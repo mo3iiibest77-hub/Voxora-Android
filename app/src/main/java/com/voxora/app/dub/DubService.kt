@@ -58,9 +58,10 @@ class DubService : Service() {
                     is GeminiStatus.Connecting -> DubUiStatus.Connecting
                     is GeminiStatus.Ready -> DubUiStatus.Live
                     is GeminiStatus.Reconnecting -> DubUiStatus.Connecting
-                    is GeminiStatus.Error -> DubUiStatus.Error(st.message)
+                    is GeminiStatus.Error -> DubUiStatus.Error(mapError(st.message))
                 }
                 updateNotification()
+                syncBubble()
             }
         }
         scope.launch {
@@ -81,7 +82,7 @@ class DubService : Service() {
                 val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
                 val data = intent.mediaProjectionData()
                 if (data == null) {
-                    _status.value = DubUiStatus.Error("Missing projection data")
+                    _status.value = DubUiStatus.Error(getString(R.string.error_projection_missing))
                     stopSelf()
                     return START_NOT_STICKY
                 }
@@ -99,12 +100,13 @@ class DubService : Service() {
             val lang = prefs.targetLanguage.first()
             if (apiKey.isBlank()) {
                 _status.value = DubUiStatus.Error(getString(R.string.error_no_api_key))
+                stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelf()
                 return
             }
             val mpm = getSystemService(MediaProjectionManager::class.java)
             val proj = mpm.getMediaProjection(resultCode, data)
-                ?: throw IllegalStateException("MediaProjection null")
+                ?: throw IllegalStateException(getString(R.string.error_projection_null))
             projection = proj
             proj.registerCallback(object : MediaProjection.Callback() {
                 override fun onStop() {
@@ -118,11 +120,28 @@ class DubService : Service() {
             capture.start(proj, scope)
             _status.value = DubUiStatus.Connecting
             updateNotification()
+            syncBubble()
         } catch (e: Exception) {
             Log.e(TAG, "beginSession", e)
-            _status.value = DubUiStatus.Error(e.message ?: "Failed to start")
+            _status.value = DubUiStatus.Error(mapError(e.message ?: getString(R.string.error_start_failed)))
             stopAll()
+            stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
+        }
+    }
+
+    private fun mapError(raw: String): String {
+        val m = raw.lowercase()
+        return when {
+            m.contains("401") || m.contains("api key") || m.contains("invalid") ->
+                getString(R.string.error_api_invalid)
+            m.contains("429") || m.contains("quota") || m.contains("resource exhausted") ->
+                getString(R.string.error_quota)
+            m.contains("network") || m.contains("unable to resolve") || m.contains("failed to connect") ->
+                getString(R.string.error_network)
+            m.contains("permission") || m.contains("security") ->
+                getString(R.string.error_permission)
+            else -> raw
         }
     }
 
@@ -130,12 +149,18 @@ class DubService : Service() {
         capture.stop()
         gemini.stop()
         playback.stop()
-        try {
-            projection?.stop()
-        } catch (_: Exception) {
-        }
+        try { projection?.stop() } catch (_: Exception) {}
         projection = null
+        FloatingBubbleService.hide(this)
         _status.value = DubUiStatus.Idle
+        try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Exception) {}
+    }
+
+    private fun syncBubble() {
+        when (_status.value) {
+            is DubUiStatus.Live, is DubUiStatus.Connecting -> FloatingBubbleService.show(this)
+            else -> FloatingBubbleService.hide(this)
+        }
     }
 
     override fun onDestroy() {
@@ -146,7 +171,10 @@ class DubService : Service() {
     }
 
     private fun startForegroundTyped() {
-        val n = buildNotification(getString(R.string.status_connecting))
+        val n = buildNotification(
+            title = getString(R.string.notif_title_connecting),
+            body = getString(R.string.notif_body_connecting),
+        )
         if (Build.VERSION.SDK_INT >= 29) {
             startForeground(NOTIF_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
         } else {
@@ -155,17 +183,21 @@ class DubService : Service() {
     }
 
     private fun updateNotification() {
-        val text = when (val s = _status.value) {
-            is DubUiStatus.Live -> getString(R.string.status_live)
-            is DubUiStatus.Connecting -> getString(R.string.status_connecting)
-            is DubUiStatus.Error -> s.message
-            else -> getString(R.string.status_idle)
+        val (title, body) = when (val s = _status.value) {
+            is DubUiStatus.Live ->
+                getString(R.string.notif_title_live) to getString(R.string.notif_body_live)
+            is DubUiStatus.Connecting ->
+                getString(R.string.notif_title_connecting) to getString(R.string.notif_body_connecting)
+            is DubUiStatus.Error ->
+                getString(R.string.notif_title_error) to s.message
+            else ->
+                getString(R.string.app_name) to getString(R.string.status_idle)
         }
-        val nm = getSystemService(NotificationManager::class.java)
-        nm.notify(NOTIF_ID, buildNotification(text))
+        getSystemService(NotificationManager::class.java)
+            .notify(NOTIF_ID, buildNotification(title, body))
     }
 
-    private fun buildNotification(content: String): Notification {
+    private fun buildNotification(title: String, body: String): Notification {
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
@@ -176,12 +208,16 @@ class DubService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(getString(R.string.app_name))
-            .setContentText(content)
+            .setContentTitle(title)
+            .setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentIntent(open)
             .addAction(0, getString(R.string.action_stop), stop)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .build()
     }
 
@@ -189,9 +225,12 @@ class DubService : Service() {
         if (Build.VERSION.SDK_INT >= 26) {
             val ch = NotificationChannel(
                 CHANNEL_ID,
-                "Voxora Live",
+                getString(R.string.notif_channel_name),
                 NotificationManager.IMPORTANCE_LOW,
-            )
+            ).apply {
+                description = getString(R.string.notif_channel_desc)
+                setShowBadge(false)
+            }
             getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
         }
     }
@@ -223,6 +262,16 @@ class DubService : Service() {
 
         fun stop(context: Context) {
             context.startService(Intent(context, DubService::class.java).setAction(ACTION_STOP))
+        }
+
+        fun postError(message: String) {
+            _status.value = DubUiStatus.Error(message)
+        }
+
+        fun clearError() {
+            if (_status.value is DubUiStatus.Error) {
+                _status.value = DubUiStatus.Idle
+            }
         }
     }
 }
