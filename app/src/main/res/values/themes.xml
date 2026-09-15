@@ -1,8 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Voxora" parent="android:Theme.Material.NoActionBar">
+    <!-- MUST be AppCompat (or MaterialComponents) — MainActivity extends AppCompatActivity -->
+    <style name="Theme.Voxora" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="android:statusBarColor">#FF0A0A0B</item>
         <item name="android:navigationBarColor">#FF0A0A0B</item>
         <item name="android:windowBackground">#FF0A0A0B</item>
+        <item name="colorPrimary">#FFD4AF37</item>
+        <item name="colorPrimaryDark">#FF0A0A0B</item>
+        <item name="colorAccent">#FFD4AF37</item>
+        <item name="android:windowLightStatusBar">false</item>
     </style>
 </resources>
