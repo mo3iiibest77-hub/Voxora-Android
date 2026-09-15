@@ -1,25 +1,31 @@
 <?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="48dp"
-    android:height="48dp"
-    android:viewportWidth="48"
-    android:viewportHeight="48">
-    <!-- dark circle -->
+    android:width="56dp"
+    android:height="56dp"
+    android:viewportWidth="56"
+    android:viewportHeight="56">
+    <!-- soft dark disc -->
     <path
-        android:fillColor="#E6121212"
-        android:pathData="M24,24m-22,0a22,22 0,1 1,44 0a22,22 0,1 1,-44 0" />
-    <!-- gold ring -->
+        android:fillColor="#F01A1A1A"
+        android:pathData="M28,28m-26,0a26,26 0,1 1,52 0a26,26 0,1 1,-52 0" />
+    <!-- gold outer ring (brand) -->
     <path
         android:fillColor="#00000000"
-        android:strokeColor="#E6B422"
-        android:strokeWidth="1.6"
-        android:pathData="M24,24m-20.5,0a20.5,20.5 0,1 1,41 0a20.5,20.5 0,1 1,-41 0" />
-    <!-- live waveform mark -->
+        android:strokeWidth="2.2"
+        android:strokeColor="#D4AF37"
+        android:pathData="M28,28m-24.5,0a24.5,24.5 0,1 1,49 0a24.5,24.5 0,1 1,-49 0" />
+    <!-- inner gold ring like launcher mark -->
     <path
-        android:fillColor="#E6B422"
-        android:pathData="M10,24h2.2v0.01c0,0 0.4,-6 2.3,-6s2.3,12 4.2,12 2.3,-16 4.3,-16 2.4,20 4.4,20 2.3,-12 4.2,-12 2.2,6 2.2,6H36v2H33.8c0,0 -0.5,5 -2.4,5s-2.5,-14 -4.4,-14 -2.4,16 -4.3,16 -2.5,-12 -4.4,-12 -2.3,8 -2.3,8H10z" />
-    <!-- tiny live pip -->
+        android:fillColor="#00000000"
+        android:strokeWidth="1.4"
+        android:strokeColor="#E6C35C"
+        android:pathData="M28,28m-14,0a14,14 0,1 1,28 0a14,28 0,1 1,-28 0" />
+    <!-- stylized V -->
+    <path
+        android:fillColor="#D4AF37"
+        android:pathData="M18.2,20.5 L25.8,38.2 C26.3,39.4 26.9,39.8 28,39.8 C29.1,39.8 29.7,39.4 30.2,38.2 L37.8,20.5 L34.2,20.5 L28,35.2 L21.8,20.5 Z" />
+    <!-- live pip -->
     <path
         android:fillColor="#3DDC97"
-        android:pathData="M34,14m-2.2,0a2.2,2.2 0,1 1,4.4 0a2.2,2.2 0,1 1,-4.4 0" />
+        android:pathData="M40,14m-3.2,0a3.2,3.2 0,1 1,6.4 0a3.2,3.2 0,1 1,-6.4 0" />
 </vector>

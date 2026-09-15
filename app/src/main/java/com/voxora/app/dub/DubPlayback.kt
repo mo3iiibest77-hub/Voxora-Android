@@ -6,23 +6,33 @@ import android.media.AudioFocusRequest
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import android.media.VolumeProvider
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
 import android.os.Build
 import android.util.Log
 import com.voxora.app.util.VoxoraLog
 import com.voxora.core.GeminiLiveConfig
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Gemini on USAGE_ASSISTANT (not STREAM_MUSIC).
  * Duck only STREAM_MUSIC so source video is quieter while dub stays loud.
+ *
+ * Hardware volume keys → MediaSession VolumeProvider → AudioTrack gain (dub),
+ * NOT YouTube STREAM_MUSIC.
  */
 class DubPlayback(context: Context? = null) {
     private val appContext = context?.applicationContext
     private val audioManager = appContext?.getSystemService(AudioManager::class.java)
     private var track: AudioTrack? = null
     private var focusRequest: AudioFocusRequest? = null
+    private var mediaSession: MediaSession? = null
     private val playing = AtomicBoolean(false)
     private var savedMusicVolume: Int = -1
+    /** 0..100 software gain for dub (volume keys) */
+    private val dubVolume = AtomicInteger(100)
 
     fun start() {
         VoxoraLog.i("Playback", "start()")
@@ -35,6 +45,7 @@ class DubPlayback(context: Context? = null) {
 
         requestFocus(attrs)
         lowerSourceMusicOnly()
+        startVolumeSession()
 
         val minBuf = AudioTrack.getMinBufferSize(
             GeminiLiveConfig.OUTPUT_SAMPLE_RATE,
@@ -60,13 +71,10 @@ class DubPlayback(context: Context? = null) {
         } catch (_: Exception) {
         }
         track = builder.build()
-        try {
-            track?.setVolume(1.0f)
-        } catch (_: Exception) {
-        }
+        applyTrackGain()
         track?.play()
         playing.set(true)
-        VoxoraLog.i("Playback", "AudioTrack ASSISTANT playing buf=$bufSize")
+        VoxoraLog.i("Playback", "AudioTrack ASSISTANT playing buf=$bufSize vol=${dubVolume.get()}")
     }
 
     fun writeFloats(samples: FloatArray) {
@@ -90,6 +98,7 @@ class DubPlayback(context: Context? = null) {
     fun stop() {
         VoxoraLog.i("Playback", "stop()")
         playing.set(false)
+        stopVolumeSession()
         try {
             track?.pause()
             track?.flush()
@@ -100,6 +109,73 @@ class DubPlayback(context: Context? = null) {
         track = null
         abandonFocus()
         restoreSourceMusic()
+    }
+
+    /** Capture hardware volume keys for dub gain while live. */
+    private fun startVolumeSession() {
+        val ctx = appContext ?: return
+        try {
+            val session = MediaSession(ctx, "VoxoraDub")
+            mediaSession = session
+            val max = 100
+            val provider = object : VolumeProvider(
+                VOLUME_CONTROL_ABSOLUTE,
+                max,
+                dubVolume.get(),
+            ) {
+                override fun onAdjustVolume(direction: Int) {
+                    val step = when (direction) {
+                        AudioManager.ADJUST_RAISE -> 5
+                        AudioManager.ADJUST_LOWER -> -5
+                        else -> 0
+                    }
+                    if (step != 0) {
+                        val next = (dubVolume.get() + step).coerceIn(0, max)
+                        dubVolume.set(next)
+                        currentVolume = next
+                        applyTrackGain()
+                        VoxoraLog.i("Playback", "volume key → dub=$next")
+                    }
+                }
+
+                override fun onSetVolumeTo(volume: Int) {
+                    val v = volume.coerceIn(0, max)
+                    dubVolume.set(v)
+                    currentVolume = v
+                    applyTrackGain()
+                    VoxoraLog.i("Playback", "volume set → dub=$v")
+                }
+            }
+            session.setPlaybackToRemote(provider)
+            session.setPlaybackState(
+                PlaybackState.Builder()
+                    .setState(PlaybackState.STATE_PLAYING, 0L, 1f)
+                    .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_STOP)
+                    .build(),
+            )
+            session.isActive = true
+            VoxoraLog.i("Playback", "MediaSession active — volume keys control dub")
+        } catch (e: Exception) {
+            VoxoraLog.w("Playback", "MediaSession failed: ${e.message}")
+            mediaSession = null
+        }
+    }
+
+    private fun stopVolumeSession() {
+        try {
+            mediaSession?.isActive = false
+            mediaSession?.release()
+        } catch (_: Exception) {
+        }
+        mediaSession = null
+    }
+
+    private fun applyTrackGain() {
+        val g = (dubVolume.get() / 100f).coerceIn(0f, 1f)
+        try {
+            track?.setVolume(g)
+        } catch (_: Exception) {
+        }
     }
 
     private fun requestFocus(attrs: AudioAttributes) {
@@ -155,7 +231,7 @@ class DubPlayback(context: Context? = null) {
             val target = (cur * 28 / 100).coerceAtLeast(1).coerceAtMost(cur - 1)
             if (target < cur) {
                 am.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
-                VoxoraLog.i("Playback", "duck STREAM_MUSIC only $cur → $target (max=$max, ~28%); dub=ASSISTANT full")
+                VoxoraLog.i("Playback", "duck STREAM_MUSIC only $cur → $target (max=$max, ~28%); dub=ASSISTANT")
             }
         } catch (e: Exception) {
             Log.w(TAG, "lowerSourceMusicOnly: ${e.message}")
