@@ -18,6 +18,8 @@ import kotlinx.coroutines.launch
 fun VoxoraNav(
     onStartDub: () -> Unit,
     onStopDub: () -> Unit,
+    onDismissError: () -> Unit = {},
+    onRequestOverlayPermission: () -> Unit = {},
 ) {
     val context = LocalContext.current
     val prefs = remember { UserPrefs(context) }
@@ -52,12 +54,16 @@ fun VoxoraNav(
                 }
             },
         )
-        "settings" -> SettingsScreen(onBack = { screen = "home" })
+        "settings" -> SettingsScreen(
+            onBack = { screen = "home" },
+            onRequestOverlayPermission = onRequestOverlayPermission,
+        )
         else -> HomeScreen(
             status = status,
             onStart = onStartDub,
             onStop = onStopDub,
             onOpenSettings = { screen = "settings" },
+            onDismissError = onDismissError,
         )
     }
 }
