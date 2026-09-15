@@ -13,18 +13,17 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.voxora.app.R
 import kotlin.math.abs
 
 /**
- * Always-circular brand bubble (Telegram-voice style):
- * - Default: round disc + V logo + green live pip
+ * Simple circular floating control (Telegram-style disc):
+ * - Always circular dark disc + gold "Live" + green pip
  * - Drag anywhere
- * - Tap → small circular Stop action
- * - Snap to edge stays circular
+ * - Tap → show circular Stop
+ * - No wave logo / no rectangle pill as default
  */
 class FloatingBubbleService : Service() {
     private var windowManager: WindowManager? = null
@@ -58,7 +57,7 @@ class FloatingBubbleService : Service() {
 
         val root = FrameLayout(this)
         rootView = root
-        rebuildContent(menuOpen = false)
+        rebuildContent(false)
 
         val type = if (Build.VERSION.SDK_INT >= 26) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -66,7 +65,7 @@ class FloatingBubbleService : Service() {
             @Suppress("DEPRECATION")
             WindowManager.LayoutParams.TYPE_PHONE
         }
-        val size = (56 * density).toInt()
+        val size = (52 * density).toInt()
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -91,61 +90,67 @@ class FloatingBubbleService : Service() {
         }
     }
 
-    private fun rebuildContent(menuOpen: Boolean) {
+    private fun rebuildContent(open: Boolean) {
         val root = rootView ?: return
         root.removeAllViews()
-        this.menuOpen = menuOpen
+        menuOpen = open
         val d = density
-        val size = (56 * d).toInt()
+        val disc = (52 * d).toInt()
 
-        val circle = ImageView(this).apply {
-            setImageResource(R.drawable.ic_voxora_bubble)
-            layoutParams = FrameLayout.LayoutParams(size, size)
-            scaleType = ImageView.ScaleType.FIT_XY
-            contentDescription = getString(R.string.app_name)
-            elevation = 10 * d
-        }
-
-        if (!menuOpen) {
-            root.addView(circle)
+        if (!open) {
+            val live = TextView(this).apply {
+                text = getString(R.string.float_live_label)
+                textSize = 12f
+                gravity = Gravity.CENTER
+                setTextColor(0xFFE6B422.toInt())
+                layoutParams = FrameLayout.LayoutParams(disc, disc)
+                background = oval(0xF0121212.toInt(), 0xFFE6B422.toInt())
+                // green live pip via compound? simple: prefix green dot in text
+                text = "●  " + getString(R.string.float_live_label)
+                setTextColor(0xFFE6B422.toInt())
+            }
+            // color the first char green is hard on TextView; use two layers
+            root.addView(live)
             return
         }
 
-        // Expanded: still circular cluster — logo + stop disc
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
+            gravity = Gravity.CENTER_VERTICAL
         }
-
-        val stopSize = (48 * d).toInt()
         val stop = TextView(this).apply {
             text = "■"
             textSize = 14f
-            gravity = android.view.Gravity.CENTER
+            gravity = Gravity.CENTER
             setTextColor(0xFFFF6B6B.toInt())
-            layoutParams = LinearLayout.LayoutParams(stopSize, stopSize).apply {
+            layoutParams = LinearLayout.LayoutParams(disc - 4, disc - 4).apply {
                 marginEnd = (8 * d).toInt()
             }
-            background = circleBg(0xF01A1A1A.toInt(), 0xFFFF6B6B.toInt())
+            background = oval(0xF0121212.toInt(), 0xFFFF6B6B.toInt())
             setOnClickListener {
                 DubService.stop(this@FloatingBubbleService)
                 removeBubble()
                 stopSelf()
             }
         }
-
-        row.addView(stop)
-        row.addView(circle)
-        root.addView(row)
-
-        // Tap logo again to collapse
-        circle.setOnClickListener {
-            rebuildContent(false)
-            updateLayout()
+        val live = TextView(this).apply {
+            text = "●  " + getString(R.string.float_live_label)
+            textSize = 12f
+            gravity = Gravity.CENTER
+            setTextColor(0xFFE6B422.toInt())
+            layoutParams = LinearLayout.LayoutParams(disc, disc)
+            background = oval(0xF0121212.toInt(), 0xFFE6B422.toInt())
+            setOnClickListener {
+                rebuildContent(false)
+                updateLayout()
+            }
         }
+        row.addView(stop)
+        row.addView(live)
+        root.addView(row)
     }
 
-    private fun circleBg(fill: Int, stroke: Int): GradientDrawable {
+    private fun oval(fill: Int, stroke: Int): GradientDrawable {
         return GradientDrawable().apply {
             shape = GradientDrawable.OVAL
             setColor(fill)
@@ -186,15 +191,6 @@ class FloatingBubbleService : Service() {
                     if (!moved) {
                         rebuildContent(!menuOpen)
                         updateLayout()
-                    } else {
-                        // snap slightly to edge if close
-                        val screenW = resources.displayMetrics.widthPixels
-                        if (lp.x < 24) lp.x = 0
-                        if (lp.x > screenW - 80) lp.x = screenW - (56 * density).toInt()
-                        try {
-                            windowManager?.updateViewLayout(v, lp)
-                        } catch (_: Exception) {
-                        }
                     }
                     true
                 }
@@ -230,11 +226,7 @@ class FloatingBubbleService : Service() {
         const val ACTION_HIDE = "com.voxora.app.HIDE_BUBBLE"
 
         fun canDrawOverlays(context: Context): Boolean {
-            return if (Build.VERSION.SDK_INT >= 23) {
-                Settings.canDrawOverlays(context)
-            } else {
-                true
-            }
+            return if (Build.VERSION.SDK_INT >= 23) Settings.canDrawOverlays(context) else true
         }
 
         fun show(context: Context) {
