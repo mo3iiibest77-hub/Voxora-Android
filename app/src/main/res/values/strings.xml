@@ -79,5 +79,8 @@
     <string name="notif_body_live">Live dubbing in progress. Tap Stop to end.</string>
     <string name="bubble_live">Live</string>
     <string name="float_live_label">Live</string>
+    <string name="toast_connecting">Connecting…</string>
+    <string name="toast_gemini_ready">Gemini Ready</string>
+    <string name="toast_reconnecting">Reconnecting…</string>
     <string name="default_web_client_id" translatable="false">REPLACE_WITH_GOOGLE_WEB_CLIENT_ID</string>
 </resources>

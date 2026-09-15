@@ -79,4 +79,7 @@
     <string name="notif_body_connecting">در حال اتصال به جمینا…</string>
     <string name="notif_body_live">دوبله زنده در حال اجرا. برای پایان توقف را بزن.</string>
     <string name="float_live_label">زنده</string>
+    <string name="toast_connecting">در حال اتصال…</string>
+    <string name="toast_gemini_ready">جمینا آماده است</string>
+    <string name="toast_reconnecting">در حال اتصال مجدد…</string>
 </resources>
