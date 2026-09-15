@@ -14,8 +14,8 @@ android {
         applicationId = "com.voxora.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 11
-        versionName = "0.5.5-dev"
+        versionCode = 12
+        versionName = "0.5.6-dev"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
         resourceConfigurations += listOf(
