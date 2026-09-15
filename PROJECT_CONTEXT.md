@@ -13,101 +13,80 @@
 | **Type** | Native Android app |
 | **Repo** | https://github.com/mo3iiibest77-hub/Voxora-Android |
 | **Sister** | https://github.com/mo3iiibest77-hub/ParsLiveDub |
-| **Version** | **0.3.0-dev** (Phase 2) |
-
-Global product. UI language ≠ dubbing target language.
+| **Version** | **0.4.0-dev** (Phase 3) |
 
 ---
 
-## 2. Tech stack
-
-Kotlin · Jetpack Compose · Material 3 · Hilt · minSdk 29 · OkHttp WebSocket · DataStore · MediaProjection + AudioPlaybackCapture · AudioTrack · Credential Manager (Google Sign-In)
-
----
-
-## 3. Phase status
+## 2. Phase status
 
 | Phase | Status |
 |-------|--------|
 | 0 Scaffold | Done |
-| 1 Capture + Gemini + playback | Done (0.2.0-dev) |
-| **2 Google Sign-In + onboarding + locales** | **Done (0.3.0-dev)** |
-| 3 Polish UI / floating controls | Next |
+| 1 Capture + Gemini + playback | Done |
+| 2 Google Sign-In + onboarding + locales | Done |
+| **3 Floating controls + notification + error UX** | **Done (0.4.0-dev)** |
 | 4 Monetization | Later |
 | 5 Advanced A/V sync | Later |
 
 ---
 
-## 4. Phase 2 implemented
+## 3. Phase 3 implemented
 
-### Onboarding
-- First-run 3-page pager (`OnboardingScreen`)
-- Skip / Next / Get started
-- Shortcut to Settings for API key
-- Flag `onboarding_done` in DataStore
+### Floating bubble
+- `FloatingBubbleService` — overlay with Live label + Stop
+- Requires `SYSTEM_ALERT_WINDOW` (Settings → Enable floating bubble)
+- Shown while Connecting/Live; hidden on stop/error
 
-### Auth
-- `GoogleAuthHelper` via Android Credential Manager + Google ID token
-- Requires `default_web_client_id` (Web client ID from Google Cloud Console)
-- If placeholder ID: clear error message; **guest mode** (API key only) still works
-- Account email/name stored in DataStore; Sign out clears state
+### Notification polish
+- Channel name/description
+- Titles: Connecting / Live / Error
+- BigText body, Stop action, onlyAlertOnce
+
+### Stronger error UX
+- Pre-start API key check (no projection prompt if missing)
+- Permission / projection denial mapped to clear messages
+- Gemini 401 / 429 / network mapped in `DubService.mapError`
+- Home error banner: message + Settings + Retry
+- `DubService.postError` / `clearError` for UI-driven errors
 
 ### Settings
-- Account section (Sign in / Sign out)
-- Link to Google AI Studio
-- API key + dubbing language (unchanged core)
-
-### i18n (UI strings)
-- Full / primary: **en**, **fa**
-- Additional: **ar**, **es**, **de**, **tr**, **fr**
-- `localeConfig` already lists more codes for system per-app language
-
-### Navigation
-- `VoxoraNav`: onboarding → home | settings
+- Overlay permission entry point
 
 ---
 
-## 5. Key files (Phase 2)
+## 4. Key files (Phase 3)
 
-- `app/.../ui/OnboardingScreen.kt`
+- `app/.../dub/FloatingBubbleService.kt`
+- `app/.../dub/DubService.kt`
+- `app/.../ui/HomeScreen.kt`
+- `app/.../MainActivity.kt`
 - `app/.../ui/VoxoraNav.kt`
 - `app/.../ui/SettingsScreen.kt`
-- `app/.../auth/GoogleAuthHelper.kt`
-- `core/.../prefs/UserPrefs.kt` — onboarding + account fields
-- `res/values*/strings.xml`
+- `AndroidManifest.xml` — SYSTEM_ALERT_WINDOW + FloatingBubbleService
 
 ---
 
-## 6. How to enable real Google Sign-In
+## 5. How to test Phase 3
 
-1. Google Cloud Console → OAuth 2.0 **Web** client ID
-2. Put it in `app/src/main/res/values/strings.xml` → `default_web_client_id`
-3. Add Android OAuth client with app SHA-1 for Play/debug
-4. Rebuild
-
-Without this, Sign-In shows a configuration message; dubbing with pasted API key still works.
-
----
-
-## 7. How to test Phase 2
-
-1. Fresh install (or clear app data) → onboarding appears
-2. Complete or skip → Home
-3. Settings → optional Sign in (needs client ID) → paste Gemini key → Save
-4. Start live dubbing as in Phase 1
+1. Pull `main`, run on device API 29+
+2. Start without API key → error banner, no capture dialog
+3. Deny mic → permission error banner
+4. Cancel capture → projection denied message
+5. Live session → richer notification + optional floating bubble (after overlay grant)
+6. Stop from bubble, notification, or Home
 
 ---
 
-## 8. Known limits
+## 6. Known limits
 
-- Original system audio not fully ducked
+- Overlay needs manual user grant
+- System audio ducking still imperfect
 - ~2–3s Gemini latency expected
-- Google Sign-In inactive until Web client ID is set
-- Gradle Wrapper may need generation in Android Studio
+- Google Sign-In needs Web client ID (Phase 2)
 
 ---
 
-## 9. AI continuation
+## 7. AI continuation
 
-Brand **Voxora** only. After changes: update this file + commit + push `main`.
-Next suggested: Phase 3 floating controls / notification polish / stronger error UX.
+Brand **Voxora** only. After changes: update this file + push `main`.
+Next: Phase 4 monetization planning / entitlement design.
