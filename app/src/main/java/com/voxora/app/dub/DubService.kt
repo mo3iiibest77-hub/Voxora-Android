@@ -11,7 +11,9 @@ import android.content.pm.ServiceInfo
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.voxora.app.MainActivity
@@ -28,6 +30,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private fun Intent.mediaProjectionData(): Intent? {
     return if (Build.VERSION.SDK_INT >= 33) {
@@ -38,11 +41,22 @@ private fun Intent.mediaProjectionData(): Intent? {
     }
 }
 
+/**
+ * Foreground service that owns MediaProjection capture, Gemini Live WS, and playback.
+ *
+ * Threading rules (ANR prevention):
+ * - [scope] Default: session lifecycle, status collection
+ * - [audioScope] IO: AudioTrack.write (never on Main)
+ * - [mainHandler] only for notification + bubble UI updates
+ */
 class DubService : Service() {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val audioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val mainHandler = Handler(Looper.getMainLooper())
+
     private val gemini = GeminiLiveSession()
     private val capture = SystemAudioCapture { pcm -> gemini.sendPcm16k(pcm) }
-    private val playback = DubPlayback()
+    private lateinit var playback: DubPlayback
     private var projection: MediaProjection? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -50,23 +64,33 @@ class DubService : Service() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        playback = DubPlayback(applicationContext)
         createChannel()
+
         scope.launch {
             gemini.status.collect { st ->
-                _status.value = when (st) {
-                    is GeminiStatus.Idle -> DubUiStatus.Idle
+                val mapped = when (st) {
+                    is GeminiStatus.Idle -> {
+                        // Keep sticky Error; do not wipe user-visible failure with Idle
+                        if (_status.value is DubUiStatus.Error) _status.value
+                        else DubUiStatus.Idle
+                    }
                     is GeminiStatus.Connecting -> DubUiStatus.Connecting
                     is GeminiStatus.Ready -> DubUiStatus.Live
                     is GeminiStatus.Reconnecting -> DubUiStatus.Connecting
                     is GeminiStatus.Error -> DubUiStatus.Error(mapError(st.message))
                 }
-                updateNotification()
-                syncBubble()
+                _status.value = mapped
+                postUiUpdate()
             }
         }
+
+        // Audio out must never touch Main — writeFloats blocks under load → ANR
         scope.launch {
             gemini.audioOut.collect { samples ->
-                playback.writeFloats(samples)
+                audioScope.launch {
+                    playback.writeFloats(samples)
+                }
             }
         }
     }
@@ -82,8 +106,7 @@ class DubService : Service() {
                 val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
                 val data = intent.mediaProjectionData()
                 if (data == null) {
-                    _status.value = DubUiStatus.Error(getString(R.string.error_projection_missing))
-                    stopSelf()
+                    setErrorAndStop(getString(R.string.error_projection_missing))
                     return START_NOT_STICKY
                 }
                 startForegroundTyped()
@@ -99,9 +122,7 @@ class DubService : Service() {
             val apiKey = prefs.apiKey.first()
             val lang = prefs.targetLanguage.first()
             if (apiKey.isBlank()) {
-                _status.value = DubUiStatus.Error(getString(R.string.error_no_api_key))
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf()
+                setErrorAndStop(getString(R.string.error_no_api_key))
                 return
             }
             val mpm = getSystemService(MediaProjectionManager::class.java)
@@ -115,29 +136,36 @@ class DubService : Service() {
                 }
             }, null)
 
-            playback.start()
+            withContext(Dispatchers.Main) {
+                playback.start()
+            }
             gemini.connect(apiKey, lang)
             capture.start(proj, scope)
             _status.value = DubUiStatus.Connecting
-            updateNotification()
-            syncBubble()
+            postUiUpdate()
         } catch (e: Exception) {
             Log.e(TAG, "beginSession", e)
-            _status.value = DubUiStatus.Error(mapError(e.message ?: getString(R.string.error_start_failed)))
-            stopAll()
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            setErrorAndStop(mapError(e.message ?: getString(R.string.error_start_failed)))
         }
+    }
+
+    private fun setErrorAndStop(message: String) {
+        _status.value = DubUiStatus.Error(message)
+        postUiUpdate()
+        stopAll()
+        stopForegroundCompat()
+        stopSelf()
     }
 
     private fun mapError(raw: String): String {
         val m = raw.lowercase()
         return when {
-            m.contains("401") || m.contains("api key") || m.contains("invalid") ->
+            m.contains("401") || m.contains("api key") || m.contains("invalid") || m.contains("permission denied") ->
                 getString(R.string.error_api_invalid)
             m.contains("429") || m.contains("quota") || m.contains("resource exhausted") ->
                 getString(R.string.error_quota)
-            m.contains("network") || m.contains("unable to resolve") || m.contains("failed to connect") ->
+            m.contains("network") || m.contains("unable to resolve") || m.contains("failed to connect") ||
+                m.contains("timeout") || m.contains("unreachable") ->
                 getString(R.string.error_network)
             m.contains("permission") || m.contains("security") ->
                 getString(R.string.error_permission)
@@ -148,12 +176,39 @@ class DubService : Service() {
     private fun stopAll() {
         capture.stop()
         gemini.stop()
-        playback.stop()
-        try { projection?.stop() } catch (_: Exception) {}
+        try {
+            playback.stop()
+        } catch (_: Exception) {
+        }
+        try {
+            projection?.stop()
+        } catch (_: Exception) {
+        }
         projection = null
         FloatingBubbleService.hide(this)
-        _status.value = DubUiStatus.Idle
-        try { stopForeground(STOP_FOREGROUND_REMOVE) } catch (_: Exception) {}
+        if (_status.value !is DubUiStatus.Error) {
+            _status.value = DubUiStatus.Idle
+        }
+        stopForegroundCompat()
+    }
+
+    private fun stopForegroundCompat() {
+        try {
+            if (Build.VERSION.SDK_INT >= 24) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun postUiUpdate() {
+        mainHandler.post {
+            updateNotification()
+            syncBubble()
+        }
     }
 
     private fun syncBubble() {
@@ -166,6 +221,7 @@ class DubService : Service() {
     override fun onDestroy() {
         stopAll()
         scope.cancel()
+        audioScope.cancel()
         instance = null
         super.onDestroy()
     }
@@ -211,7 +267,7 @@ class DubService : Service() {
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_stat_notify)
             .setContentIntent(open)
             .addAction(0, getString(R.string.action_stop), stop)
             .setOngoing(true)
