@@ -7,18 +7,22 @@ import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
 import android.os.Build
+import android.util.Log
 import com.voxora.core.GeminiLiveConfig
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Plays Gemini PCM output. Uses ALLOW_CAPTURE_BY_NONE so AudioPlaybackCapture
- * does not re-capture our own dubbed audio (feedback loop).
+ * Plays Gemini PCM on a dedicated path.
+ * - ALLOW_CAPTURE_BY_NONE: do not re-capture our own output
+ * - Audio focus MAY_DUCK + optional STREAM_MUSIC volume lower (~5%) so source is quieter
  */
 class DubPlayback(context: Context? = null) {
-    private val audioManager = context?.getSystemService(AudioManager::class.java)
+    private val appContext = context?.applicationContext
+    private val audioManager = appContext?.getSystemService(AudioManager::class.java)
     private var track: AudioTrack? = null
     private var focusRequest: AudioFocusRequest? = null
     private val playing = AtomicBoolean(false)
+    private var savedMusicVolume: Int = -1
 
     fun start() {
         stop()
@@ -28,27 +32,16 @@ class DubPlayback(context: Context? = null) {
             .setAllowedCapturePolicy(AudioAttributes.ALLOW_CAPTURE_BY_NONE)
             .build()
 
-        if (Build.VERSION.SDK_INT >= 26) {
-            val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
-                .setAudioAttributes(attrs)
-                .setOnAudioFocusChangeListener { }
-                .build()
-            focusRequest = req
-            audioManager?.requestAudioFocus(req)
-        } else {
-            @Suppress("DEPRECATION")
-            audioManager?.requestAudioFocus(
-                null,
-                AudioManager.STREAM_MUSIC,
-                AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK,
-            )
-        }
+        requestFocus(attrs)
+        lowerSourceVolume()
 
         val minBuf = AudioTrack.getMinBufferSize(
             GeminiLiveConfig.OUTPUT_SAMPLE_RATE,
             AudioFormat.CHANNEL_OUT_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
         )
+        // Larger buffer reduces blocking on write() under load
+        val bufSize = (minBuf * 4).coerceAtLeast(GeminiLiveConfig.OUTPUT_SAMPLE_RATE / 2)
         track = AudioTrack.Builder()
             .setAudioAttributes(attrs)
             .setAudioFormat(
@@ -58,13 +51,14 @@ class DubPlayback(context: Context? = null) {
                     .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
                     .build(),
             )
-            .setBufferSizeInBytes(minBuf * 2)
+            .setBufferSizeInBytes(bufSize)
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
         track?.play()
         playing.set(true)
     }
 
+    /** Must be called off the main thread. */
     fun writeFloats(samples: FloatArray) {
         if (!playing.get()) return
         val t = track ?: return
@@ -72,7 +66,12 @@ class DubPlayback(context: Context? = null) {
             val s = samples[i].coerceIn(-1f, 1f)
             (if (s < 0) s * 0x8000 else s * 0x7fff).toInt().toShort()
         }
-        t.write(shorts, 0, shorts.size)
+        var offset = 0
+        while (offset < shorts.size && playing.get()) {
+            val written = t.write(shorts, offset, shorts.size - offset)
+            if (written < 0) break
+            offset += written
+        }
     }
 
     fun stop() {
@@ -85,12 +84,79 @@ class DubPlayback(context: Context? = null) {
         } catch (_: Exception) {
         }
         track = null
-        if (Build.VERSION.SDK_INT >= 26) {
-            focusRequest?.let { try { audioManager?.abandonAudioFocusRequest(it) } catch (_: Exception) {} }
-            focusRequest = null
-        } else {
-            @Suppress("DEPRECATION")
-            try { audioManager?.abandonAudioFocus(null) } catch (_: Exception) {}
+        abandonFocus()
+        restoreSourceVolume()
+    }
+
+    private fun requestFocus(attrs: AudioAttributes) {
+        val am = audioManager ?: return
+        try {
+            if (Build.VERSION.SDK_INT >= 26) {
+                val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK)
+                    .setAudioAttributes(attrs)
+                    .setWillPauseWhenDucked(false)
+                    .setOnAudioFocusChangeListener { }
+                    .build()
+                focusRequest = req
+                am.requestAudioFocus(req)
+            } else {
+                @Suppress("DEPRECATION")
+                am.requestAudioFocus(
+                    null,
+                    AudioManager.STREAM_MUSIC,
+                    AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK,
+                )
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "requestAudioFocus: ${e.message}")
         }
+    }
+
+    private fun abandonFocus() {
+        val am = audioManager ?: return
+        try {
+            if (Build.VERSION.SDK_INT >= 26) {
+                focusRequest?.let { am.abandonAudioFocusRequest(it) }
+                focusRequest = null
+            } else {
+                @Suppress("DEPRECATION")
+                am.abandonAudioFocus(null)
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    /** Lower media stream so original video is ~5% while dub is active. */
+    private fun lowerSourceVolume() {
+        val am = audioManager ?: return
+        try {
+            val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+            val cur = am.getStreamVolume(AudioManager.STREAM_MUSIC)
+            if (cur <= 0 || max <= 0) return
+            savedMusicVolume = cur
+            val target = (max * 5 / 100).coerceAtLeast(1).coerceAtMost(cur)
+            if (target < cur) {
+                am.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "lowerSourceVolume: ${e.message}")
+            savedMusicVolume = -1
+        }
+    }
+
+    private fun restoreSourceVolume() {
+        val am = audioManager ?: return
+        val saved = savedMusicVolume
+        savedMusicVolume = -1
+        if (saved < 0) return
+        try {
+            am.setStreamVolume(AudioManager.STREAM_MUSIC, saved, 0)
+        } catch (e: Exception) {
+            Log.w(TAG, "restoreSourceVolume: ${e.message}")
+        }
+    }
+
+    companion object {
+        private const val TAG = "VoxoraPlayback"
     }
 }
