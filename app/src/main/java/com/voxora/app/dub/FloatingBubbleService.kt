@@ -15,7 +15,9 @@ import android.os.Looper
 import android.provider.Settings
 import android.text.SpannableString
 import android.text.Spanned
+import android.text.style.AbsoluteSizeSpan
 import android.text.style.ForegroundColorSpan
+import android.text.style.StyleSpan
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -24,18 +26,14 @@ import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.voxora.app.MainActivity
-import com.voxora.app.R
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.sin
 
 /**
- * Circular Live bubble:
- * - Larger disc (~64dp)
- * - Label "Live": V gold, ive green, green pip
- * - Drag works even when Stop is open
- * - Single tap toggles Stop; double-tap opens MainActivity
- * - Mini waveform while Live (amplitude from DubService)
+ * Circular Live bubble — drag works on entire widget including red Stop.
+ * Single tap Live area toggles Stop; tap Stop (no drag) stops dubbing.
+ * Double-tap opens app. Bigger gold V in "LiVe".
  */
 class FloatingBubbleService : Service() {
     private var windowManager: WindowManager? = null
@@ -44,6 +42,7 @@ class FloatingBubbleService : Service() {
     private var menuOpen = false
     private var density = 1f
     private var waveView: WaveView? = null
+    private var stopView: View? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private var lastTapMs = 0L
 
@@ -88,7 +87,7 @@ class FloatingBubbleService : Service() {
             @Suppress("DEPRECATION")
             WindowManager.LayoutParams.TYPE_PHONE
         }
-        val size = (64 * density).toInt()
+        val size = (68 * density).toInt()
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -118,8 +117,9 @@ class FloatingBubbleService : Service() {
         val root = rootView ?: return
         root.removeAllViews()
         menuOpen = open
+        stopView = null
         val d = density
-        val disc = (64 * d).toInt()
+        val disc = (68 * d).toInt()
 
         val liveDisc = buildLiveDisc(disc)
         if (!open) {
@@ -127,26 +127,24 @@ class FloatingBubbleService : Service() {
             return
         }
 
-        // Stop + Live side by side — still fully draggable via root touch
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
+        // No OnClickListener — parent touch handles drag + tap-to-stop
         val stop = TextView(this).apply {
             text = "■"
             textSize = 16f
             gravity = Gravity.CENTER
             setTextColor(0xFFFF6B6B.toInt())
-            layoutParams = LinearLayout.LayoutParams(disc - 6, disc - 6).apply {
+            layoutParams = LinearLayout.LayoutParams(disc - 8, disc - 8).apply {
                 marginEnd = (10 * d).toInt()
             }
             background = oval(0xF0121212.toInt(), 0xFFFF6B6B.toInt())
-            setOnClickListener {
-                DubService.stop(this@FloatingBubbleService)
-                removeBubble()
-                stopSelf()
-            }
+            isClickable = false
+            isFocusable = false
         }
+        stopView = stop
         row.addView(stop)
         row.addView(liveDisc)
         root.addView(row)
@@ -165,9 +163,9 @@ class FloatingBubbleService : Service() {
 
         val label = TextView(this).apply {
             text = liveSpannable()
-            textSize = 13f
+            textSize = 12f
             gravity = Gravity.CENTER
-            setPadding(0, (18 * density).toInt(), 0, 0)
+            setPadding(0, (16 * density).toInt(), 0, 0)
             layoutParams = FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
                 FrameLayout.LayoutParams.MATCH_PARENT,
@@ -177,18 +175,17 @@ class FloatingBubbleService : Service() {
         return wrap
     }
 
-    /** "● Live" with V gold, ive green, pip green */
+    /** ● LiVe — pip green, Li green, V large gold bold, e green */
     private fun liveSpannable(): SpannableString {
-        val raw = "● Live"
+        val raw = "● LiVe"
         val ss = SpannableString(raw)
         val green = 0xFF3DDC97.toInt()
         val gold = 0xFFE6B422.toInt()
-        // pip
         ss.setSpan(ForegroundColorSpan(green), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-        // space stays default
-        // L i v e — index 2=L,3=i,4=v,5=e  → V is index 4
         ss.setSpan(ForegroundColorSpan(green), 2, 4, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) // Li
         ss.setSpan(ForegroundColorSpan(gold), 4, 5, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) // V
+        ss.setSpan(StyleSpan(android.graphics.Typeface.BOLD), 4, 5, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        ss.setSpan(AbsoluteSizeSpan((18 * density).toInt(), true), 4, 5, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         ss.setSpan(ForegroundColorSpan(green), 5, 6, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) // e
         return ss
     }
@@ -203,12 +200,26 @@ class FloatingBubbleService : Service() {
 
     private fun openApp() {
         try {
-            val i = Intent(this, MainActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-            }
-            startActivity(i)
+            startActivity(
+                Intent(this, MainActivity::class.java).apply {
+                    addFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK or
+                            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP,
+                    )
+                },
+            )
         } catch (_: Exception) {
         }
+    }
+
+    private fun isTouchOnStop(rawX: Float, rawY: Float): Boolean {
+        val stop = stopView ?: return false
+        val loc = IntArray(2)
+        stop.getLocationOnScreen(loc)
+        val l = loc[0].toFloat()
+        val t = loc[1].toFloat()
+        return rawX >= l && rawX <= l + stop.width && rawY >= t && rawY <= t + stop.height
     }
 
     private fun attachDrag(view: View, lp: WindowManager.LayoutParams) {
@@ -217,6 +228,7 @@ class FloatingBubbleService : Service() {
         var startX = 0
         var startY = 0
         var moved = false
+        var downOnStop = false
 
         view.setOnTouchListener { v, event ->
             when (event.actionMasked) {
@@ -226,13 +238,14 @@ class FloatingBubbleService : Service() {
                     startX = lp.x
                     startY = lp.y
                     moved = false
+                    downOnStop = menuOpen && isTouchOnStop(event.rawX, event.rawY)
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = (event.rawX - downX).toInt()
                     val dy = (event.rawY - downY).toInt()
                     if (abs(dx) > 8 || abs(dy) > 8) moved = true
-                    // Drag always allowed — including when Stop is visible
+                    // Always drag — including finger on red Stop
                     lp.x = (startX + dx).coerceIn(0, resources.displayMetrics.widthPixels - 48)
                     lp.y = (startY + dy).coerceIn(0, resources.displayMetrics.heightPixels - 48)
                     try {
@@ -243,20 +256,24 @@ class FloatingBubbleService : Service() {
                 }
                 MotionEvent.ACTION_UP -> {
                     if (!moved) {
-                        val now = System.currentTimeMillis()
-                        if (now - lastTapMs < 320) {
-                            // double tap → open app
-                            lastTapMs = 0
-                            openApp()
+                        if (downOnStop && menuOpen) {
+                            DubService.stop(this)
+                            removeBubble()
+                            stopSelf()
                         } else {
-                            lastTapMs = now
-                            // single tap → toggle stop menu
-                            mainHandler.postDelayed({
-                                if (lastTapMs == now) {
-                                    rebuildContent(!menuOpen)
-                                    updateLayout()
-                                }
-                            }, 280)
+                            val now = System.currentTimeMillis()
+                            if (now - lastTapMs < 320) {
+                                lastTapMs = 0
+                                openApp()
+                            } else {
+                                lastTapMs = now
+                                mainHandler.postDelayed({
+                                    if (lastTapMs == now) {
+                                        rebuildContent(!menuOpen)
+                                        updateLayout()
+                                    }
+                                }, 280)
+                            }
                         }
                     }
                     true
@@ -284,6 +301,7 @@ class FloatingBubbleService : Service() {
         rootView = null
         params = null
         waveView = null
+        stopView = null
     }
 
     override fun onDestroy() {
@@ -291,7 +309,6 @@ class FloatingBubbleService : Service() {
         super.onDestroy()
     }
 
-    /** Soft gold bars reacting to audio level 0..1 */
     private class WaveView(context: Context) : View(context) {
         var level: Float = 0f
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
