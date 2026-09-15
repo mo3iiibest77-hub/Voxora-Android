@@ -42,15 +42,15 @@ Logic is **ported from** ParsLiveDub (protocol, chunking, ducking ideas) — **r
 | UI | Jetpack Compose + Material 3 |
 | Min SDK | 29 (Android 10) — required for AudioPlaybackCapture |
 | Target / Compile SDK | 35+ |
-| Architecture | Multi-module: `app`, `core`, `feature-dub`, `feature-auth`, `feature-settings` |
+| Architecture | Multi-module: `app`, `core` (more feature modules in Phase 1+) |
 | DI | Hilt |
 | Async | Coroutines + Flow |
 | Preferences | DataStore |
-| Auth | Credential Manager + Google Sign-In |
-| Audio in | MediaProjection + AudioRecord (AudioPlaybackCaptureConfiguration) |
-| Audio out | AudioTrack (PCM 24 kHz from model) |
+| Auth | Credential Manager + Google Sign-In (Phase 2) |
+| Audio in | MediaProjection + AudioRecord (Phase 1) |
+| Audio out | AudioTrack (Phase 1) |
 | Gemini | WebSocket BidiGenerateContent · model `gemini-3.5-live-translate-preview` |
-| i18n | Android resources `values` / `values-xx` + per-app language picker |
+| i18n | `values` / `values-xx` + `localeConfig` |
 
 No Flutter / React Native for v1.
 
@@ -72,69 +72,69 @@ Resample / chunk (~60ms) → 16 kHz mono
 WebSocket → Gemini Live Translate
         │
 PCM 24 kHz response → AudioTrack
-        │
-Optional: duck original via session volume / usage (best-effort)
 ```
-
-UI modules:
-- Onboarding (permissions, how it works)
-- Home / Live session controls
-- Settings (API key, target language, app language)
-- Account (Google Sign-In)
 
 ---
 
 ## 5. Auth & API key (policy)
 
-- **Google Sign-In** for account identity and future cloud settings.
-- **Gemini API key:** v1 = user pastes key from Google AI Studio (guided in-app). Do **not** automate scraping AI Studio.
-- Later: optional backend proxy so keys stay server-side (commercial).
+- **Google Sign-In** for account identity (Phase 2).
+- **Gemini API key:** v1 = user pastes from Google AI Studio. Do not scrape AI Studio.
+- Later: optional backend proxy for commercial keys.
 
-YouTube login is **not** required to capture YouTube audio; system capture hears whatever is playing.
+YouTube login is **not** required to capture YouTube audio.
 
 ---
 
 ## 6. App UI languages (i18n)
 
-Ship string resources for at least:
+**Shipped strings so far:** English (`values`), Persian (`values-fa`).
 
-English, Persian (fa), Arabic (ar), Spanish (es), French (fr), German (de), Portuguese (pt), Turkish (tr), Russian (ru), Chinese Simplified (zh-rCN), Japanese (ja), Korean (ko), Hindi (hi), Indonesian (id).
+**localeConfig registered:** en, fa, ar, es, fr, de, pt, tr, ru, zh-CN, ja, ko, hi, id.
 
-User can change **app UI language** independently from **dubbing target language**.
+Add remaining `values-xx/strings.xml` in Phase 2–3. App UI language is independent of dubbing target language.
 
 ---
 
 ## 7. Roadmap
 
-| Phase | Scope |
-|-------|--------|
-| **0** | Scaffold Gradle + Compose + theme + PROJECT_CONTEXT (current) |
-| **1** | MediaProjection capture + Gemini Live WS + playback + notification controls |
-| **2** | Google Sign-In + secure key storage + full onboarding |
-| **3** | Polish UI, floating controls, error UX |
-| **4** | Monetization (subscriptions / ads / region-aware payments — separate design) |
-| **5** | Advanced A/V sync experiments |
+| Phase | Scope | Status |
+|-------|--------|--------|
+| **0** | Gradle + Compose shell + gold theme + i18n base | **Done** |
+| **1** | MediaProjection + Gemini Live WS + playback + notification | Next |
+| **2** | Google Sign-In + key storage + onboarding + more locales | |
+| **3** | Polish UI, floating controls, error UX | |
+| **4** | Monetization | Later |
+| **5** | Advanced A/V sync | Later |
 
 ---
 
-## 8. Sister extension lessons (do not regress)
+## 8. Sister extension lessons
 
-- Gemini payload: transcription fields **outside** `generationConfig` when required by Live Translate.
-- Never leave audio routes stuck after stop.
-- Gender pitch-shift on short realtime chunks caused noise — prefer clean pass-through unless streaming phase-vocoder exists.
-- Clear errors for quota / permission / capture conflict.
+- Live Translate payload shape matters.
+- Always clean up audio on stop.
+- Avoid naive per-chunk pitch shift (noise).
+- Clear permission / quota errors.
 
 ---
 
-## 9. Current status
+## 9. Current status (Phase 0 complete)
 
-- Repo created; scaffold in progress.
-- Next: Gradle modules, Compose shell, dark gold theme, baseline `values` + `values-fa` strings.
+**Works in repo:**
+- Multi-module Gradle (`app`, `core`)
+- Compose home UI (dark gold theme)
+- EN + FA strings; locales_config for 14 languages
+- `GeminiLiveConfig` constants aligned with extension
+- Manifest permissions for future capture service
+
+**Not yet:** Gradle Wrapper (open in Android Studio once to generate), Phase 1 capture/Gemini, real Start button logic.
+
+**Next task:** Phase 1 — `DubForegroundService` + AudioPlaybackCapture + WebSocket client + AudioTrack playback.
 
 ---
 
 ## 10. AI continuation
 
-- Product name is **Voxora** (global). Do not rename to Pars/Persian.
-- Extension repo stays separate for desktop experiments.
-- After every change: bump version if releasing, update this file, commit + push `main`.
+- Brand is **Voxora** only (global).
+- Extension repo stays separate.
+- After every change: update this file + commit + push `main`.
