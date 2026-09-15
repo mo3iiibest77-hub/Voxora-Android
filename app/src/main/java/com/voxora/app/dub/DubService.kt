@@ -125,18 +125,18 @@ class DubService : Service() {
                 ?: throw IllegalStateException(getString(R.string.error_projection_null))
             projection = proj
             VoxoraLog.i("DubService", "MediaProjection obtained")
-            proj.registerCallback(object : MediaProjection.Callback() {
-                override fun onStop() {
-                    VoxoraLog.w("DubService", "MediaProjection.onStop")
-                    scope.launch {
-                        stopAll()
-                        stopSelf()
-                    }
-                }
-            }, null)
-
-            VoxoraLog.i("DubService", "starting playback on Main...")
+            // registerCallback(null handler) tries to create Handler on current thread → crash on DefaultDispatcher
             withContext(Dispatchers.Main) {
+                proj.registerCallback(object : MediaProjection.Callback() {
+                    override fun onStop() {
+                        VoxoraLog.w("DubService", "MediaProjection.onStop")
+                        scope.launch {
+                            stopAll()
+                            stopSelf()
+                        }
+                    }
+                }, null)
+                VoxoraLog.i("DubService", "starting playback on Main...")
                 playback.start()
             }
             VoxoraLog.i("DubService", "playback started, connecting Gemini...")
