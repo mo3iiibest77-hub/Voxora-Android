@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -37,14 +38,16 @@ fun HomeScreen(
     onStart: () -> Unit,
     onStop: () -> Unit,
     onOpenSettings: () -> Unit,
+    onDismissError: () -> Unit = {},
 ) {
     val colors = MaterialTheme.colorScheme
     val isLive = status is DubUiStatus.Live || status is DubUiStatus.Connecting
+    val isError = status is DubUiStatus.Error
     val statusLabel = when (status) {
         is DubUiStatus.Idle -> stringResource(R.string.status_idle)
         is DubUiStatus.Connecting -> stringResource(R.string.status_connecting)
         is DubUiStatus.Live -> stringResource(R.string.status_live)
-        is DubUiStatus.Error -> status.message
+        is DubUiStatus.Error -> stringResource(R.string.status_error)
     }
     val dotColor = when (status) {
         is DubUiStatus.Live -> Color(0xFF3DDC84)
@@ -105,6 +108,57 @@ fun HomeScreen(
                 Spacer(Modifier.size(8.dp))
                 Text(statusLabel, color = colors.onSurface, fontSize = 14.sp)
             }
+
+            if (isError && status is DubUiStatus.Error) {
+                Spacer(Modifier.height(16.dp))
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(colors.error.copy(alpha = 0.12f))
+                        .padding(14.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.error_banner_title),
+                        color = colors.error,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 14.sp,
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(status.message, color = colors.onSurface, fontSize = 13.sp)
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = {
+                                onDismissError()
+                                onOpenSettings()
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            Text(stringResource(R.string.action_settings), color = colors.primary, fontSize = 12.sp)
+                        }
+                        Button(
+                            onClick = {
+                                onDismissError()
+                                onStart()
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = colors.primary,
+                                contentColor = colors.onPrimary,
+                            ),
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            Text(stringResource(R.string.action_retry), fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+
             Spacer(Modifier.height(16.dp))
             Text(
                 text = stringResource(R.string.home_title),
@@ -150,6 +204,13 @@ fun HomeScreen(
                 text = stringResource(R.string.phase1_hint),
                 color = colors.onSurfaceVariant,
                 fontSize = 12.sp,
+                textAlign = TextAlign.Center,
+            )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = stringResource(R.string.latency_hint),
+                color = colors.onSurfaceVariant.copy(alpha = 0.85f),
+                fontSize = 11.sp,
                 textAlign = TextAlign.Center,
             )
         }
