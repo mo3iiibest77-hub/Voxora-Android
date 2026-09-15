@@ -14,8 +14,8 @@ android {
         applicationId = "com.voxora.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 15
-        versionName = "0.5.9-dev"
+        versionCode = 20
+        versionName = "0.6.0-dev"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
         resourceConfigurations += listOf(
@@ -24,8 +24,12 @@ android {
     }
 
     buildTypes {
-        release {
+        debug {
             isMinifyEnabled = false
+        }
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

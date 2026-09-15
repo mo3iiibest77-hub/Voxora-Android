@@ -30,13 +30,42 @@ jobs:
         with:
           packages: platform-tools platforms;android-35 build-tools;35.0.0
 
+      # Same debug.keystore across CI runs → APK can update over previous install
+      # (avoids "different package / must uninstall" when only signature differs)
+      - name: Cache stable debug keystore
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.android/debug.keystore
+            ~/.android/debug.keystore.lock
+          key: voxora-debug-keystore-v1
+
+      - name: Ensure debug keystore exists
+        run: |
+          mkdir -p ~/.android
+          if [ ! -f ~/.android/debug.keystore ]; then
+            keytool -genkeypair -v \
+              -keystore ~/.android/debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Voxora CI, OU=Dev, O=Voxora, L=Tehran, ST=TR, C=IR"
+          fi
+          ls -la ~/.android/debug.keystore
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: "8.9"
 
       - name: Assemble debug
-        run: gradle :app:assembleDebug --stacktrace --no-daemon
+        run: |
+          gradle :app:assembleDebug --stacktrace --no-daemon \
+            -Pandroid.injected.signing.store.file=$HOME/.android/debug.keystore \
+            -Pandroid.injected.signing.store.password=android \
+            -Pandroid.injected.signing.key.alias=androiddebugkey \
+            -Pandroid.injected.signing.key.password=android
 
       - name: Upload debug APK
         if: success()
