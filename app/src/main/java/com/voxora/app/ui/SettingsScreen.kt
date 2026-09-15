@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenuItem
@@ -15,6 +17,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -27,12 +30,15 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.voxora.app.R
+import com.voxora.app.auth.GoogleAuthHelper
 import com.voxora.core.prefs.UserPrefs
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -59,16 +65,26 @@ private val LANGS = listOf(
 fun SettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     val prefs = remember { UserPrefs(context) }
+    val auth = remember { GoogleAuthHelper(context, prefs) }
     val scope = rememberCoroutineScope()
+    val uriHandler = LocalUriHandler.current
     var apiKey by remember { mutableStateOf("") }
     var lang by remember { mutableStateOf("fa") }
     var expanded by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf(false) }
+    var signedIn by remember { mutableStateOf(false) }
+    var displayName by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf("") }
+    var authMessage by remember { mutableStateOf<String?>(null) }
+    var authBusy by remember { mutableStateOf(false) }
     val colors = MaterialTheme.colorScheme
 
     LaunchedEffect(Unit) {
         apiKey = prefs.apiKey.first()
         lang = prefs.targetLanguage.first()
+        signedIn = prefs.signedIn.first()
+        displayName = prefs.displayName.first()
+        email = prefs.userEmail.first()
     }
 
     val fieldColors = OutlinedTextFieldDefaults.colors(
@@ -85,6 +101,7 @@ fun SettingsScreen(onBack: () -> Unit) {
         Modifier
             .fillMaxSize()
             .background(colors.background)
+            .verticalScroll(rememberScrollState())
             .padding(24.dp),
     ) {
         TextButton(onClick = onBack) {
@@ -96,7 +113,93 @@ fun SettingsScreen(onBack: () -> Unit) {
             fontSize = 24.sp,
             fontWeight = FontWeight.SemiBold,
         )
-        Spacer(Modifier.height(24.dp))
+        Spacer(Modifier.height(20.dp))
+
+        Text(
+            stringResource(R.string.settings_account),
+            color = colors.onSurfaceVariant,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+        )
+        Spacer(Modifier.height(8.dp))
+        if (signedIn) {
+            Text(
+                displayName.ifBlank { email },
+                color = colors.onSurface,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium,
+            )
+            if (email.isNotBlank()) {
+                Text(email, color = colors.onSurfaceVariant, fontSize = 13.sp)
+            }
+            Spacer(Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = {
+                    scope.launch {
+                        auth.signOut()
+                        signedIn = false
+                        displayName = ""
+                        email = ""
+                        authMessage = context.getString(R.string.auth_signed_out)
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                shape = RoundedCornerShape(12.dp),
+            ) {
+                Text(stringResource(R.string.action_sign_out), color = colors.primary)
+            }
+        } else {
+            Button(
+                onClick = {
+                    scope.launch {
+                        authBusy = true
+                        authMessage = null
+                        val r = auth.signIn()
+                        authBusy = false
+                        if (r.ok) {
+                            signedIn = true
+                            displayName = r.name
+                            email = r.email
+                            authMessage = context.getString(R.string.auth_welcome, r.name)
+                        } else {
+                            authMessage = r.message
+                        }
+                    }
+                },
+                enabled = !authBusy,
+                modifier = Modifier.fillMaxWidth().height(52.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = colors.primary,
+                    contentColor = colors.onPrimary,
+                ),
+                shape = RoundedCornerShape(14.dp),
+            ) {
+                Text(
+                    if (authBusy) stringResource(R.string.auth_signing_in)
+                    else stringResource(R.string.settings_sign_in),
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                stringResource(R.string.auth_optional_hint),
+                color = colors.onSurfaceVariant,
+                fontSize = 12.sp,
+            )
+        }
+        authMessage?.let {
+            Spacer(Modifier.height(8.dp))
+            Text(it, color = colors.primary, fontSize = 13.sp)
+        }
+
+        Spacer(Modifier.height(28.dp))
+        Text(
+            stringResource(R.string.settings_api_key),
+            color = colors.onSurfaceVariant,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+        )
+        Spacer(Modifier.height(8.dp))
         OutlinedTextField(
             value = apiKey,
             onValueChange = { apiKey = it; saved = false },
@@ -107,8 +210,17 @@ fun SettingsScreen(onBack: () -> Unit) {
             colors = fieldColors,
             shape = RoundedCornerShape(12.dp),
         )
+        Spacer(Modifier.height(8.dp))
+        TextButton(onClick = { uriHandler.openUri("https://aistudio.google.com/apikey") }) {
+            Text(stringResource(R.string.settings_open_ai_studio), color = colors.primary)
+        }
+
         Spacer(Modifier.height(16.dp))
-        Text(stringResource(R.string.settings_target_language), color = colors.onSurfaceVariant, fontSize = 13.sp)
+        Text(
+            stringResource(R.string.settings_target_language),
+            color = colors.onSurfaceVariant,
+            fontSize = 13.sp,
+        )
         Spacer(Modifier.height(8.dp))
         ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
             OutlinedTextField(
@@ -133,6 +245,7 @@ fun SettingsScreen(onBack: () -> Unit) {
                 }
             }
         }
+
         Spacer(Modifier.height(24.dp))
         Button(
             onClick = {
@@ -153,7 +266,7 @@ fun SettingsScreen(onBack: () -> Unit) {
         }
         if (saved) {
             Spacer(Modifier.height(8.dp))
-            Text(stringResource(R.string.settings_saved), color = ColorGreen, fontSize = 13.sp)
+            Text(stringResource(R.string.settings_saved), color = Color(0xFF3DDC84), fontSize = 13.sp)
         }
         Spacer(Modifier.height(16.dp))
         Text(
@@ -161,7 +274,6 @@ fun SettingsScreen(onBack: () -> Unit) {
             color = colors.onSurfaceVariant,
             fontSize = 12.sp,
         )
+        Spacer(Modifier.height(24.dp))
     }
 }
-
-private val ColorGreen = androidx.compose.ui.graphics.Color(0xFF3DDC84)
