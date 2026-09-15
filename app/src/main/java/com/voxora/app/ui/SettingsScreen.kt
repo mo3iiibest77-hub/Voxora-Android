@@ -83,9 +83,9 @@ fun SettingsScreen(
     LaunchedEffect(Unit) {
         apiKey = prefs.apiKey.first()
         lang = prefs.targetLanguage.first()
-        signedIn = prefs.isSignedIn.first()
+        signedIn = prefs.signedIn.first()
         displayName = prefs.displayName.first()
-        email = prefs.email.first()
+        email = prefs.userEmail.first()
     }
 
     val colors = MaterialTheme.colorScheme
@@ -119,12 +119,31 @@ fun SettingsScreen(
         if (signedIn) {
             Text("$displayName\n$email", color = colors.onBackground, fontSize = 14.sp)
             Spacer(Modifier.height(8.dp))
-            OutlinedButton(onClick = { scope.launch { auth.signOut(); signedIn = false } }, modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = {
+                    scope.launch {
+                        auth.signOut()
+                        signedIn = false
+                        displayName = ""
+                        email = ""
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
                 Text(stringResource(R.string.action_sign_out), color = colors.primary)
             }
         } else {
             Button(
-                onClick = { scope.launch { val ok = auth.signIn(); signedIn = ok; if (ok) { displayName = prefs.displayName.first(); email = prefs.email.first() } } },
+                onClick = {
+                    scope.launch {
+                        val r = auth.signIn()
+                        if (r.ok) {
+                            signedIn = true
+                            displayName = r.name
+                            email = r.email
+                        }
+                    }
+                },
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = colors.onPrimary),
                 shape = RoundedCornerShape(12.dp),
@@ -177,7 +196,13 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(24.dp))
         Button(
-            onClick = { scope.launch { prefs.setApiKey(apiKey); prefs.setTargetLanguage(lang); saved = true } },
+            onClick = {
+                scope.launch {
+                    prefs.setApiKey(apiKey)
+                    prefs.setTargetLanguage(lang)
+                    saved = true
+                }
+            },
             modifier = Modifier.fillMaxWidth().height(52.dp),
             colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = colors.onPrimary),
             shape = RoundedCornerShape(14.dp),
