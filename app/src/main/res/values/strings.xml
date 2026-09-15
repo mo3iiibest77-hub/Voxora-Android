@@ -28,10 +28,12 @@
     <string name="status_connecting">Connecting…</string>
     <string name="status_live">Live</string>
     <string name="status_error">Error</string>
+    <string name="error_banner_title">Something went wrong</string>
     <string name="error_no_api_key">No API key. Open Settings and paste your Gemini key.</string>
     <string name="error_permission_denied">Microphone or notification permission was denied.</string>
     <string name="error_projection_denied">Screen capture was cancelled. Try again when ready.</string>
     <string name="phase1_hint">Allow screen capture when asked — Voxora only uses system audio, not your camera.</string>
+    <string name="latency_hint">Live dubbing has ~2–3s delay from the AI model — that is normal.</string>
     <string name="onboarding_welcome">Welcome to Voxora</string>
     <string name="onboarding_body">Hear any app in your language — powered by Gemini Live Translate.</string>
     <string name="permission_audio">Capture permission is required to hear system audio.</string>
