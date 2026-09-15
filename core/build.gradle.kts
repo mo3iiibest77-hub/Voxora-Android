@@ -17,5 +17,6 @@ android {
 dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
-    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // api: GeminiLiveSession exposes OkHttpClient in its public constructor default
+    api("com.squareup.okhttp3:okhttp:4.12.0")
 }
