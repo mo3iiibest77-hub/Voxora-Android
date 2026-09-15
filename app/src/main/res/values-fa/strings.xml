@@ -59,4 +59,23 @@
     <string name="auth_signed_out">خارج شدی</string>
     <string name="auth_welcome">خوش آمدی، %1$s</string>
     <string name="auth_need_client_id">برای ورود با گوگل باید Web client ID در پروژه تنظیم شود. فعلاً می‌توانی با کلید API به‌عنوان مهمان ادامه دهی.</string>
+    <string name="action_show_key">نمایش کلید API</string>
+    <string name="action_hide_key">مخفی کردن کلید</string>
+    <string name="home_now_dubbing">در حال دوبله به %1$s</string>
+    <string name="settings_app_language_help">زبان منوها و متن‌های Voxora را عوض کن. این جدا از زبان دوبله است.</string>
+    <string name="settings_app_language_open">باز کردن تنظیمات زبان</string>
+    <string name="error_api_invalid">کلید API نامعتبر است. در تنظیمات بررسی کن.</string>
+    <string name="error_network">خطای شبکه. اتصال را چک کن و دوباره تلاش کن.</string>
+    <string name="error_permission">مجوز رد شد.</string>
+    <string name="error_projection_missing">مجوز ضبط صفحه لازم است.</string>
+    <string name="error_projection_null">نتوانست ضبط صفحه را شروع کند. دوباره تلاش کن.</string>
+    <string name="error_quota">سهمیه جمینا تمام شده. صبر کن یا کلید دیگری استفاده کن.</string>
+    <string name="error_start_failed">شروع دوبله ممکن نشد.</string>
+    <string name="error_capture_failed">ضبط صدای سیستم ممکن نشد. دوباره تلاش کن.</string>
+    <string name="notif_title_connecting">Voxora · در حال اتصال</string>
+    <string name="notif_title_live">Voxora · زنده</string>
+    <string name="notif_title_error">Voxora · خطا</string>
+    <string name="notif_body_connecting">در حال اتصال به جمینا…</string>
+    <string name="notif_body_live">دوبله زنده در حال اجرا. برای پایان توقف را بزن.</string>
+    <string name="float_live_label">زنده</string>
 </resources>
