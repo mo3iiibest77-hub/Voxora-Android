@@ -1,5 +1,6 @@
 package com.voxora.app.ui
 
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -37,16 +38,17 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.os.LocaleListCompat
 import com.voxora.app.R
 import com.voxora.app.auth.GoogleAuthHelper
 import com.voxora.core.prefs.UserPrefs
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
-private val LANGS = listOf(
-    "fa" to "Persian",
+private val DUB_LANGS = listOf(
+    "fa" to "Persian / فارسی",
     "en" to "English",
-    "ar" to "Arabic",
+    "ar" to "Arabic / العربية",
     "es" to "Spanish",
     "fr" to "French",
     "de" to "German",
@@ -58,6 +60,16 @@ private val LANGS = listOf(
     "hi" to "Hindi",
     "pt" to "Portuguese",
     "id" to "Indonesian",
+)
+
+private val APP_LANGS = listOf(
+    "fa" to "فارسی",
+    "en" to "English",
+    "ar" to "العربية",
+    "es" to "Español",
+    "fr" to "Français",
+    "de" to "Deutsch",
+    "tr" to "Türkçe",
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -74,7 +86,9 @@ fun SettingsScreen(
     val uriHandler = LocalUriHandler.current
     var apiKey by remember { mutableStateOf("") }
     var lang by remember { mutableStateOf("fa") }
+    var appLang by remember { mutableStateOf("fa") }
     var expanded by remember { mutableStateOf(false) }
+    var appLangExpanded by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf(false) }
     var signedIn by remember { mutableStateOf(false) }
     var displayName by remember { mutableStateOf("") }
@@ -83,6 +97,7 @@ fun SettingsScreen(
     LaunchedEffect(Unit) {
         apiKey = prefs.apiKey.first()
         lang = prefs.targetLanguage.first()
+        appLang = prefs.appLanguage.first()
         signedIn = prefs.signedIn.first()
         displayName = prefs.displayName.first()
         email = prefs.userEmail.first()
@@ -104,7 +119,7 @@ fun SettingsScreen(
             .padding(20.dp),
     ) {
         TextButton(onClick = onBack) {
-            Text("← Back", color = colors.primary)
+            Text("← " + stringResource(R.string.action_back), color = colors.primary)
         }
         Text(
             stringResource(R.string.settings_title),
@@ -114,6 +129,38 @@ fun SettingsScreen(
         )
         Spacer(Modifier.height(20.dp))
 
+        Text(stringResource(R.string.settings_app_language), color = colors.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(6.dp))
+        Text(stringResource(R.string.settings_app_language_help), color = colors.onSurfaceVariant, fontSize = 12.sp)
+        Spacer(Modifier.height(8.dp))
+        ExposedDropdownMenuBox(expanded = appLangExpanded, onExpandedChange = { appLangExpanded = it }) {
+            OutlinedTextField(
+                value = APP_LANGS.find { it.first == appLang }?.second ?: appLang,
+                onValueChange = {},
+                readOnly = true,
+                modifier = Modifier.fillMaxWidth().menuAnchor(),
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(appLangExpanded) },
+                colors = fieldColors,
+                shape = RoundedCornerShape(12.dp),
+            )
+            ExposedDropdownMenu(expanded = appLangExpanded, onDismissRequest = { appLangExpanded = false }) {
+                APP_LANGS.forEach { (code, name) ->
+                    DropdownMenuItem(
+                        text = { Text(name) },
+                        onClick = {
+                            appLang = code
+                            appLangExpanded = false
+                            scope.launch {
+                                prefs.setAppLanguage(code)
+                                AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(code))
+                            }
+                        },
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(24.dp))
         Text(stringResource(R.string.settings_account), color = colors.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(8.dp))
         if (signedIn) {
@@ -176,7 +223,7 @@ fun SettingsScreen(
         Spacer(Modifier.height(8.dp))
         ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
             OutlinedTextField(
-                value = LANGS.find { it.first == lang }?.second ?: lang,
+                value = DUB_LANGS.find { it.first == lang }?.second ?: lang,
                 onValueChange = {},
                 readOnly = true,
                 modifier = Modifier.fillMaxWidth().menuAnchor(),
@@ -185,7 +232,7 @@ fun SettingsScreen(
                 shape = RoundedCornerShape(12.dp),
             )
             ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                LANGS.forEach { (code, name) ->
+                DUB_LANGS.forEach { (code, name) ->
                     DropdownMenuItem(
                         text = { Text(name) },
                         onClick = { lang = code; expanded = false; saved = false },
@@ -200,6 +247,8 @@ fun SettingsScreen(
                 scope.launch {
                     prefs.setApiKey(apiKey)
                     prefs.setTargetLanguage(lang)
+                    prefs.setAppLanguage(appLang)
+                    AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(appLang))
                     saved = true
                 }
             },
@@ -237,14 +286,12 @@ fun SettingsScreen(
         }
 
         Spacer(Modifier.height(28.dp))
-        Text("Debug", color = colors.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.height(8.dp))
         OutlinedButton(
             onClick = onOpenLogs,
             modifier = Modifier.fillMaxWidth().height(48.dp),
             shape = RoundedCornerShape(12.dp),
         ) {
-            Text("View logs", color = colors.primary)
+            Text(stringResource(R.string.action_view_logs), color = colors.primary)
         }
         Spacer(Modifier.height(24.dp))
     }

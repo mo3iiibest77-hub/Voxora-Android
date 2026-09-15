@@ -1,5 +1,12 @@
 package com.voxora.app.ui
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,9 +27,15 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -30,7 +43,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.voxora.app.R
+import com.voxora.app.dub.DubService
 import com.voxora.app.dub.DubUiStatus
+import kotlin.math.sin
 
 @Composable
 fun HomeScreen(
@@ -55,6 +70,7 @@ fun HomeScreen(
         is DubUiStatus.Error -> colors.error
         else -> Color(0xFF666666)
     }
+    val level by DubService.audioLevel.collectAsState()
 
     Column(
         modifier = Modifier
@@ -107,6 +123,17 @@ fun HomeScreen(
                 )
                 Spacer(Modifier.size(8.dp))
                 Text(statusLabel, color = colors.onSurface, fontSize = 14.sp)
+            }
+
+            if (isLive) {
+                Spacer(Modifier.height(20.dp))
+                LiveWaveform(
+                    level = level,
+                    active = status is DubUiStatus.Live,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(56.dp),
+                )
             }
 
             if (isError && status is DubUiStatus.Error) {
@@ -217,6 +244,47 @@ fun HomeScreen(
 
         TextButton(onClick = onOpenSettings) {
             Text(stringResource(R.string.action_settings), color = colors.primary)
+        }
+    }
+}
+
+@Composable
+private fun LiveWaveform(
+    level: Float,
+    active: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val gold = Color(0xFFE6B422)
+    val green = Color(0xFF3DDC97)
+    val transition = rememberInfiniteTransition(label = "wave")
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = (Math.PI * 2).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "phase",
+    )
+    Canvas(modifier = modifier) {
+        val bars = 24
+        val gap = size.width * 0.012f
+        val barW = (size.width - gap * (bars + 1)) / bars
+        val base = if (active) level.coerceIn(0.05f, 1f) else 0.12f
+        for (i in 0 until bars) {
+            val n = ((sin(phase + i * 0.45f) + 1f) / 2f)
+            val amp = (0.18f + 0.82f * base * (0.35f + 0.65f * n)).coerceIn(0.1f, 1f)
+            val bh = size.height * amp
+            val left = gap + i * (barW + gap)
+            val top = (size.height - bh) / 2f
+            val t = i / (bars - 1f)
+            val color = androidx.compose.ui.graphics.lerp(gold, green, t)
+            drawRoundRect(
+                brush = Brush.verticalGradient(listOf(color.copy(alpha = 0.35f), color)),
+                topLeft = Offset(left, top),
+                size = Size(barW, bh),
+                cornerRadius = CornerRadius(barW / 2f, barW / 2f),
+            )
         }
     }
 }

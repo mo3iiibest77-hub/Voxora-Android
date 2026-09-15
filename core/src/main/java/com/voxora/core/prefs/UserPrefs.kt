@@ -13,6 +13,7 @@ private val Context.dataStore by preferencesDataStore("voxora_prefs")
 class UserPrefs(private val context: Context) {
     private val keyApi = stringPreferencesKey("api_key")
     private val keyLang = stringPreferencesKey("target_lang")
+    private val keyAppLang = stringPreferencesKey("app_lang")
     private val keyOnboarding = booleanPreferencesKey("onboarding_done")
     private val keyEmail = stringPreferencesKey("user_email")
     private val keyDisplayName = stringPreferencesKey("user_display_name")
@@ -20,6 +21,8 @@ class UserPrefs(private val context: Context) {
 
     val apiKey: Flow<String> = context.dataStore.data.map { it[keyApi].orEmpty() }
     val targetLanguage: Flow<String> = context.dataStore.data.map { it[keyLang] ?: "fa" }
+    /** UI language: fa, en, ar, … empty = system default */
+    val appLanguage: Flow<String> = context.dataStore.data.map { it[keyAppLang] ?: "fa" }
     val onboardingDone: Flow<Boolean> = context.dataStore.data.map { it[keyOnboarding] == true }
     val userEmail: Flow<String> = context.dataStore.data.map { it[keyEmail].orEmpty() }
     val displayName: Flow<String> = context.dataStore.data.map { it[keyDisplayName].orEmpty() }
@@ -31,6 +34,10 @@ class UserPrefs(private val context: Context) {
 
     suspend fun setTargetLanguage(code: String) {
         context.dataStore.edit { it[keyLang] = code }
+    }
+
+    suspend fun setAppLanguage(code: String) {
+        context.dataStore.edit { it[keyAppLang] = code }
     }
 
     suspend fun setOnboardingDone(done: Boolean = true) {
