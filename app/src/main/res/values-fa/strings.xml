@@ -11,6 +11,7 @@
     <string name="action_save">ذخیره</string>
     <string name="action_sign_out">خروج از حساب</string>
     <string name="action_retry">تلاش دوباره</string>
+    <string name="action_view_logs">مشاهده لاگ‌ها</string>
     <string name="settings_title">تنظیمات</string>
     <string name="settings_account">حساب کاربری</string>
     <string name="settings_api_key">کلید API جمینا</string>
@@ -52,7 +53,7 @@
     <string name="onboarding_page2_title">حریم خصوصی مهم است</string>
     <string name="onboarding_page2_body">وقتی اندروید اجازه ضبط صفحه می‌خواهد، تأیید کن. Voxora فقط صدا را استفاده می‌کند — نه دوربین. هر وقت بخواهی از اپ یا نوتیفیکیشن متوقف کن.</string>
     <string name="onboarding_page3_title">کلید رایگان جمینا را اضافه کن</string>
-    <string name="onboarding_page3_body">در Google AI Studio کلید بساز، در تنظیمات بچسبان، زبان دوبله را انتخاب کن، بعد Start را بزن. اختیاری: با گوگل وارد شو.</string>
+    <string name="onboarding_page3_body">در Google AI Studio کلید بساز، در تنظیمات بچسبان، زبان دوبله را انتخاب کن، بعد شروع را بزن. اختیاری: با گوگل وارد شو.</string>
     <string name="auth_optional_hint">اختیاری. بدون ورود هم می‌توانی فقط با کلید API از Voxora استفاده کنی.</string>
     <string name="auth_signing_in">در حال ورود…</string>
     <string name="auth_failed">ورود ناموفق بود. دوباره تلاش کن یا بدون حساب ادامه بده.</string>
