@@ -2,8 +2,6 @@
 
 **Standing rule:** After any material change, update this file in the same session.
 
----
-
 ## 1. Product
 
 | Field | Value |
@@ -13,80 +11,30 @@
 | **Type** | Native Android app |
 | **Repo** | https://github.com/mo3iiibest77-hub/Voxora-Android |
 | **Sister** | https://github.com/mo3iiibest77-hub/ParsLiveDub |
-| **Version** | **0.4.0-dev** (Phase 3) |
+| **Version** | **0.5.0-dev** |
 
----
+## 2. Tech stack
 
-## 2. Phase status
+Kotlin · Jetpack Compose · Material 3 · Hilt · minSdk 29 · OkHttp WebSocket · DataStore · MediaProjection + AudioPlaybackCapture · AudioTrack · Credential Manager · SYSTEM_ALERT_WINDOW
+
+## 3. Phase status
 
 | Phase | Status |
 |-------|--------|
-| 0 Scaffold | Done |
-| 1 Capture + Gemini + playback | Done |
-| 2 Google Sign-In + onboarding + locales | Done |
-| **3 Floating controls + notification + error UX** | **Done (0.4.0-dev)** |
+| 0–3 Capture, Gemini, UI, bubble, notif | Done |
+| **3.5 Production hardening (0.5.0)** | **Done** |
+| CI assembleDebug | Strings + icon aligned for green build |
 | 4 Monetization | Later |
-| 5 Advanced A/V sync | Later |
 
----
+## 4. 0.5.0 fixes
 
-## 3. Phase 3 implemented
+- All R.string keys for DubService present in en/fa/fr/ar/es/de/tr; FR apostrophes escaped
+- Notification icon `ic_stat_notify` (white)
+- Error status no longer wiped by Gemini Idle
+- Playback `ALLOW_CAPTURE_BY_NONE` (no self-echo) + audio focus ducking
+- versionCode 6 / versionName 0.5.0-dev
+- allowBackup=false
 
-### Floating bubble
-- `FloatingBubbleService` — overlay with Live label + Stop
-- Requires `SYSTEM_ALERT_WINDOW` (Settings → Enable floating bubble)
-- Shown while Connecting/Live; hidden on stop/error
+## 5. AI continuation
 
-### Notification polish
-- Channel name/description
-- Titles: Connecting / Live / Error
-- BigText body, Stop action, onlyAlertOnce
-
-### Stronger error UX
-- Pre-start API key check (no projection prompt if missing)
-- Permission / projection denial mapped to clear messages
-- Gemini 401 / 429 / network mapped in `DubService.mapError`
-- Home error banner: message + Settings + Retry
-- `DubService.postError` / `clearError` for UI-driven errors
-
-### Settings
-- Overlay permission entry point
-
----
-
-## 4. Key files (Phase 3)
-
-- `app/.../dub/FloatingBubbleService.kt`
-- `app/.../dub/DubService.kt`
-- `app/.../ui/HomeScreen.kt`
-- `app/.../MainActivity.kt`
-- `app/.../ui/VoxoraNav.kt`
-- `app/.../ui/SettingsScreen.kt`
-- `AndroidManifest.xml` — SYSTEM_ALERT_WINDOW + FloatingBubbleService
-
----
-
-## 5. How to test Phase 3
-
-1. Pull `main`, run on device API 29+
-2. Start without API key → error banner, no capture dialog
-3. Deny mic → permission error banner
-4. Cancel capture → projection denied message
-5. Live session → richer notification + optional floating bubble (after overlay grant)
-6. Stop from bubble, notification, or Home
-
----
-
-## 6. Known limits
-
-- Overlay needs manual user grant
-- System audio ducking still imperfect
-- ~2–3s Gemini latency expected
-- Google Sign-In needs Web client ID (Phase 2)
-
----
-
-## 7. AI continuation
-
-Brand **Voxora** only. After changes: update this file + push `main`.
-Next: Phase 4 monetization planning / entitlement design.
+Brand **Voxora** only. After changes: update this file + commit + push `main`.
