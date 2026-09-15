@@ -14,8 +14,8 @@ android {
         applicationId = "com.voxora.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0-dev"
+        versionCode = 3
+        versionName = "0.3.0-dev"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
         resourceConfigurations += listOf(
@@ -59,5 +59,9 @@ dependencies {
     implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.credentials:credentials:1.3.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
+    implementation("androidx.compose.foundation:foundation")
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
