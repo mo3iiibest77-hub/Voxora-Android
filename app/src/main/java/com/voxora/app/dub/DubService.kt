@@ -19,6 +19,7 @@ import com.voxora.app.R
 import com.voxora.core.gemini.GeminiLiveSession
 import com.voxora.core.gemini.GeminiStatus
 import com.voxora.core.prefs.UserPrefs
+import com.voxora.app.util.VoxoraLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -39,14 +40,6 @@ private fun Intent.mediaProjectionData(): Intent? {
     }
 }
 
-/**
- * Foreground service that owns MediaProjection capture, Gemini Live WS, and playback.
- *
- * Threading rules (ANR prevention):
- * - [scope] Default: session lifecycle, status collection
- * - [audioScope] IO: AudioTrack.write (never on Main)
- * - UI updates (notification + bubble) always via Dispatchers.Main
- */
 class DubService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val audioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -61,6 +54,7 @@ class DubService : Service() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        VoxoraLog.i("DubService", "onCreate")
         playback = DubPlayback(applicationContext)
         createChannel()
 
@@ -98,9 +92,11 @@ class DubService : Service() {
                 return START_NOT_STICKY
             }
             ACTION_START -> {
+                VoxoraLog.i("DubService", "ACTION_START")
                 val resultCode = intent.getIntExtra(EXTRA_RESULT_CODE, 0)
                 val data = intent.mediaProjectionData()
                 if (data == null) {
+                    VoxoraLog.e("DubService", "projection data null")
                     setErrorAndStop(getString(R.string.error_projection_missing))
                     return START_NOT_STICKY
                 }
@@ -112,20 +108,26 @@ class DubService : Service() {
     }
 
     private suspend fun beginSession(resultCode: Int, data: Intent) {
+        VoxoraLog.i("DubService", "beginSession resultCode=$resultCode")
         try {
             val prefs = UserPrefs(applicationContext)
             val apiKey = prefs.apiKey.first()
             val lang = prefs.targetLanguage.first()
+            VoxoraLog.i("DubService", "prefs ok lang=$lang keyLen=${apiKey.length}")
             if (apiKey.isBlank()) {
+                VoxoraLog.e("DubService", "apiKey blank")
                 setErrorAndStop(getString(R.string.error_no_api_key))
                 return
             }
             val mpm = getSystemService(MediaProjectionManager::class.java)
+            VoxoraLog.i("DubService", "getting MediaProjection...")
             val proj = mpm.getMediaProjection(resultCode, data)
                 ?: throw IllegalStateException(getString(R.string.error_projection_null))
             projection = proj
+            VoxoraLog.i("DubService", "MediaProjection obtained")
             proj.registerCallback(object : MediaProjection.Callback() {
                 override fun onStop() {
+                    VoxoraLog.w("DubService", "MediaProjection.onStop")
                     scope.launch {
                         stopAll()
                         stopSelf()
@@ -133,20 +135,27 @@ class DubService : Service() {
                 }
             }, null)
 
+            VoxoraLog.i("DubService", "starting playback on Main...")
             withContext(Dispatchers.Main) {
                 playback.start()
             }
+            VoxoraLog.i("DubService", "playback started, connecting Gemini...")
             gemini.connect(apiKey, lang)
+            VoxoraLog.i("DubService", "gemini.connect called, starting capture...")
             capture.start(proj, scope)
+            VoxoraLog.i("DubService", "capture started")
             _status.value = DubUiStatus.Connecting
             postUiUpdate()
+            VoxoraLog.i("DubService", "beginSession done → Connecting")
         } catch (e: Exception) {
+            VoxoraLog.e("DubService", "beginSession FAILED", e)
             Log.e(TAG, "beginSession", e)
             setErrorAndStop(mapError(e.message ?: getString(R.string.error_start_failed)))
         }
     }
 
     private fun setErrorAndStop(message: String) {
+        VoxoraLog.e("DubService", "setErrorAndStop: $message")
         _status.value = DubUiStatus.Error(message)
         scope.launch { postUiUpdate() }
         stopAll()
@@ -175,14 +184,8 @@ class DubService : Service() {
     private fun stopAll() {
         capture.stop()
         gemini.stop()
-        try {
-            playback.stop()
-        } catch (_: Exception) {
-        }
-        try {
-            projection?.stop()
-        } catch (_: Exception) {
-        }
+        try { playback.stop() } catch (_: Exception) {}
+        try { projection?.stop() } catch (_: Exception) {}
         projection = null
         FloatingBubbleService.hide(this)
         if (_status.value !is DubUiStatus.Error) {
@@ -193,14 +196,12 @@ class DubService : Service() {
 
     private fun stopForegroundCompat() {
         try {
-            if (Build.VERSION.SDK_INT >= 24) {
-                stopForeground(STOP_FOREGROUND_REMOVE)
-            } else {
+            if (Build.VERSION.SDK_INT >= 24) stopForeground(STOP_FOREGROUND_REMOVE)
+            else {
                 @Suppress("DEPRECATION")
                 stopForeground(true)
             }
-        } catch (_: Exception) {
-        }
+        } catch (_: Exception) {}
     }
 
     private suspend fun postUiUpdate() {
