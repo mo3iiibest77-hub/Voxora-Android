@@ -115,7 +115,6 @@ fun SettingsScreen(
         scope.launch {
             prefs.setAppLanguage(code)
             AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(code))
-            // AppCompatActivity will recreate; UI strings reload from values-xx
         }
     }
 
@@ -208,7 +207,7 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(24.dp))
         Text(stringResource(R.string.settings_api_key), color = colors.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-        Spacer(modifier.height(8.dp))
+        Spacer(Modifier.height(8.dp))
         OutlinedTextField(
             value = apiKey,
             onValueChange = { apiKey = it; saved = false },
