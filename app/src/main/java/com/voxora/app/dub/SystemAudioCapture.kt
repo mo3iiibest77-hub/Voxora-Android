@@ -13,6 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import com.voxora.app.util.VoxoraLog
 
 /** Captures other apps' playback via AudioPlaybackCapture (Android 10+). */
 class SystemAudioCapture(
@@ -23,6 +24,7 @@ class SystemAudioCapture(
     private var sampleRate = 44_100
 
     fun start(projection: MediaProjection, scope: CoroutineScope) {
+        VoxoraLog.i("Capture", "start()")
         stop()
         val config = AudioPlaybackCaptureConfiguration.Builder(projection)
             .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
