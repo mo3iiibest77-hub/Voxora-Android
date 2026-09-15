@@ -11,9 +11,7 @@ import android.content.pm.ServiceInfo
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
-import android.os.Handler
 import android.os.IBinder
-import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.voxora.app.MainActivity
@@ -47,12 +45,11 @@ private fun Intent.mediaProjectionData(): Intent? {
  * Threading rules (ANR prevention):
  * - [scope] Default: session lifecycle, status collection
  * - [audioScope] IO: AudioTrack.write (never on Main)
- * - [mainHandler] only for notification + bubble UI updates
+ * - UI updates (notification + bubble) always via Dispatchers.Main
  */
 class DubService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val audioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val mainHandler = Handler(Looper.getMainLooper())
 
     private val gemini = GeminiLiveSession()
     private val capture = SystemAudioCapture { pcm -> gemini.sendPcm16k(pcm) }
@@ -71,7 +68,6 @@ class DubService : Service() {
             gemini.status.collect { st ->
                 val mapped = when (st) {
                     is GeminiStatus.Idle -> {
-                        // Keep sticky Error; do not wipe user-visible failure with Idle
                         if (_status.value is DubUiStatus.Error) _status.value
                         else DubUiStatus.Idle
                     }
@@ -85,7 +81,6 @@ class DubService : Service() {
             }
         }
 
-        // Audio out must never touch Main — writeFloats blocks under load → ANR
         scope.launch {
             gemini.audioOut.collect { samples ->
                 audioScope.launch {
@@ -131,8 +126,10 @@ class DubService : Service() {
             projection = proj
             proj.registerCallback(object : MediaProjection.Callback() {
                 override fun onStop() {
-                    stopAll()
-                    stopSelf()
+                    scope.launch {
+                        stopAll()
+                        stopSelf()
+                    }
                 }
             }, null)
 
@@ -151,7 +148,7 @@ class DubService : Service() {
 
     private fun setErrorAndStop(message: String) {
         _status.value = DubUiStatus.Error(message)
-        postUiUpdate()
+        scope.launch { postUiUpdate() }
         stopAll()
         stopForegroundCompat()
         stopSelf()
@@ -169,6 +166,8 @@ class DubService : Service() {
                 getString(R.string.error_network)
             m.contains("permission") || m.contains("security") ->
                 getString(R.string.error_permission)
+            m.contains("handler") || m.contains("looper") ->
+                getString(R.string.error_start_failed)
             else -> raw
         }
     }
@@ -204,8 +203,8 @@ class DubService : Service() {
         }
     }
 
-    private fun postUiUpdate() {
-        mainHandler.post {
+    private suspend fun postUiUpdate() {
+        withContext(Dispatchers.Main) {
             updateNotification()
             syncBubble()
         }
