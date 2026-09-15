@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Voxora</string>
+    <string name="tagline">Live AI dubbing for every language</string>
+    <string name="home_title">Ready to dub</string>
+    <string name="home_subtitle">Play any video or podcast, then start live dubbing.</string>
+    <string name="action_start">Start live dubbing</string>
+    <string name="action_stop">Stop</string>
+    <string name="action_settings">Settings</string>
+    <string name="settings_title">Settings</string>
+    <string name="settings_api_key">Gemini API key</string>
+    <string name="settings_api_key_hint">Paste key from Google AI Studio</string>
+    <string name="settings_target_language">Dubbing language</string>
+    <string name="settings_app_language">App language</string>
+    <string name="settings_sign_in">Sign in with Google</string>
+    <string name="status_idle">Idle</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_live">Live</string>
+    <string name="status_error">Error</string>
+    <string name="onboarding_welcome">Welcome to Voxora</string>
+    <string name="onboarding_body">Hear any app in your language — powered by Gemini Live Translate.</string>
+    <string name="permission_audio">Capture permission is required to hear system audio.</string>
+    <string name="coming_soon_phase1">Phase 1: system audio capture + Gemini Live comes next.</string>
+</resources>
