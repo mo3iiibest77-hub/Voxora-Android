@@ -1,6 +1,6 @@
 # PROJECT_CONTEXT.md — Voxora (Android)
 
-**Standing rule:** After any material change, update this file in the same session (version, works, issues, next task).
+**Standing rule:** After any material change, update this file in the same session.
 
 ---
 
@@ -10,131 +10,78 @@
 |-------|--------|
 | **Brand** | **Voxora** |
 | **Tagline** | Live AI dubbing for every language |
-| **Type** | Native Android app (not a Chrome extension) |
+| **Type** | Native Android app |
 | **Repo** | https://github.com/mo3iiibest77-hub/Voxora-Android |
-| **Sister project** | https://github.com/mo3iiibest77-hub/ParsLiveDub (MV3 extension prototype) |
-| **Version** | 0.1.0-dev |
+| **Sister** | https://github.com/mo3iiibest77-hub/ParsLiveDub |
+| **Version** | **0.2.0-dev** (Phase 1) |
 
-### Positioning
-Global product — **not** Persian-only. Gemini Live Translate supports 70+ dubbing target languages. The **app UI** is localized for major world languages (see §6).
-
-### Core value
-Capture system audio from any app (YouTube, podcasts, etc.) → stream to Gemini Live Translate → play natural dubbed speech in the user’s target language, with low client overhead and clear onboarding.
+Global product. UI language ≠ dubbing target language.
 
 ---
 
-## 2. Why native (vs extension)
+## 2. Tech stack
 
-- Extension on Lemur cannot reliably lipsync video frames (black / blink).
-- Android **MediaProjection + AudioPlaybackCapture** captures internal audio cleanly.
-- Foreground service + AudioTrack give better control of latency buffers and ducking.
-- Path to monetization, Google Sign-In, and Play distribution.
-
-Logic is **ported from** ParsLiveDub (protocol, chunking, ducking ideas) — **rewritten in Kotlin**, not copy-paste JS.
+Kotlin · Jetpack Compose · Material 3 · Hilt · minSdk 29 · OkHttp WebSocket · DataStore · MediaProjection + AudioPlaybackCapture · AudioTrack
 
 ---
 
-## 3. Tech stack (locked)
+## 3. Phase 1 architecture (implemented)
 
-| Layer | Choice |
+```
+MainActivity → permissions → MediaProjection intent
+        → DubService (FGS mediaProjection)
+        → SystemAudioCapture (AudioRecord + AudioPlaybackCapture)
+        → PCM 16 kHz chunks
+        → GeminiLiveSession (WebSocket Live Translate)
+        → AudioTrack 24 kHz playback
+        → Notification Start/Stop
+```
+
+Key files:
+- `core/.../gemini/GeminiLiveSession.kt` — protocol aligned with ParsLiveDub
+- `core/.../audio/PcmUtils.kt`
+- `core/.../prefs/UserPrefs.kt`
+- `app/.../dub/SystemAudioCapture.kt`
+- `app/.../dub/DubPlayback.kt`
+- `app/.../dub/DubService.kt`
+- `app/.../ui/HomeScreen.kt`, `SettingsScreen.kt`, `VoxoraNav.kt`
+
+---
+
+## 4. How to test
+
+1. Open in Android Studio · Sync Gradle (generate wrapper if needed)
+2. Run on device API 29+
+3. Settings → paste Gemini API key → Save → choose dubbing language
+4. Play YouTube (or any media)
+5. Start live dubbing → allow screen capture (audio only)
+6. Hear dubbed audio; Stop from app or notification
+
+---
+
+## 5. Roadmap status
+
+| Phase | Status |
 |-------|--------|
-| Language | Kotlin |
-| UI | Jetpack Compose + Material 3 |
-| Min SDK | 29 (Android 10) — required for AudioPlaybackCapture |
-| Target / Compile SDK | 35+ |
-| Architecture | Multi-module: `app`, `core` (more feature modules in Phase 1+) |
-| DI | Hilt |
-| Async | Coroutines + Flow |
-| Preferences | DataStore |
-| Auth | Credential Manager + Google Sign-In (Phase 2) |
-| Audio in | MediaProjection + AudioRecord (Phase 1) |
-| Audio out | AudioTrack (Phase 1) |
-| Gemini | WebSocket BidiGenerateContent · model `gemini-3.5-live-translate-preview` |
-| i18n | `values` / `values-xx` + `localeConfig` |
-
-No Flutter / React Native for v1.
+| 0 Scaffold | Done |
+| **1 Capture + Gemini + playback** | **Done (0.2.0-dev)** |
+| 2 Google Sign-In + onboarding + more locales | Next |
+| 3 Polish UI / floating controls | |
+| 4 Monetization | Later |
+| 5 Advanced A/V sync | Later |
 
 ---
 
-## 4. Architecture (target)
+## 6. Known limits (Phase 1)
 
-```
-User plays YouTube (or any media)
-        │
-MediaProjection permission (one-time prompt)
-        │
-Foreground Service (mediaProjection type)
-        │
-AudioRecord ← system playback PCM
-        │
-Resample / chunk (~60ms) → 16 kHz mono
-        │
-WebSocket → Gemini Live Translate
-        │
-PCM 24 kHz response → AudioTrack
-```
+- Original app audio still plays (no perfect system-wide duck yet)
+- ~2–3s Gemini model latency is expected
+- Some OEMs restrict AudioPlaybackCapture for certain apps
+- Gradle Wrapper not committed — Android Studio can add it on first open
+- Old `VoxoraAppRoot.kt` may still exist unused; HomeScreen is the active UI
 
 ---
 
-## 5. Auth & API key (policy)
+## 7. AI continuation
 
-- **Google Sign-In** for account identity (Phase 2).
-- **Gemini API key:** v1 = user pastes from Google AI Studio. Do not scrape AI Studio.
-- Later: optional backend proxy for commercial keys.
-
-YouTube login is **not** required to capture YouTube audio.
-
----
-
-## 6. App UI languages (i18n)
-
-**Shipped strings so far:** English (`values`), Persian (`values-fa`).
-
-**localeConfig registered:** en, fa, ar, es, fr, de, pt, tr, ru, zh-CN, ja, ko, hi, id.
-
-Add remaining `values-xx/strings.xml` in Phase 2–3. App UI language is independent of dubbing target language.
-
----
-
-## 7. Roadmap
-
-| Phase | Scope | Status |
-|-------|--------|--------|
-| **0** | Gradle + Compose shell + gold theme + i18n base | **Done** |
-| **1** | MediaProjection + Gemini Live WS + playback + notification | Next |
-| **2** | Google Sign-In + key storage + onboarding + more locales | |
-| **3** | Polish UI, floating controls, error UX | |
-| **4** | Monetization | Later |
-| **5** | Advanced A/V sync | Later |
-
----
-
-## 8. Sister extension lessons
-
-- Live Translate payload shape matters.
-- Always clean up audio on stop.
-- Avoid naive per-chunk pitch shift (noise).
-- Clear permission / quota errors.
-
----
-
-## 9. Current status (Phase 0 complete)
-
-**Works in repo:**
-- Multi-module Gradle (`app`, `core`)
-- Compose home UI (dark gold theme)
-- EN + FA strings; locales_config for 14 languages
-- `GeminiLiveConfig` constants aligned with extension
-- Manifest permissions for future capture service
-
-**Not yet:** Gradle Wrapper (open in Android Studio once to generate), Phase 1 capture/Gemini, real Start button logic.
-
-**Next task:** Phase 1 — `DubForegroundService` + AudioPlaybackCapture + WebSocket client + AudioTrack playback.
-
----
-
-## 10. AI continuation
-
-- Brand is **Voxora** only (global).
-- Extension repo stays separate.
-- After every change: update this file + commit + push `main`.
+Brand **Voxora** only. After changes: update this file + commit + push `main`.
