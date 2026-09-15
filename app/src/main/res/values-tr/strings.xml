@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Voxora</string>
+    <string name="tagline">Her dil için canlı yapay zeka dublajı</string>
+    <string name="home_title">Dublaja hazır</string>
+    <string name="home_subtitle">Herhangi bir video veya podcast oynat, sonra canlı dublajı başlat.</string>
+    <string name="action_start">Canlı dublajı başlat</string>
+    <string name="action_stop">Durdur</string>
+    <string name="action_settings">Ayarlar</string>
+    <string name="action_back">Geri</string>
+    <string name="action_save">Kaydet</string>
+    <string name="action_sign_out">Çıkış yap</string>
+    <string name="settings_title">Ayarlar</string>
+    <string name="settings_account">Hesap</string>
+    <string name="settings_api_key">Gemini API anahtarı</string>
+    <string name="settings_api_key_hint">Google AI Studio anahtarını yapıştır</string>
+    <string name="settings_target_language">Dublaj dili</string>
+    <string name="settings_sign_in">Google ile giriş yap</string>
+    <string name="settings_saved">Kaydedildi</string>
+    <string name="settings_api_help">Ücretsiz anahtar: aistudio.google.com/apikey — sonra buraya yapıştır. Giriş isteğe bağlıdır.</string>
+    <string name="settings_open_ai_studio">Google AI Studio aç</string>
+    <string name="status_idle">Hazır</string>
+    <string name="status_connecting">Bağlanıyor…</string>
+    <string name="status_live">Canlı</string>
+    <string name="status_error">Hata</string>
+    <string name="error_no_api_key">API anahtarı yok. Ayarlardan Gemini anahtarını yapıştır.</string>
+    <string name="phase1_hint">Ekran yakalama istendiğinde izin ver — Voxora yalnızca sistem sesini kullanır, kamerayı değil.</string>
+    <string name="onboarding_skip">Atla</string>
+    <string name="onboarding_next">İleri</string>
+    <string name="onboarding_get_started">Başla</string>
+    <string name="onboarding_add_api_key">Gemini API anahtarı ekle</string>
+    <string name="onboarding_page1_title">Dünyayı canlı duble et</string>
+    <string name="onboarding_page1_body">YouTube, podcast veya herhangi bir uygulamayı oynat. Voxora sistem sesini yakalar ve dilinde canlı çeviri konuşur.</string>
+    <string name="onboarding_page2_title">Gizliliğin önemli</string>
+    <string name="onboarding_page2_body">Android ekran yakalama istediğinde izin ver. Voxora yalnızca ses kullanır — kamera değil.</string>
+    <string name="onboarding_page3_title">Ücretsiz Gemini anahtarını ekle</string>
+    <string name="onboarding_page3_body">Google AI Studio da anahtar oluştur, Ayarlara yapıştır, dublaj dilini seç, Start a bas.</string>
+    <string name="auth_optional_hint">İsteğe bağlı. Yalnızca API anahtarıyla, giriş yapmadan kullanabilirsin.</string>
+    <string name="auth_signing_in">Giriş yapılıyor…</string>
+    <string name="auth_failed">Giriş başarısız. Tekrar dene veya misafir olarak devam et.</string>
+    <string name="auth_signed_out">Çıkış yapıldı</string>
+    <string name="auth_welcome">Hoş geldin, %1$s</string>
+    <string name="auth_need_client_id">Google girişi için Web client ID gerekir. API anahtarıyla misafir olarak devam edebilirsin.</string>
+</resources>
