@@ -16,6 +16,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.voxora.app.MainActivity
 import com.voxora.app.R
+import com.voxora.app.util.StatusToast
 import com.voxora.app.util.VoxoraLog
 import com.voxora.core.gemini.GeminiLiveSession
 import com.voxora.core.gemini.GeminiStatus
@@ -47,7 +48,6 @@ class DubService : Service() {
 
     private val gemini = GeminiLiveSession()
     private val capture = SystemAudioCapture { pcm ->
-        // RMS for bubble / home waveform
         var sum = 0.0
         for (s in pcm) sum += s * s
         val rms = if (pcm.isNotEmpty()) sqrt(sum / pcm.size).toFloat() else 0f
@@ -58,6 +58,7 @@ class DubService : Service() {
     }
     private lateinit var playback: DubPlayback
     private var projection: MediaProjection? = null
+    private var lastToastKey: String = ""
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -84,6 +85,7 @@ class DubService : Service() {
                 if (mapped !is DubUiStatus.Live && mapped !is DubUiStatus.Connecting) {
                     _audioLevel.value = 0f
                 }
+                toastForGemini(st)
                 postUiUpdate()
             }
         }
@@ -95,6 +97,26 @@ class DubService : Service() {
                 }
             }
         }
+    }
+
+    private fun toastForGemini(st: GeminiStatus) {
+        val key = when (st) {
+            is GeminiStatus.Connecting -> "connecting"
+            is GeminiStatus.Ready -> "ready"
+            is GeminiStatus.Reconnecting -> "reconnect"
+            is GeminiStatus.Error -> "err:${st.message}"
+            is GeminiStatus.Idle -> "idle"
+        }
+        if (key == lastToastKey) return
+        lastToastKey = key
+        val msg = when (st) {
+            is GeminiStatus.Connecting -> getString(R.string.toast_connecting)
+            is GeminiStatus.Ready -> getString(R.string.toast_gemini_ready)
+            is GeminiStatus.Reconnecting -> getString(R.string.toast_reconnecting)
+            is GeminiStatus.Error -> mapError(st.message)
+            is GeminiStatus.Idle -> return
+        }
+        StatusToast.show(applicationContext, msg)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -152,11 +174,12 @@ class DubService : Service() {
                 playback.start()
             }
             VoxoraLog.i("DubService", "playback started, connecting Gemini...")
+            lastToastKey = ""
+            StatusToast.show(applicationContext, getString(R.string.toast_connecting))
             gemini.connect(apiKey, lang)
             VoxoraLog.i("DubService", "gemini.connect called, starting capture...")
             capture.start(proj, scope, applicationInfo.uid)
             VoxoraLog.i("DubService", "capture started")
-            VoxoraLog.i("DubService", "picture lag disabled (no recursive overlay)")
             _status.value = DubUiStatus.Connecting
             postUiUpdate()
             VoxoraLog.i("DubService", "beginSession done → Connecting")
@@ -170,6 +193,7 @@ class DubService : Service() {
     private fun setErrorAndStop(message: String) {
         VoxoraLog.e("DubService", "setErrorAndStop: $message")
         _status.value = DubUiStatus.Error(message)
+        StatusToast.show(applicationContext, message)
         scope.launch { postUiUpdate() }
         stopAll()
         stopForegroundCompat()
