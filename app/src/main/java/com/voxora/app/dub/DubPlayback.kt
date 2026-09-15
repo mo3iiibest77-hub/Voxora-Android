@@ -15,7 +15,7 @@ import com.voxora.app.util.VoxoraLog
 /**
  * Plays Gemini PCM on a dedicated path.
  * - ALLOW_CAPTURE_BY_NONE: do not re-capture our own output
- * - Audio focus MAY_DUCK + soft STREAM_MUSIC duck (~20% of current) so source is quieter without mute
+ * - Audio focus MAY_DUCK + soft STREAM_MUSIC duck (~8% of current) so source is quieter without full mute
  */
 class DubPlayback(context: Context? = null) {
     private val appContext = context?.applicationContext
@@ -135,7 +135,7 @@ class DubPlayback(context: Context? = null) {
             val cur = am.getStreamVolume(AudioManager.STREAM_MUSIC)
             if (cur <= 0 || max <= 0) return
             savedMusicVolume = cur
-            val target = (cur * 20 / 100).coerceAtLeast(1).coerceAtMost(cur - 1)
+            val target = (cur * 8 / 100).coerceAtLeast(1).coerceAtMost(cur - 1)
             if (target < cur) {
                 am.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
                 VoxoraLog.i("Playback", "duck STREAM_MUSIC $cur → $target (max=$max)")
