@@ -15,7 +15,7 @@ import com.voxora.app.util.VoxoraLog
 /**
  * Plays Gemini PCM on a dedicated path.
  * - ALLOW_CAPTURE_BY_NONE: do not re-capture our own output
- * - Audio focus MAY_DUCK + soft STREAM_MUSIC duck (~30% of current) so source is quieter without mute
+ * - Audio focus MAY_DUCK + soft STREAM_MUSIC duck (~20% of current) so source is quieter without mute
  */
 class DubPlayback(context: Context? = null) {
     private val appContext = context?.applicationContext
@@ -60,7 +60,6 @@ class DubPlayback(context: Context? = null) {
         VoxoraLog.i("Playback", "AudioTrack playing buf=${bufSize}")
     }
 
-    /** Must be called off the main thread. */
     fun writeFloats(samples: FloatArray) {
         if (!playing.get()) return
         val t = track ?: return
@@ -129,11 +128,6 @@ class DubPlayback(context: Context? = null) {
         }
     }
 
-    /**
-     * Soft-duck original media to ~30% of the *current* volume.
-     * Avoid absolute ~5% of max — that feels like mute and forces the user
-     * to press volume-up (which undoes the duck).
-     */
     private fun lowerSourceVolume() {
         val am = audioManager ?: return
         try {
@@ -141,7 +135,7 @@ class DubPlayback(context: Context? = null) {
             val cur = am.getStreamVolume(AudioManager.STREAM_MUSIC)
             if (cur <= 0 || max <= 0) return
             savedMusicVolume = cur
-            val target = (cur * 30 / 100).coerceAtLeast(1).coerceAtMost(cur - 1)
+            val target = (cur * 20 / 100).coerceAtLeast(1).coerceAtMost(cur - 1)
             if (target < cur) {
                 am.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
                 VoxoraLog.i("Playback", "duck STREAM_MUSIC $cur → $target (max=$max)")
