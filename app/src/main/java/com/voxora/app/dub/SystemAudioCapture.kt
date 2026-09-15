@@ -6,6 +6,7 @@ import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
 import android.media.projection.MediaProjection
 import android.util.Log
+import com.voxora.app.util.VoxoraLog
 import com.voxora.core.GeminiLiveConfig
 import com.voxora.core.audio.PcmUtils
 import kotlinx.coroutines.CoroutineScope
@@ -13,7 +14,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import com.voxora.app.util.VoxoraLog
 
 /** Captures other apps' playback via AudioPlaybackCapture (Android 10+). */
 class SystemAudioCapture(
@@ -23,14 +23,21 @@ class SystemAudioCapture(
     private var job: Job? = null
     private var sampleRate = 44_100
 
-    fun start(projection: MediaProjection, scope: CoroutineScope) {
-        VoxoraLog.i("Capture", "start()")
+    fun start(projection: MediaProjection, scope: CoroutineScope, excludeUid: Int = 0) {
+        VoxoraLog.i("Capture", "start() excludeUid=$excludeUid")
         stop()
-        val config = AudioPlaybackCaptureConfiguration.Builder(projection)
+        val configBuilder = AudioPlaybackCaptureConfiguration.Builder(projection)
             .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
             .addMatchingUsage(AudioAttributes.USAGE_GAME)
             .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
-            .build()
+        if (excludeUid > 0) {
+            try {
+                configBuilder.excludeUid(excludeUid)
+            } catch (e: Exception) {
+                VoxoraLog.w("Capture", "excludeUid failed: ${e.message}")
+            }
+        }
+        val config = configBuilder.build()
 
         val rates = intArrayOf(48_000, 44_100, 16_000)
         var created: AudioRecord? = null

@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.sqrt
 
 private fun Intent.mediaProjectionData(): Intent? {
     return if (Build.VERSION.SDK_INT >= 33) {
@@ -45,7 +46,16 @@ class DubService : Service() {
     private val audioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val gemini = GeminiLiveSession()
-    private val capture = SystemAudioCapture { pcm -> gemini.sendPcm16k(pcm) }
+    private val capture = SystemAudioCapture { pcm ->
+        // RMS for bubble / home waveform
+        var sum = 0.0
+        for (s in pcm) sum += s * s
+        val rms = if (pcm.isNotEmpty()) sqrt(sum / pcm.size).toFloat() else 0f
+        val level = (rms * 4f).coerceIn(0f, 1f)
+        val prev = _audioLevel.value
+        _audioLevel.value = prev * 0.55f + level * 0.45f
+        gemini.sendPcm16k(pcm)
+    }
     private lateinit var playback: DubPlayback
     private var projection: MediaProjection? = null
 
@@ -71,6 +81,9 @@ class DubService : Service() {
                     is GeminiStatus.Error -> DubUiStatus.Error(mapError(st.message))
                 }
                 _status.value = mapped
+                if (mapped !is DubUiStatus.Live && mapped !is DubUiStatus.Connecting) {
+                    _audioLevel.value = 0f
+                }
                 postUiUpdate()
             }
         }
@@ -141,9 +154,8 @@ class DubService : Service() {
             VoxoraLog.i("DubService", "playback started, connecting Gemini...")
             gemini.connect(apiKey, lang)
             VoxoraLog.i("DubService", "gemini.connect called, starting capture...")
-            capture.start(proj, scope)
+            capture.start(proj, scope, applicationInfo.uid)
             VoxoraLog.i("DubService", "capture started")
-            // Screen lipsync DISABLED (v0.6.2): VirtualDisplay+overlay = recursive frames / frozen UI
             VoxoraLog.i("DubService", "picture lag disabled (no recursive overlay)")
             _status.value = DubUiStatus.Connecting
             postUiUpdate()
@@ -188,6 +200,7 @@ class DubService : Service() {
         try { playback.stop() } catch (_: Exception) {}
         try { projection?.stop() } catch (_: Exception) {}
         projection = null
+        _audioLevel.value = 0f
         FloatingBubbleService.hide(this)
         if (_status.value !is DubUiStatus.Error) {
             _status.value = DubUiStatus.Idle
@@ -303,6 +316,9 @@ class DubService : Service() {
 
         private val _status = MutableStateFlow<DubUiStatus>(DubUiStatus.Idle)
         val status: StateFlow<DubUiStatus> = _status.asStateFlow()
+
+        private val _audioLevel = MutableStateFlow(0f)
+        val audioLevel: StateFlow<Float> = _audioLevel.asStateFlow()
 
         @Volatile
         var instance: DubService? = null

@@ -3,11 +3,19 @@ package com.voxora.app.dub
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.provider.Settings
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -15,15 +23,19 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import com.voxora.app.MainActivity
 import com.voxora.app.R
 import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.sin
 
 /**
- * Simple circular floating control (Telegram-style disc):
- * - Always circular dark disc + gold "Live" + green pip
- * - Drag anywhere
- * - Tap → show circular Stop
- * - No wave logo / no rectangle pill as default
+ * Circular Live bubble:
+ * - Larger disc (~64dp)
+ * - Label "Live": V gold, ive green, green pip
+ * - Drag works even when Stop is open
+ * - Single tap toggles Stop; double-tap opens MainActivity
+ * - Mini waveform while Live (amplitude from DubService)
  */
 class FloatingBubbleService : Service() {
     private var windowManager: WindowManager? = null
@@ -31,6 +43,17 @@ class FloatingBubbleService : Service() {
     private var params: WindowManager.LayoutParams? = null
     private var menuOpen = false
     private var density = 1f
+    private var waveView: WaveView? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var lastTapMs = 0L
+
+    private val amplitudePoll = object : Runnable {
+        override fun run() {
+            waveView?.level = DubService.audioLevel.value
+            waveView?.invalidate()
+            if (rootView != null) mainHandler.postDelayed(this, 50L)
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -65,7 +88,7 @@ class FloatingBubbleService : Service() {
             @Suppress("DEPRECATION")
             WindowManager.LayoutParams.TYPE_PHONE
         }
-        val size = (52 * density).toInt()
+        val size = (64 * density).toInt()
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -76,14 +99,15 @@ class FloatingBubbleService : Service() {
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = resources.displayMetrics.widthPixels - size - (12 * density).toInt()
-            y = (160 * density).toInt()
+            x = resources.displayMetrics.widthPixels - size - (10 * density).toInt()
+            y = (150 * density).toInt()
         }
         params = lp
         attachDrag(root, lp)
 
         try {
             windowManager?.addView(root, lp)
+            mainHandler.post(amplitudePoll)
         } catch (_: Exception) {
             rootView = null
             stopSelf()
@@ -95,36 +119,26 @@ class FloatingBubbleService : Service() {
         root.removeAllViews()
         menuOpen = open
         val d = density
-        val disc = (52 * d).toInt()
+        val disc = (64 * d).toInt()
 
+        val liveDisc = buildLiveDisc(disc)
         if (!open) {
-            val live = TextView(this).apply {
-                text = getString(R.string.float_live_label)
-                textSize = 12f
-                gravity = Gravity.CENTER
-                setTextColor(0xFFE6B422.toInt())
-                layoutParams = FrameLayout.LayoutParams(disc, disc)
-                background = oval(0xF0121212.toInt(), 0xFFE6B422.toInt())
-                // green live pip via compound? simple: prefix green dot in text
-                text = "●  " + getString(R.string.float_live_label)
-                setTextColor(0xFFE6B422.toInt())
-            }
-            // color the first char green is hard on TextView; use two layers
-            root.addView(live)
+            root.addView(liveDisc)
             return
         }
 
+        // Stop + Live side by side — still fully draggable via root touch
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
         }
         val stop = TextView(this).apply {
             text = "■"
-            textSize = 14f
+            textSize = 16f
             gravity = Gravity.CENTER
             setTextColor(0xFFFF6B6B.toInt())
-            layoutParams = LinearLayout.LayoutParams(disc - 4, disc - 4).apply {
-                marginEnd = (8 * d).toInt()
+            layoutParams = LinearLayout.LayoutParams(disc - 6, disc - 6).apply {
+                marginEnd = (10 * d).toInt()
             }
             background = oval(0xF0121212.toInt(), 0xFFFF6B6B.toInt())
             setOnClickListener {
@@ -133,28 +147,67 @@ class FloatingBubbleService : Service() {
                 stopSelf()
             }
         }
-        val live = TextView(this).apply {
-            text = "●  " + getString(R.string.float_live_label)
-            textSize = 12f
-            gravity = Gravity.CENTER
-            setTextColor(0xFFE6B422.toInt())
-            layoutParams = LinearLayout.LayoutParams(disc, disc)
-            background = oval(0xF0121212.toInt(), 0xFFE6B422.toInt())
-            setOnClickListener {
-                rebuildContent(false)
-                updateLayout()
-            }
-        }
         row.addView(stop)
-        row.addView(live)
+        row.addView(liveDisc)
         root.addView(row)
+    }
+
+    private fun buildLiveDisc(disc: Int): FrameLayout {
+        val wrap = FrameLayout(this).apply {
+            layoutParams = FrameLayout.LayoutParams(disc, disc)
+            background = oval(0xF0121212.toInt(), 0xFFE6B422.toInt())
+        }
+        val wave = WaveView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(disc, disc)
+        }
+        waveView = wave
+        wrap.addView(wave)
+
+        val label = TextView(this).apply {
+            text = liveSpannable()
+            textSize = 13f
+            gravity = Gravity.CENTER
+            setPadding(0, (18 * density).toInt(), 0, 0)
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            )
+        }
+        wrap.addView(label)
+        return wrap
+    }
+
+    /** "● Live" with V gold, ive green, pip green */
+    private fun liveSpannable(): SpannableString {
+        val raw = "● Live"
+        val ss = SpannableString(raw)
+        val green = 0xFF3DDC97.toInt()
+        val gold = 0xFFE6B422.toInt()
+        // pip
+        ss.setSpan(ForegroundColorSpan(green), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        // space stays default
+        // L i v e — index 2=L,3=i,4=v,5=e  → V is index 4
+        ss.setSpan(ForegroundColorSpan(green), 2, 4, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) // Li
+        ss.setSpan(ForegroundColorSpan(gold), 4, 5, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) // V
+        ss.setSpan(ForegroundColorSpan(green), 5, 6, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) // e
+        return ss
     }
 
     private fun oval(fill: Int, stroke: Int): GradientDrawable {
         return GradientDrawable().apply {
             shape = GradientDrawable.OVAL
             setColor(fill)
-            setStroke((2 * density).toInt(), stroke)
+            setStroke((2.5f * density).toInt().coerceAtLeast(2), stroke)
+        }
+    }
+
+    private fun openApp() {
+        try {
+            val i = Intent(this, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            }
+            startActivity(i)
+        } catch (_: Exception) {
         }
     }
 
@@ -178,9 +231,10 @@ class FloatingBubbleService : Service() {
                 MotionEvent.ACTION_MOVE -> {
                     val dx = (event.rawX - downX).toInt()
                     val dy = (event.rawY - downY).toInt()
-                    if (abs(dx) > 6 || abs(dy) > 6) moved = true
-                    lp.x = (startX + dx).coerceIn(0, resources.displayMetrics.widthPixels - 40)
-                    lp.y = (startY + dy).coerceIn(0, resources.displayMetrics.heightPixels - 40)
+                    if (abs(dx) > 8 || abs(dy) > 8) moved = true
+                    // Drag always allowed — including when Stop is visible
+                    lp.x = (startX + dx).coerceIn(0, resources.displayMetrics.widthPixels - 48)
+                    lp.y = (startY + dy).coerceIn(0, resources.displayMetrics.heightPixels - 48)
                     try {
                         windowManager?.updateViewLayout(v, lp)
                     } catch (_: Exception) {
@@ -189,8 +243,21 @@ class FloatingBubbleService : Service() {
                 }
                 MotionEvent.ACTION_UP -> {
                     if (!moved) {
-                        rebuildContent(!menuOpen)
-                        updateLayout()
+                        val now = System.currentTimeMillis()
+                        if (now - lastTapMs < 320) {
+                            // double tap → open app
+                            lastTapMs = 0
+                            openApp()
+                        } else {
+                            lastTapMs = now
+                            // single tap → toggle stop menu
+                            mainHandler.postDelayed({
+                                if (lastTapMs == now) {
+                                    rebuildContent(!menuOpen)
+                                    updateLayout()
+                                }
+                            }, 280)
+                        }
                     }
                     true
                 }
@@ -209,17 +276,50 @@ class FloatingBubbleService : Service() {
     }
 
     private fun removeBubble() {
+        mainHandler.removeCallbacks(amplitudePoll)
         try {
             rootView?.let { windowManager?.removeView(it) }
         } catch (_: Exception) {
         }
         rootView = null
         params = null
+        waveView = null
     }
 
     override fun onDestroy() {
         removeBubble()
         super.onDestroy()
+    }
+
+    /** Soft gold bars reacting to audio level 0..1 */
+    private class WaveView(context: Context) : View(context) {
+        var level: Float = 0f
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.parseColor("#E6B422")
+            style = Paint.Style.FILL
+            alpha = 90
+        }
+        private var phase = 0f
+
+        override fun onDraw(canvas: Canvas) {
+            super.onDraw(canvas)
+            val w = width.toFloat()
+            val h = height.toFloat()
+            if (w <= 0 || h <= 0) return
+            val bars = 7
+            val gap = w * 0.04f
+            val barW = (w - gap * (bars + 1)) / bars
+            phase += 0.35f
+            val base = max(0.08f, level)
+            for (i in 0 until bars) {
+                val n = ((sin(phase + i * 0.7f) + 1f) / 2f)
+                val amp = (0.25f + 0.75f * base * (0.4f + 0.6f * n)).coerceIn(0.12f, 0.92f)
+                val bh = h * amp * 0.55f
+                val left = gap + i * (barW + gap)
+                val top = (h - bh) / 2f
+                canvas.drawRoundRect(left, top, left + barW, top + bh, barW / 2f, barW / 2f, paint)
+            }
+        }
     }
 
     companion object {
