@@ -8,10 +8,10 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
@@ -27,7 +27,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
-class MainActivity : ComponentActivity() {
+class MainActivity : AppCompatActivity() {
 
     private val prefs by lazy { UserPrefs(applicationContext) }
 
@@ -53,9 +53,7 @@ class MainActivity : ComponentActivity() {
 
     private val overlayPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult(),
-    ) {
-        // User returned from overlay settings
-    }
+    ) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

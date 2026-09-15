@@ -12,13 +12,12 @@ import kotlinx.coroutines.runBlocking
 class VoxoraApp : Application() {
     override fun onCreate() {
         super.onCreate()
-        // Apply saved UI language before first Activity (default Persian)
         try {
             val code = runBlocking { UserPrefs(this@VoxoraApp).appLanguage.first() }
-            val tags = code.ifBlank { "fa" }
+            val tags = code.ifBlank { "en" }
             AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(tags))
         } catch (_: Exception) {
-            AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags("fa"))
+            AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags("en"))
         }
     }
 }

@@ -21,8 +21,8 @@ class UserPrefs(private val context: Context) {
 
     val apiKey: Flow<String> = context.dataStore.data.map { it[keyApi].orEmpty() }
     val targetLanguage: Flow<String> = context.dataStore.data.map { it[keyLang] ?: "fa" }
-    /** UI language: fa, en, ar, … empty = system default */
-    val appLanguage: Flow<String> = context.dataStore.data.map { it[keyAppLang] ?: "fa" }
+    /** UI language — default English (international) */
+    val appLanguage: Flow<String> = context.dataStore.data.map { it[keyAppLang] ?: "en" }
     val onboardingDone: Flow<Boolean> = context.dataStore.data.map { it[keyOnboarding] == true }
     val userEmail: Flow<String> = context.dataStore.data.map { it[keyEmail].orEmpty() }
     val displayName: Flow<String> = context.dataStore.data.map { it[keyDisplayName].orEmpty() }

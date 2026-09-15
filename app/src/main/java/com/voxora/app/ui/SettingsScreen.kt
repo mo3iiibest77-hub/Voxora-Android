@@ -63,8 +63,8 @@ private val DUB_LANGS = listOf(
 )
 
 private val APP_LANGS = listOf(
-    "fa" to "فارسی",
     "en" to "English",
+    "fa" to "فارسی",
     "ar" to "العربية",
     "es" to "Español",
     "fr" to "Français",
@@ -86,7 +86,7 @@ fun SettingsScreen(
     val uriHandler = LocalUriHandler.current
     var apiKey by remember { mutableStateOf("") }
     var lang by remember { mutableStateOf("fa") }
-    var appLang by remember { mutableStateOf("fa") }
+    var appLang by remember { mutableStateOf("en") }
     var expanded by remember { mutableStateOf(false) }
     var appLangExpanded by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf(false) }
@@ -110,6 +110,14 @@ fun SettingsScreen(
         focusedLabelColor = colors.primary,
         cursorColor = colors.primary,
     )
+
+    fun applyAppLocale(code: String) {
+        scope.launch {
+            prefs.setAppLanguage(code)
+            AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(code))
+            // AppCompatActivity will recreate; UI strings reload from values-xx
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -150,10 +158,7 @@ fun SettingsScreen(
                         onClick = {
                             appLang = code
                             appLangExpanded = false
-                            scope.launch {
-                                prefs.setAppLanguage(code)
-                                AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(code))
-                            }
+                            applyAppLocale(code)
                         },
                     )
                 }
@@ -203,7 +208,7 @@ fun SettingsScreen(
 
         Spacer(Modifier.height(24.dp))
         Text(stringResource(R.string.settings_api_key), color = colors.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.height(8.dp))
+        Spacer(modifier.height(8.dp))
         OutlinedTextField(
             value = apiKey,
             onValueChange = { apiKey = it; saved = false },
