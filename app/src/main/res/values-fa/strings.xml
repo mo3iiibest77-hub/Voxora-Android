@@ -7,18 +7,23 @@
     <string name="action_start">شروع دوبله زنده</string>
     <string name="action_stop">توقف</string>
     <string name="action_settings">تنظیمات</string>
+    <string name="action_back">بازگشت</string>
+    <string name="action_save">ذخیره</string>
     <string name="settings_title">تنظیمات</string>
     <string name="settings_api_key">کلید API جمینا</string>
     <string name="settings_api_key_hint">کلید را از Google AI Studio وارد کن</string>
     <string name="settings_target_language">زبان دوبله</string>
     <string name="settings_app_language">زبان برنامه</string>
     <string name="settings_sign_in">ورود با گوگل</string>
+    <string name="settings_saved">ذخیره شد</string>
+    <string name="settings_api_help">کلید رایگان: aistudio.google.com/apikey — بعد اینجا بچسبان.</string>
     <string name="status_idle">آماده</string>
     <string name="status_connecting">در حال اتصال…</string>
     <string name="status_live">زنده</string>
     <string name="status_error">خطا</string>
+    <string name="error_no_api_key">کلید API نیست. از تنظیمات کلید جمینا را وارد کن.</string>
+    <string name="phase1_hint">وقتی اجازه ضبط صفحه خواست، تأیید کن — Voxora فقط صدای سیستم را می‌گیرد، نه دوربین.</string>
     <string name="onboarding_welcome">به Voxora خوش آمدید</string>
     <string name="onboarding_body">صدای هر اپ را به زبان خودت بشنو — با Gemini Live Translate.</string>
     <string name="permission_audio">برای شنیدن صدای سیستم به مجوز ضبط نیاز است.</string>
-    <string name="coming_soon_phase1">فاز ۱: ضبط صدای سیستم + Gemini Live در مرحله بعد می‌آید.</string>
 </resources>
