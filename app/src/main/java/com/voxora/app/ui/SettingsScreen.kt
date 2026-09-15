@@ -1,0 +1,167 @@
+package com.voxora.app.ui
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.voxora.app.R
+import com.voxora.core.prefs.UserPrefs
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+
+private val LANGS = listOf(
+    "fa" to "Persian",
+    "en" to "English",
+    "ar" to "Arabic",
+    "es" to "Spanish",
+    "fr" to "French",
+    "de" to "German",
+    "tr" to "Turkish",
+    "ru" to "Russian",
+    "zh" to "Chinese",
+    "ja" to "Japanese",
+    "ko" to "Korean",
+    "hi" to "Hindi",
+    "pt" to "Portuguese",
+    "id" to "Indonesian",
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    val prefs = remember { UserPrefs(context) }
+    val scope = rememberCoroutineScope()
+    var apiKey by remember { mutableStateOf("") }
+    var lang by remember { mutableStateOf("fa") }
+    var expanded by remember { mutableStateOf(false) }
+    var saved by remember { mutableStateOf(false) }
+    val colors = MaterialTheme.colorScheme
+
+    LaunchedEffect(Unit) {
+        apiKey = prefs.apiKey.first()
+        lang = prefs.targetLanguage.first()
+    }
+
+    val fieldColors = OutlinedTextFieldDefaults.colors(
+        focusedBorderColor = colors.primary,
+        unfocusedBorderColor = colors.onSurfaceVariant.copy(alpha = 0.4f),
+        focusedTextColor = colors.onSurface,
+        unfocusedTextColor = colors.onSurface,
+        cursorColor = colors.primary,
+        focusedLabelColor = colors.primary,
+        unfocusedLabelColor = colors.onSurfaceVariant,
+    )
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .background(colors.background)
+            .padding(24.dp),
+    ) {
+        TextButton(onClick = onBack) {
+            Text("← ${stringResource(R.string.action_back)}", color = colors.primary)
+        }
+        Text(
+            stringResource(R.string.settings_title),
+            color = colors.onSurface,
+            fontSize = 24.sp,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(Modifier.height(24.dp))
+        OutlinedTextField(
+            value = apiKey,
+            onValueChange = { apiKey = it; saved = false },
+            modifier = Modifier.fillMaxWidth(),
+            label = { Text(stringResource(R.string.settings_api_key)) },
+            placeholder = { Text(stringResource(R.string.settings_api_key_hint)) },
+            singleLine = true,
+            colors = fieldColors,
+            shape = RoundedCornerShape(12.dp),
+        )
+        Spacer(Modifier.height(16.dp))
+        Text(stringResource(R.string.settings_target_language), color = colors.onSurfaceVariant, fontSize = 13.sp)
+        Spacer(Modifier.height(8.dp))
+        ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+            OutlinedTextField(
+                value = LANGS.find { it.first == lang }?.second ?: lang,
+                onValueChange = {},
+                readOnly = true,
+                modifier = Modifier.fillMaxWidth().menuAnchor(),
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+                colors = fieldColors,
+                shape = RoundedCornerShape(12.dp),
+            )
+            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                LANGS.forEach { (code, name) ->
+                    DropdownMenuItem(
+                        text = { Text(name) },
+                        onClick = {
+                            lang = code
+                            expanded = false
+                            saved = false
+                        },
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+        Button(
+            onClick = {
+                scope.launch {
+                    prefs.setApiKey(apiKey)
+                    prefs.setTargetLanguage(lang)
+                    saved = true
+                }
+            },
+            modifier = Modifier.fillMaxWidth().height(52.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = colors.primary,
+                contentColor = colors.onPrimary,
+            ),
+            shape = RoundedCornerShape(14.dp),
+        ) {
+            Text(stringResource(R.string.action_save), fontWeight = FontWeight.SemiBold)
+        }
+        if (saved) {
+            Spacer(Modifier.height(8.dp))
+            Text(stringResource(R.string.settings_saved), color = ColorGreen, fontSize = 13.sp)
+        }
+        Spacer(Modifier.height(16.dp))
+        Text(
+            stringResource(R.string.settings_api_help),
+            color = colors.onSurfaceVariant,
+            fontSize = 12.sp,
+        )
+    }
+}
+
+private val ColorGreen = androidx.compose.ui.graphics.Color(0xFF3DDC84)
