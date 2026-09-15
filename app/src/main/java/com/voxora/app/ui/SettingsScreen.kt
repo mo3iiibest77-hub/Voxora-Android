@@ -62,7 +62,10 @@ private val LANGS = listOf(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(onBack: () -> Unit) {
+fun SettingsScreen(
+    onBack: () -> Unit,
+    onRequestOverlayPermission: () -> Unit = {},
+) {
     val context = LocalContext.current
     val prefs = remember { UserPrefs(context) }
     val auth = remember { GoogleAuthHelper(context, prefs) }
@@ -274,6 +277,35 @@ fun SettingsScreen(onBack: () -> Unit) {
             color = colors.onSurfaceVariant,
             fontSize = 12.sp,
         )
+
+        Spacer(Modifier.height(28.dp))
+        Text(
+            stringResource(R.string.settings_overlay),
+            color = colors.onSurfaceVariant,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            stringResource(R.string.settings_overlay_help),
+            color = colors.onSurfaceVariant,
+            fontSize = 12.sp,
+        )
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = {
+                onRequestOverlayPermission()
+                val intent = android.content.Intent(
+                    android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    android.net.Uri.parse("package:${context.packageName}"),
+                )
+                context.startActivity(intent)
+            },
+            modifier = Modifier.fillMaxWidth().height(48.dp),
+            shape = RoundedCornerShape(12.dp),
+        ) {
+            Text(stringResource(R.string.settings_overlay_open), color = colors.primary)
+        }
         Spacer(Modifier.height(24.dp))
     }
 }
