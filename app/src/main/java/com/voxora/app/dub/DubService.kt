@@ -48,7 +48,6 @@ class DubService : Service() {
     private val capture = SystemAudioCapture { pcm -> gemini.sendPcm16k(pcm) }
     private lateinit var playback: DubPlayback
     private var projection: MediaProjection? = null
-    private var lipsync: DelayedScreenOverlay? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -73,10 +72,6 @@ class DubService : Service() {
                 }
                 _status.value = mapped
                 postUiUpdate()
-                // Start picture lag only when fully live
-                if (st is GeminiStatus.Ready) {
-                    maybeStartLipsync()
-                }
             }
         }
 
@@ -148,6 +143,8 @@ class DubService : Service() {
             VoxoraLog.i("DubService", "gemini.connect called, starting capture...")
             capture.start(proj, scope)
             VoxoraLog.i("DubService", "capture started")
+            // Screen lipsync DISABLED (v0.6.2): VirtualDisplay+overlay = recursive frames / frozen UI
+            VoxoraLog.i("DubService", "picture lag disabled (no recursive overlay)")
             _status.value = DubUiStatus.Connecting
             postUiUpdate()
             VoxoraLog.i("DubService", "beginSession done → Connecting")
@@ -155,25 +152,6 @@ class DubService : Service() {
             VoxoraLog.e("DubService", "beginSession FAILED", e)
             Log.e(TAG, "beginSession", e)
             setErrorAndStop(mapError(e.message ?: getString(R.string.error_start_failed)))
-        }
-    }
-
-    private fun maybeStartLipsync() {
-        val proj = projection ?: return
-        if (lipsync != null) return
-        if (!FloatingBubbleService.canDrawOverlays(this)) {
-            VoxoraLog.w("DubService", "lipsync skipped — no overlay permission")
-            return
-        }
-        scope.launch(Dispatchers.Main) {
-            try {
-                val overlay = DelayedScreenOverlay(applicationContext, DelayedScreenOverlay.DEFAULT_LAG_MS)
-                overlay.start(proj)
-                lipsync = overlay
-                VoxoraLog.i("DubService", "lipsync overlay started ${DelayedScreenOverlay.DEFAULT_LAG_MS}ms")
-            } catch (e: Exception) {
-                VoxoraLog.e("DubService", "lipsync failed: ${e.message}", e)
-            }
         }
     }
 
@@ -205,21 +183,10 @@ class DubService : Service() {
     }
 
     private fun stopAll() {
-        try {
-            lipsync?.stop()
-        } catch (_: Exception) {
-        }
-        lipsync = null
         capture.stop()
         gemini.stop()
-        try {
-            playback.stop()
-        } catch (_: Exception) {
-        }
-        try {
-            projection?.stop()
-        } catch (_: Exception) {
-        }
+        try { playback.stop() } catch (_: Exception) {}
+        try { projection?.stop() } catch (_: Exception) {}
         projection = null
         FloatingBubbleService.hide(this)
         if (_status.value !is DubUiStatus.Error) {
@@ -235,8 +202,7 @@ class DubService : Service() {
                 @Suppress("DEPRECATION")
                 stopForeground(true)
             }
-        } catch (_: Exception) {
-        }
+        } catch (_: Exception) {}
     }
 
     private suspend fun postUiUpdate() {
