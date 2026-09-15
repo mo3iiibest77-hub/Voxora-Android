@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Voxora</string>
+    <string name="tagline">Doblage en vivo con IA para todos los idiomas</string>
+    <string name="home_title">Listo para doblar</string>
+    <string name="home_subtitle">Reproduce cualquier vídeo o podcast y luego inicia el doblaje en vivo.</string>
+    <string name="action_start">Iniciar doblaje en vivo</string>
+    <string name="action_stop">Detener</string>
+    <string name="action_settings">Ajustes</string>
+    <string name="action_back">Atrás</string>
+    <string name="action_save">Guardar</string>
+    <string name="action_sign_out">Cerrar sesión</string>
+    <string name="settings_title">Ajustes</string>
+    <string name="settings_account">Cuenta</string>
+    <string name="settings_api_key">Clave API de Gemini</string>
+    <string name="settings_api_key_hint">Pega la clave de Google AI Studio</string>
+    <string name="settings_target_language">Idioma de doblaje</string>
+    <string name="settings_sign_in">Iniciar sesión con Google</string>
+    <string name="settings_saved">Guardado</string>
+    <string name="settings_api_help">Obtén una clave gratis en aistudio.google.com/apikey y pégala aquí. El inicio de sesión es opcional.</string>
+    <string name="settings_open_ai_studio">Abrir Google AI Studio</string>
+    <string name="status_idle">Inactivo</string>
+    <string name="status_connecting">Conectando…</string>
+    <string name="status_live">En vivo</string>
+    <string name="status_error">Error</string>
+    <string name="error_no_api_key">Sin clave API. Abre Ajustes y pega tu clave de Gemini.</string>
+    <string name="phase1_hint">Permite la captura de pantalla cuando se pida — Voxora solo usa el audio del sistema, no la cámara.</string>
+    <string name="onboarding_skip">Omitir</string>
+    <string name="onboarding_next">Siguiente</string>
+    <string name="onboarding_get_started">Empezar</string>
+    <string name="onboarding_add_api_key">Añadir clave de Gemini</string>
+    <string name="onboarding_page1_title">Dobla el mundo en vivo</string>
+    <string name="onboarding_page1_body">Reproduce YouTube, podcasts o cualquier app. Voxora captura el audio del sistema y traduce en vivo a tu idioma.</string>
+    <string name="onboarding_page2_title">Tu privacidad importa</string>
+    <string name="onboarding_page2_body">Cuando Android pida capturar la pantalla, acepta. Voxora usa solo audio, no la cámara. Puedes detener cuando quieras.</string>
+    <string name="onboarding_page3_title">Añade tu clave gratuita de Gemini</string>
+    <string name="onboarding_page3_body">Crea una clave en Google AI Studio, pégala en Ajustes, elige el idioma de doblaje y pulsa Start.</string>
+    <string name="auth_optional_hint">Opcional. Puedes usar Voxora solo con una clave API, sin iniciar sesión.</string>
+    <string name="auth_signing_in">Iniciando sesión…</string>
+    <string name="auth_failed">Error al iniciar sesión. Inténtalo de nuevo o continúa como invitado.</string>
+    <string name="auth_signed_out">Sesión cerrada</string>
+    <string name="auth_welcome">Bienvenido/a, %1$s</string>
+    <string name="auth_need_client_id">El inicio de sesión con Google necesita un Web client ID. Puedes continuar como invitado con una clave API.</string>
+</resources>

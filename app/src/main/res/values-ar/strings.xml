@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Voxora</string>
+    <string name="tagline">دبلجة فورية بالذكاء الاصطناعي لكل اللغات</string>
+    <string name="home_title">جاهز للدبلجة</string>
+    <string name="home_subtitle">شغّل أي فيديو أو بودكاست ثم ابدأ الدبلجة المباشرة.</string>
+    <string name="action_start">بدء الدبلجة المباشرة</string>
+    <string name="action_stop">إيقاف</string>
+    <string name="action_settings">الإعدادات</string>
+    <string name="action_back">رجوع</string>
+    <string name="action_save">حفظ</string>
+    <string name="action_sign_out">تسجيل الخروج</string>
+    <string name="settings_title">الإعدادات</string>
+    <string name="settings_account">الحساب</string>
+    <string name="settings_api_key">مفتاح Gemini API</string>
+    <string name="settings_api_key_hint">الصق المفتاح من Google AI Studio</string>
+    <string name="settings_target_language">لغة الدبلجة</string>
+    <string name="settings_sign_in">تسجيل الدخول عبر Google</string>
+    <string name="settings_saved">تم الحفظ</string>
+    <string name="settings_api_help">احصل على مفتاح مجاني من aistudio.google.com/apikey ثم الصقه هنا. تسجيل الدخول اختياري.</string>
+    <string name="settings_open_ai_studio">فتح Google AI Studio</string>
+    <string name="status_idle">جاهز</string>
+    <string name="status_connecting">جارٍ الاتصال…</string>
+    <string name="status_live">مباشر</string>
+    <string name="status_error">خطأ</string>
+    <string name="error_no_api_key">لا يوجد مفتاح API. افتح الإعدادات وألصق مفتاح Gemini.</string>
+    <string name="phase1_hint">اسمح بالتقاط الشاشة عند الطلب — يستخدم Voxora صوت النظام فقط وليس الكاميرا.</string>
+    <string name="onboarding_skip">تخطي</string>
+    <string name="onboarding_next">التالي</string>
+    <string name="onboarding_get_started">ابدأ</string>
+    <string name="onboarding_add_api_key">إضافة مفتاح Gemini</string>
+    <string name="onboarding_page1_title">دبلجة العالم مباشرة</string>
+    <string name="onboarding_page1_body">شغّل يوتيوب أو أي تطبيق. يلتقط Voxora صوت النظام ويقدّم ترجمة حية بلغتك.</string>
+    <string name="onboarding_page2_title">خصوصيتك مهمة</string>
+    <string name="onboarding_page2_body">عند طلب إذن التقاط الشاشة وافق. يستخدم Voxora الصوت فقط — ليس الكاميرا. يمكنك الإيقاف في أي وقت.</string>
+    <string name="onboarding_page3_title">أضف مفتاح Gemini المجاني</string>
+    <string name="onboarding_page3_body">أنشئ مفتاحاً في Google AI Studio، الصقه في الإعدادات، اختر لغة الدبلجة، ثم اضغط Start.</string>
+    <string name="auth_optional_hint">اختياري. يمكنك استخدام Voxora بمفتاح API فقط بدون تسجيل دخول.</string>
+    <string name="auth_signing_in">جارٍ تسجيل الدخول…</string>
+    <string name="auth_failed">فشل تسجيل الدخول. أعد المحاولة أو تابع كضيف.</string>
+    <string name="auth_signed_out">تم تسجيل الخروج</string>
+    <string name="auth_welcome">مرحباً، %1$s</string>
+    <string name="auth_need_client_id">تسجيل الدخول عبر Google يحتاج Web client ID. يمكنك المتابعة كضيف بمفتاح API.</string>
+</resources>
