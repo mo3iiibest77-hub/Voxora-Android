@@ -57,6 +57,10 @@ fun VoxoraNav(
         "settings" -> SettingsScreen(
             onBack = { screen = "home" },
             onRequestOverlayPermission = onRequestOverlayPermission,
+            onOpenLogs = { screen = "logs" },
+        )
+        "logs" -> LogsScreen(
+            onBack = { screen = "settings" },
         )
         else -> HomeScreen(
             status = status,
