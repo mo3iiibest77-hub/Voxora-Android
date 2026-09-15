@@ -13,24 +13,28 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import com.voxora.app.R
 import kotlin.math.abs
 
 /**
- * Tiny always-on-top control while dubbing.
- * - Compact pill (~1/3 previous size)
- * - Drag anywhere on screen
- * - Tap to expand (Stop) / long-press edge to minimize to side tab
- * - Tap minimized tab to restore
+ * Circular brand bubble:
+ * - Default: gold-ring circle with Voxora mark
+ * - Drag anywhere
+ * - Tap → expand Stop panel
+ * - Minimize → half-circle edge tab with logo
+ * - Tap tab → restore
  */
 class FloatingBubbleService : Service() {
     private var windowManager: WindowManager? = null
     private var rootView: FrameLayout? = null
     private var params: WindowManager.LayoutParams? = null
-    private var expanded = true
+    private var expanded = false
     private var density = 1f
+    private var lastX = 0
+    private var lastY = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -57,7 +61,7 @@ class FloatingBubbleService : Service() {
 
         val root = FrameLayout(this)
         rootView = root
-        rebuildContent(expanded = true)
+        rebuildContent(expanded = false)
 
         val type = if (Build.VERSION.SDK_INT >= 26) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
@@ -65,6 +69,9 @@ class FloatingBubbleService : Service() {
             @Suppress("DEPRECATION")
             WindowManager.LayoutParams.TYPE_PHONE
         }
+        val size = (52 * density).toInt()
+        lastX = resources.displayMetrics.widthPixels - size - (10 * density).toInt()
+        lastY = (140 * density).toInt()
         val lp = WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -75,8 +82,8 @@ class FloatingBubbleService : Service() {
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = (resources.displayMetrics.widthPixels - (72 * density).toInt())
-            y = (120 * density).toInt()
+            x = lastX
+            y = lastY
         }
         params = lp
         attachDrag(root, lp)
@@ -96,38 +103,47 @@ class FloatingBubbleService : Service() {
         val d = density
 
         if (!expanded) {
-            // Minimal edge tab — tap to expand
-            val tab = TextView(this).apply {
-                text = "V"
-                textSize = 11f
-                setTextColor(0xFFE6B422.toInt())
-                setPadding((8 * d).toInt(), (10 * d).toInt(), (8 * d).toInt(), (10 * d).toInt())
-                background = pillBg(0xCC121212.toInt(), (16 * d))
-                setOnClickListener { rebuildContent(true); updateLayout() }
+            // Circular brand mark (or half-disk when snapped to edge)
+            val circleSize = (48 * d).toInt()
+            val icon = ImageView(this).apply {
+                setImageResource(R.drawable.ic_voxora_bubble)
+                layoutParams = FrameLayout.LayoutParams(circleSize, circleSize)
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+                contentDescription = getString(R.string.app_name)
+                setOnClickListener {
+                    rebuildContent(true)
+                    updateLayout()
+                }
             }
-            root.addView(tab)
+            root.addView(icon)
             return
         }
 
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding((8 * d).toInt(), (6 * d).toInt(), (8 * d).toInt(), (6 * d).toInt())
-            background = pillBg(0xE6121212.toInt(), (18 * d))
-            elevation = 6 * d
+            setPadding((10 * d).toInt(), (8 * d).toInt(), (10 * d).toInt(), (8 * d).toInt())
+            background = pillBg(0xF0121212.toInt(), (22 * d))
+            elevation = 8 * d
+        }
+
+        val logo = ImageView(this).apply {
+            setImageResource(R.drawable.ic_voxora_bubble)
+            layoutParams = LinearLayout.LayoutParams((28 * d).toInt(), (28 * d).toInt())
+            scaleType = ImageView.ScaleType.CENTER_INSIDE
         }
 
         val live = TextView(this).apply {
             text = getString(R.string.float_live_label)
             setTextColor(0xFFE6B422.toInt())
             textSize = 11f
-            setPadding(0, 0, (8 * d).toInt(), 0)
+            setPadding((6 * d).toInt(), 0, (8 * d).toInt(), 0)
         }
 
         val stop = TextView(this).apply {
             text = getString(R.string.action_stop)
             setTextColor(0xFFFF6B6B.toInt())
             textSize = 11f
-            setPadding((6 * d).toInt(), (2 * d).toInt(), (6 * d).toInt(), (2 * d).toInt())
+            setPadding((8 * d).toInt(), (4 * d).toInt(), (8 * d).toInt(), (4 * d).toInt())
             background = pillBg(0x33FF6B6B, (12 * d))
             setOnClickListener {
                 DubService.stop(this@FloatingBubbleService)
@@ -137,24 +153,31 @@ class FloatingBubbleService : Service() {
         }
 
         val hide = TextView(this).apply {
-            text = "–"
+            text = "·"
             setTextColor(0xFFAAAAAA.toInt())
-            textSize = 12f
-            setPadding((8 * d).toInt(), 0, 0, 0)
+            textSize = 16f
+            setPadding((10 * d).toInt(), 0, 0, 0)
             setOnClickListener {
-                // Snap to nearest edge as mini tab
-                val p = params ?: return@setOnClickListener
-                val screenW = resources.displayMetrics.widthPixels
-                p.x = if (p.x + (root.width / 2) < screenW / 2) 0 else screenW - (28 * d).toInt()
+                snapToEdge()
                 rebuildContent(false)
                 updateLayout()
             }
         }
 
+        row.addView(logo)
         row.addView(live)
         row.addView(stop)
         row.addView(hide)
         root.addView(row)
+    }
+
+    private fun snapToEdge() {
+        val p = params ?: return
+        val screenW = resources.displayMetrics.widthPixels
+        val tab = (28 * density).toInt()
+        p.x = if (p.x + 40 < screenW / 2) 0 else screenW - tab
+        lastX = p.x
+        lastY = p.y
     }
 
     private fun pillBg(color: Int, radiusPx: Float): GradientDrawable {
@@ -184,9 +207,11 @@ class FloatingBubbleService : Service() {
                 MotionEvent.ACTION_MOVE -> {
                     val dx = (event.rawX - downX).toInt()
                     val dy = (event.rawY - downY).toInt()
-                    if (abs(dx) > 4 || abs(dy) > 4) moved = true
-                    lp.x = (startX + dx).coerceIn(0, resources.displayMetrics.widthPixels - v.width.coerceAtLeast(1))
-                    lp.y = (startY + dy).coerceIn(0, resources.displayMetrics.heightPixels - v.height.coerceAtLeast(1))
+                    if (abs(dx) > 6 || abs(dy) > 6) moved = true
+                    lp.x = (startX + dx).coerceIn(0, resources.displayMetrics.widthPixels - 24)
+                    lp.y = (startY + dy).coerceIn(0, resources.displayMetrics.heightPixels - 24)
+                    lastX = lp.x
+                    lastY = lp.y
                     try {
                         windowManager?.updateViewLayout(v, lp)
                     } catch (_: Exception) {
@@ -194,8 +219,9 @@ class FloatingBubbleService : Service() {
                     true
                 }
                 MotionEvent.ACTION_UP -> {
-                    if (!moved && expanded) {
-                        // treat as click on empty area — ignore
+                    if (!moved && !expanded) {
+                        rebuildContent(true)
+                        updateLayout()
                     }
                     true
                 }

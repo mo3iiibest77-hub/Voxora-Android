@@ -13,14 +13,8 @@ import com.voxora.core.GeminiLiveConfig
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Plays Gemini PCM on a **separate** path from STREAM_MUSIC so we can duck
- * YouTube/Instagram/etc. without also quieting the dub.
- *
- * Strategy (closest to Chrome extension tab ducking on stock Android):
- * 1) AudioTrack uses USAGE_ASSISTANT + CONTENT_TYPE_SPEECH → not STREAM_MUSIC
- * 2) Request AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK so well-behaved apps soft-duck
- * 3) Lower STREAM_MUSIC only (source apps); assistant volume stays independent
- * 4) ALLOW_CAPTURE_BY_NONE so our output is not re-captured into Gemini
+ * Gemini on USAGE_ASSISTANT (not STREAM_MUSIC).
+ * Duck only STREAM_MUSIC so source video is quieter while dub stays loud.
  */
 class DubPlayback(context: Context? = null) {
     private val appContext = context?.applicationContext
@@ -34,7 +28,6 @@ class DubPlayback(context: Context? = null) {
         VoxoraLog.i("Playback", "start()")
         stop()
         val attrs = AudioAttributes.Builder()
-            // Separate from media stream — critical for independent volume
             .setUsage(AudioAttributes.USAGE_ASSISTANT)
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
             .setAllowedCapturePolicy(AudioAttributes.ALLOW_CAPTURE_BY_NONE)
@@ -48,9 +41,8 @@ class DubPlayback(context: Context? = null) {
             AudioFormat.CHANNEL_OUT_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
         )
-        // Larger buffer → fewer underruns / less choppy dub on weak networks
         val bufSize = (minBuf * 8).coerceAtLeast(GeminiLiveConfig.OUTPUT_SAMPLE_RATE * 2)
-        track = AudioTrack.Builder()
+        val builder = AudioTrack.Builder()
             .setAudioAttributes(attrs)
             .setAudioFormat(
                 AudioFormat.Builder()
@@ -61,9 +53,13 @@ class DubPlayback(context: Context? = null) {
             )
             .setBufferSizeInBytes(bufSize)
             .setTransferMode(AudioTrack.MODE_STREAM)
-            .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
-            .build()
-        // Full assistant path volume (independent of STREAM_MUSIC)
+        try {
+            if (Build.VERSION.SDK_INT >= 26) {
+                builder.setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
+            }
+        } catch (_: Exception) {
+        }
+        track = builder.build()
         try {
             track?.setVolume(1.0f)
         } catch (_: Exception) {
@@ -148,7 +144,7 @@ class DubPlayback(context: Context? = null) {
         }
     }
 
-    /** Duck only STREAM_MUSIC (YouTube, Instagram players, etc.). Dub stays on ASSISTANT. */
+    /** ~28% of current media volume for source only; dub stays on ASSISTANT. */
     private fun lowerSourceMusicOnly() {
         val am = audioManager ?: return
         try {
@@ -156,11 +152,10 @@ class DubPlayback(context: Context? = null) {
             val cur = am.getStreamVolume(AudioManager.STREAM_MUSIC)
             if (cur <= 0 || max <= 0) return
             savedMusicVolume = cur
-            // ~4% of current media volume for source apps only
-            val target = (cur * 4 / 100).coerceAtLeast(1).coerceAtMost(cur - 1)
+            val target = (cur * 28 / 100).coerceAtLeast(1).coerceAtMost(cur - 1)
             if (target < cur) {
                 am.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
-                VoxoraLog.i("Playback", "duck STREAM_MUSIC only $cur → $target (max=$max); dub=ASSISTANT full")
+                VoxoraLog.i("Playback", "duck STREAM_MUSIC only $cur → $target (max=$max, ~28%); dub=ASSISTANT full")
             }
         } catch (e: Exception) {
             Log.w(TAG, "lowerSourceMusicOnly: ${e.message}")

@@ -36,7 +36,7 @@ class GeminiLiveSession(
     val status: StateFlow<GeminiStatus> = _status.asStateFlow()
 
     private val _audioOut = MutableSharedFlow<FloatArray>(
-        extraBufferCapacity = 32,
+        extraBufferCapacity = 48,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
     val audioOut: SharedFlow<FloatArray> = _audioOut.asSharedFlow()
@@ -175,13 +175,14 @@ class GeminiLiveSession(
 
     private fun failOrReconnect(message: String) {
         if (closedByUs.get()) return
-        if (reconnectAttempts >= 4) {
+        // More attempts for weak networks (was 4)
+        if (reconnectAttempts >= 8) {
             _status.value = GeminiStatus.Error(message)
             return
         }
         reconnectAttempts++
         _status.value = GeminiStatus.Reconnecting
-        val delay = minOf(500L * (1 shl (reconnectAttempts - 1)), 5000L)
+        val delay = minOf(800L * (1 shl (reconnectAttempts - 1).coerceAtMost(4)), 8000L)
         client.dispatcher.executorService.execute {
             try {
                 Thread.sleep(delay)
@@ -203,7 +204,10 @@ class GeminiLiveSession(
         fun defaultClient(): OkHttpClient =
             OkHttpClient.Builder()
                 .readTimeout(0, TimeUnit.MILLISECONDS)
-                .pingInterval(15, TimeUnit.SECONDS)
+                .writeTimeout(30, TimeUnit.SECONDS)
+                .connectTimeout(20, TimeUnit.SECONDS)
+                .pingInterval(12, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(true)
                 .build()
     }
 }

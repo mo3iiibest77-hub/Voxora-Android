@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <!-- dark circle -->
+    <path
+        android:fillColor="#E6121212"
+        android:pathData="M24,24m-22,0a22,22 0,1 1,44 0a22,22 0,1 1,-44 0" />
+    <!-- gold ring -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#E6B422"
+        android:strokeWidth="1.6"
+        android:pathData="M24,24m-20.5,0a20.5,20.5 0,1 1,41 0a20.5,20.5 0,1 1,-41 0" />
+    <!-- live waveform mark -->
+    <path
+        android:fillColor="#E6B422"
+        android:pathData="M10,24h2.2v0.01c0,0 0.4,-6 2.3,-6s2.3,12 4.2,12 2.3,-16 4.3,-16 2.4,20 4.4,20 2.3,-12 4.2,-12 2.2,6 2.2,6H36v2H33.8c0,0 -0.5,5 -2.4,5s-2.5,-14 -4.4,-14 -2.4,16 -4.3,16 -2.5,-12 -4.4,-12 -2.3,8 -2.3,8H10z" />
+    <!-- tiny live pip -->
+    <path
+        android:fillColor="#3DDC97"
+        android:pathData="M34,14m-2.2,0a2.2,2.2 0,1 1,4.4 0a2.2,2.2 0,1 1,-4.4 0" />
+</vector>
