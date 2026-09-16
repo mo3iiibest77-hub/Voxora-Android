@@ -293,6 +293,8 @@ If a bug is found in these files, report it — do not silently fix.
 
 ## 8. BUILD RULES
 
+- NEVER run gradle builds locally. This server has only 4GB RAM / 2 cores. Always commit and push — GitHub Actions (android-ci.yml) handles all builds. Never run assembleDebug, lintDebug, or any gradle task.
+
 - `app/build.gradle.kts` — do not change `applicationId`, `versionCode`, or `minSdk` without being asked
 - When adding a dependency, always use version catalog if one exists, otherwise add to `libs.versions.toml`
 - After adding dependencies, always verify no duplicate transitive conflicts
