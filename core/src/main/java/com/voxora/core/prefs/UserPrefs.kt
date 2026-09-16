@@ -18,6 +18,18 @@ class UserPrefs(private val context: Context) {
     private val keyEmail = stringPreferencesKey("user_email")
     private val keyDisplayName = stringPreferencesKey("user_display_name")
     private val keySignedIn = booleanPreferencesKey("signed_in")
+    private val keyReaderEndpoint = stringPreferencesKey("reader_endpoint")
+    private val keyReaderMode = stringPreferencesKey("reader_mode")
+
+    val readerEndpoint: Flow<String> = context.dataStore.data.map { it[keyReaderEndpoint].orEmpty() }
+    val readerMode: Flow<String> = context.dataStore.data.map { it[keyReaderMode] ?: "simple" }
+
+    suspend fun setReaderSettings(endpoint: String, mode: String) {
+        context.dataStore.edit {
+            it[keyReaderEndpoint] = endpoint.trim()
+            it[keyReaderMode] = mode
+        }
+    }
 
     val apiKey: Flow<String> = context.dataStore.data.map { it[keyApi].orEmpty() }
     val targetLanguage: Flow<String> = context.dataStore.data.map { it[keyLang] ?: "fa" }

@@ -53,6 +53,7 @@ fun HomeScreen(
     onStart: () -> Unit,
     onStop: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenReader: () -> Unit = {},
     onDismissError: () -> Unit = {},
 ) {
     val colors = MaterialTheme.colorScheme
@@ -242,8 +243,13 @@ fun HomeScreen(
             )
         }
 
-        TextButton(onClick = onOpenSettings) {
-            Text(stringResource(R.string.action_settings), color = colors.primary)
+        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            TextButton(onClick = onOpenReader) {
+                Text(stringResource(R.string.reader_title), color = colors.primary)
+            }
+            TextButton(onClick = onOpenSettings) {
+                Text(stringResource(R.string.action_settings), color = colors.primary)
+            }
         }
     }
 }

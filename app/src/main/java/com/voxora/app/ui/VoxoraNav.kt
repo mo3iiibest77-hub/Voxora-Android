@@ -9,6 +9,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import com.voxora.app.reader.ReaderScreen
 import com.voxora.app.dub.DubService
 import com.voxora.core.prefs.UserPrefs
 import kotlinx.coroutines.flow.first
@@ -62,11 +63,13 @@ fun VoxoraNav(
         "logs" -> LogsScreen(
             onBack = { screen = "settings" },
         )
+        "reader" -> ReaderScreen(onBack = { screen = "home" })
         else -> HomeScreen(
             status = status,
             onStart = onStartDub,
             onStop = onStopDub,
             onOpenSettings = { screen = "settings" },
+            onOpenReader = { screen = "reader" },
             onDismissError = onDismissError,
         )
     }

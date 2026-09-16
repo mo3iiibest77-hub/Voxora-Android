@@ -83,4 +83,24 @@
     <string name="toast_gemini_ready">Gemini Ready</string>
     <string name="toast_reconnecting">Reconnecting…</string>
     <string name="default_web_client_id" translatable="false">REPLACE_WITH_GOOGLE_WEB_CLIENT_ID</string>
+    <string name="reader_title">Voxora Reader</string>
+    <string name="reader_pick">Choose PDF or TXT</string>
+    <string name="reader_endpoint">HTTPS rewrite endpoint (including /rewrite)</string>
+    <string name="reader_privacy">Play sends document text to your configured backend. PDFs must contain selectable text; scanned PDFs need OCR.</string>
+    <string name="reader_pause_hint">Reader pauses when you leave. Resume restarts the current speech segment.</string>
+    <string name="reader_simple">Simple</string>
+    <string name="reader_fluent">Fluent</string>
+    <string name="reader_play">Play</string>
+    <string name="reader_pause">Pause</string>
+    <string name="reader_progress">Chunk %1$d of %2$d</string>
+    <string name="reader_idle">Choose a document to begin</string>
+    <string name="reader_extracting">Extracting text…</string>
+    <string name="reader_ready">Ready</string>
+    <string name="reader_rewriting">Rewriting…</string>
+    <string name="reader_speaking">Speaking…</string>
+    <string name="reader_next">Next chunk…</string>
+    <string name="reader_paused">Paused</string>
+    <string name="reader_stopped">Stopped</string>
+    <string name="reader_complete">Finished</string>
+    <string name="reader_error">Reader error</string>
 </resources>
