@@ -65,6 +65,17 @@ class ReaderPlayback(context: Context, onFocusLost: () -> Unit) {
         }
     }
 
+    fun writeFloatsBlocking(samples: FloatArray) {
+        val output = checkNotNull(track)
+        var offset = 0
+        while (offset < samples.size) {
+            val count = output.write(samples, offset, minOf(2400, samples.size - offset), AudioTrack.WRITE_BLOCKING)
+            check(count > 0) { "AudioTrack write failed" }
+            offset += count
+            framesWritten += count
+        }
+    }
+
     suspend fun drain() {
         val output = checkNotNull(track)
         withTimeout(30_000) {

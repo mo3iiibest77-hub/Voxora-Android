@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.SystemClock
 import com.voxora.app.R
 import com.voxora.app.util.VoxoraLog
+import com.voxora.core.audio.PcmUtils
 import com.voxora.core.gemini.GeminiReaderSession
 import com.voxora.core.gemini.ReaderSessionStatus
 import com.voxora.core.prefs.UserPrefs
@@ -19,7 +20,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -88,8 +88,7 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
                 }
                 val narration = GeminiReaderSession()
                 val output = ReaderPlayback(context) { pauseOwned(run) }
-                var collector: Job? = null
-                val written = AtomicLong()
+                val bytesReceived = AtomicLong()
                 try {
                     require(mode in setOf("simple", "fluent")) { context.getString(R.string.reader_mode_missing) }
                     val key = prefs.apiKey.first().trim()
@@ -101,25 +100,6 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
                     } catch (e: Exception) {
                         throw IllegalStateException(context.getString(R.string.reader_audio_unavailable))
                     }
-                    collector = launch {
-                        try {
-                            narration.audio.collect { pcm ->
-                                synchronized(lock) {
-                                    if (run == generation && state.value.phase != ReaderPhase.SPEAKING) publish(ReaderPhase.SPEAKING)
-                                }
-                                output.writeFloats(pcm)
-                                written.addAndGet(pcm.size.toLong())
-                            }
-                        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-                            fail(run, context.getString(R.string.reader_audio_unavailable))
-                            owner.cancel()
-                        } catch (e: CancellationException) {
-                            throw e
-                        } catch (e: Exception) {
-                            fail(run, context.getString(R.string.reader_audio_unavailable))
-                            owner.cancel()
-                        }
-                    }
                     while (true) {
                         currentCoroutineContext().ensureActive()
                         val text = synchronized(lock) {
@@ -129,16 +109,21 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
                                 mutableNarrationText.value = it.take(400)
                             }
                         } ?: break
-                        val spoken = narration.narrate(text)
-                            ?: throw IllegalStateException(context.getString(R.string.reader_no_audio))
+                        var firstAudio = true
+                        val spoken = narration.narrate(text) { pcmBytes ->
+                            if (firstAudio) {
+                                firstAudio = false
+                                synchronized(lock) {
+                                    if (run == generation) publish(ReaderPhase.SPEAKING)
+                                }
+                            }
+                            output.writeFloatsBlocking(PcmUtils.pcm16ToFloat(pcmBytes))
+                            bytesReceived.addAndGet(pcmBytes.size.toLong())
+                        } ?: throw IllegalStateException(context.getString(R.string.reader_no_audio))
                         synchronized(lock) {
                             if (run == generation && spoken.isNotBlank()) mutableNarrationText.value = spoken.take(400)
                         }
-                        val received = narration.audioFramesReceived
-                        withTimeout(300_000) {
-                            while (written.get() < received) delay(10)
-                            output.drain()
-                        }
+                        withTimeout(300_000) { output.drain() }
                         synchronized(lock) {
                             if (run != generation) throw CancellationException()
                             publish(ReaderPhase.NEXT)
@@ -154,8 +139,7 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
                     fail(run, e.message ?: context.getString(R.string.reader_failed_generic))
                 } finally {
                     withContext(NonCancellable) {
-                        collector?.cancelAndJoin()
-                        narration.close()
+                        narration.closeAndJoin()
                         try {
                             output.stop()
                         } catch (e: Exception) {
