@@ -1,15 +1,27 @@
 package com.voxora.core.gemini
 
 import com.voxora.core.GeminiLiveConfig
-import com.voxora.core.audio.PcmUtils
+import java.util.Base64
+import java.util.Locale
 import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -57,239 +69,401 @@ class GeminiReaderSession(
     private val _status = MutableStateFlow<ReaderSessionStatus>(ReaderSessionStatus.Idle)
     val status: StateFlow<ReaderSessionStatus> = _status.asStateFlow()
 
-    /** One-line diagnostic hook; called from WebSocket threads. */
+    /** One-line diagnostic hook; the caller routes these lines to VoxoraLog. */
+    @Volatile
     var onLog: ((String) -> Unit)? = null
 
-    private val receivedFrames = java.util.concurrent.atomic.AtomicLong()
-    val audioFramesReceived: Long get() = receivedFrames.get()
-    private val audioChannel = Channel<FloatArray>(capacity = 512)
-    val audio: Flow<FloatArray> = audioChannel.receiveAsFlow()
+    private val lock = Any()
+    private val sessionJob = SupervisorJob()
+    private val scope = CoroutineScope(sessionJob + Dispatchers.IO)
+    private var closed = false
+    private var generation = 0L
+    private var attempt: Attempt? = null
 
-    private val closedByUs = AtomicBoolean(false)
-    private val ready = AtomicBoolean(false)
-    private var ws: WebSocket? = null
-    private var narrationInstruction: String = ""
-    private var setupModel: String = ""
-    private var withSpeechConfig: Boolean = true
-    private var setupCompleteLogged = false
+    private class Attempt(val generation: Long, val setup: String) {
+        val ingress = Channel<Ingress>(QUEUE_MAX_MESSAGES)
+        val startedAt = System.nanoTime()
+        var socket: WebSocket? = null
+        var worker: Job? = null
+        var connectDeadline: Job? = null
+        var ready = false
+        var turn: Turn? = null
+        var queuedMessages = 0
+        var queuedBytes = 0L
+        var highWaterMessages = 0
+        var highWaterBytes = 0L
+        var processedMessages = 0L
+        var processingNanos = 0L
+        var audioBytes = 0L
+    }
 
-    @Volatile
-    private var pendingTurn: Channel<Unit>? = null
+    private class Turn(val onPcm: (ByteArray) -> Unit) {
+        val result = CompletableDeferred<String?>()
+        val text = StringBuilder()
+        val startedAt = System.nanoTime()
+        var audioBytes = 0L
+        var firstMimeLogged = false
+    }
 
-    private val hadAudio = AtomicBoolean(false)
-    private val spokenText = StringBuilder()
+    private data class Ingress(val raw: Any, val cost: Long, val turn: Turn?)
 
     fun connect(apiKey: String, instruction: String, model: String, withSpeechConfig: Boolean = true) {
-        stop()
-        closedByUs.set(false)
-        ready.set(false)
-        setupCompleteLogged = false
-        narrationInstruction = instruction
-        setupModel = model
-        this.withSpeechConfig = withSpeechConfig
-        _status.value = ReaderSessionStatus.Connecting
-        log("connecting (model=$model, speechConfig=${if (withSpeechConfig) "on" else "off"})")
-        val url = "${GeminiLiveConfig.WS_PATH}?key=${java.net.URLEncoder.encode(apiKey.trim(), "UTF-8")}"
-        ws = wsClient.newWebSocket(Request.Builder().url(url).build(), listener)
+        val target = synchronized(lock) {
+            if (closed) throw ReaderSessionException("Gemini session is closed.")
+            attempt?.let { abortLocked(it, "Gemini connection was replaced.") }
+            Attempt(++generation, setupPayload(instruction, model, withSpeechConfig)).also {
+                attempt = it
+                _status.value = ReaderSessionStatus.Connecting
+                it.worker = scope.launch(start = CoroutineStart.LAZY) { runWorker(it) }
+                it.connectDeadline = scope.launch(start = CoroutineStart.LAZY) {
+                    delay(CONNECT_TIMEOUT_MS)
+                    val message = synchronized(lock) {
+                        if (isCurrent(it) && !it.ready) failLocked(it, "Gemini connection setup timed out.") else null
+                    }
+                    message?.let(::log)
+                }
+                it.worker?.start()
+                it.connectDeadline?.start()
+            }
+        }
+        log("connecting generation=${target.generation}")
+        try {
+            val url = "${GeminiLiveConfig.WS_PATH}?key=${java.net.URLEncoder.encode(apiKey.trim(), "UTF-8")}"
+            val socket = wsClient.newWebSocket(Request.Builder().url(url).build(), listener(target))
+            synchronized(lock) {
+                if (isCurrent(target)) target.socket = socket else socket.cancel()
+            }
+        } catch (_: Exception) {
+            fail(target, "Gemini connection could not be started.")
+        }
     }
 
     fun stop() {
-        closedByUs.set(true)
-        ready.set(false)
-        completeTurn()
-        ws?.close(1000, "stop")
-        ws = null
-        _status.value = ReaderSessionStatus.Idle
+        synchronized(lock) {
+            attempt?.let { abortLocked(it, "Gemini narration stopped.") }
+            _status.value = ReaderSessionStatus.Idle
+        }
     }
 
     fun close() {
-        stop()
-        audioChannel.cancel()
-        wsClient.dispatcher.cancelAll()
-        wsClient.connectionPool.evictAll()
-        wsClient.dispatcher.executorService.shutdown()
+        synchronized(lock) {
+            closed = true
+            attempt?.let { abortLocked(it, "Gemini session closed.") }
+            _status.value = ReaderSessionStatus.Idle
+            sessionJob.cancel()
+        }
+    }
+
+    suspend fun closeAndJoin() {
+        close()
+        withContext(NonCancellable) { sessionJob.join() }
     }
 
     /**
-     * Sends one chunk as a text turn and suspends until the model finishes speaking
-     * it. Audio arrives via [audio]. Returns the model's text parts (may be empty —
-     * some models speak without emitting text), or null if the turn finished
-     * without any audio. Throws on connection/protocol failure.
+     * Sends one chunk as a text turn and suspends until all PCM has been written
+     * to [onPcm] on the ordered IO worker. Returns the model's text parts (may be
+     * empty), or null if the turn finished without audio. Throws on connection,
+     * protocol, decode, or sink failure.
      */
-    suspend fun narrate(text: String): String? {
-        val socket = ws ?: throw ReaderSessionException("Gemini session is not connected.")
-        if (!ready.get()) throw ReaderSessionException("Gemini session is not ready.")
-        val channel = Channel<Unit>(capacity = 1)
-        pendingTurn = channel
-        hadAudio.set(false)
-        spokenText.setLength(0)
-        val payload = JSONObject()
-            .put(
-                "clientContent",
-                JSONObject()
-                    .put(
-                        "turns",
-                        JSONArray().put(
-                            JSONObject().put("role", "user").put("parts", JSONArray().put(JSONObject().put("text", text))),
-                        ),
-                    )
-                    .put("turnComplete", true),
-            )
-            .toString()
-        if (!socket.send(payload)) {
-            pendingTurn = null
-            throw ReaderSessionException("Gemini connection was lost.")
-        }
-        log("turn sent (${text.length} chars)")
-        try {
-            withTimeout(TURN_TIMEOUT_MS) { channel.receive() }
-        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-            pendingTurn = null
-            throw ReaderSessionException("Gemini took too long for this chunk. Try again.")
-        } catch (e: kotlinx.coroutines.channels.ClosedReceiveChannelException) {
-            pendingTurn = null
-            throw ReaderSessionException("Gemini session closed before the chunk finished.")
-        }
-        pendingTurn = null
-        (status.value as? ReaderSessionStatus.Error)?.let { throw ReaderSessionException(it.message) }
-        if (!hadAudio.get()) return null
-        return spokenText.toString().trim()
-    }
-
-    private val listener = object : WebSocketListener() {
-        override fun onOpen(webSocket: WebSocket, response: Response) {
-            val genConfig = JSONObject().put("responseModalities", JSONArray().put("AUDIO"))
-            if (withSpeechConfig) {
-                genConfig.put(
-                    "speechConfig",
-                    JSONObject().put(
-                        "voiceConfig",
-                        JSONObject().put("prebuiltVoiceConfig", JSONObject().put("voiceName", READER_VOICE)),
+    suspend fun narrate(text: String, onPcm: (ByteArray) -> Unit): String? {
+        currentCoroutineContext().ensureActive()
+        val payload = JSONObject().put(
+            "clientContent",
+            JSONObject()
+                .put(
+                    "turns",
+                    JSONArray().put(
+                        JSONObject().put("role", "user")
+                            .put("parts", JSONArray().put(JSONObject().put("text", text))),
                     ),
                 )
+                .put("turnComplete", true),
+        ).toString()
+        val turn = Turn(onPcm)
+        val target = synchronized(lock) {
+            val current = attempt
+            if (closed || current == null || !current.ready) {
+                throw ReaderSessionException("Gemini session is not ready.")
             }
-            val setup = JSONObject()
-                .put(
-                    "setup",
-                    JSONObject()
-                        .put("model", setupModel)
-                        .put("generationConfig", genConfig)
-                        .put(
-                            "systemInstruction",
-                            JSONObject().put("parts", JSONArray().put(JSONObject().put("text", narrationInstruction))),
-                        ),
-                )
-                .toString()
-            log("connected; sending setup (model=$setupModel, speechConfig=${if (withSpeechConfig) "on" else "off"})")
-            webSocket.send(setup)
+            if (current.turn != null) throw ReaderSessionException("Gemini narration is already active.")
+            current.turn = turn
+            current
+        }
+        try {
+            val failure = synchronized(lock) {
+                if (!isCurrent(target)) {
+                    null
+                } else if (target.socket?.send(payload) != true) {
+                    failLocked(target, "Gemini connection was lost.")
+                } else {
+                    null
+                }
+            }
+            failure?.let(::log)
+            log("turn sent generation=${target.generation} chars=${text.length}")
+            return withTimeout(TURN_TIMEOUT_MS) { turn.result.await() }
+        } catch (_: TimeoutCancellationException) {
+            val message = "Gemini took too long for this chunk. Try again."
+            fail(target, message)
+            throw ReaderSessionException(message)
+        } catch (e: CancellationException) {
+            fail(target, "Gemini narration was cancelled.")
+            throw e
+        } catch (_: Exception) {
+            val message = synchronized(lock) {
+                if (isCurrent(target)) "Gemini narration failed." else null
+            }
+            message?.let { fail(target, it) }
+            return turn.result.await()
+        } finally {
+            synchronized(lock) {
+                if (target.turn === turn) target.turn = null
+            }
+        }
+    }
+
+    private fun listener(target: Attempt) = object : WebSocketListener() {
+        override fun onOpen(webSocket: WebSocket, response: Response) {
+            val failure = synchronized(lock) {
+                if (!isCurrent(target)) {
+                    webSocket.cancel()
+                    return
+                }
+                target.socket = webSocket
+                if (!webSocket.send(target.setup)) failLocked(target, "Gemini setup could not be sent.") else null
+            }
+            failure?.let(::log)
         }
 
-        override fun onMessage(webSocket: WebSocket, text: String) = handleMessage(text)
+        override fun onMessage(webSocket: WebSocket, text: String) {
+            offer(target, text, text.length.toLong() * 2)
+        }
 
-        override fun onMessage(webSocket: WebSocket, bytes: ByteString) = handleMessage(bytes.utf8())
+        override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+            offer(target, bytes, bytes.size.toLong())
+        }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-            if (closedByUs.get()) return
-            val httpCode = response?.code?.let { " (http $it)" } ?: ""
-            log("onFailure: ${t.message.orEmpty().take(LOG_LIMIT)}$httpCode")
-            val msg = t.message?.takeIf { it.isNotBlank() } ?: "Connection failed."
-            fail(msg + httpCode)
+            fail(target, "Gemini connection failed.${response?.code?.let { " HTTP $it." }.orEmpty()}")
+        }
+
+        override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+            fail(target, closeMessage(code))
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-            if (closedByUs.get()) return
-            log("onClosed: code=$code reason=${reason.take(LOG_LIMIT)}")
-            if (!ready.get()) {
-                fail(mapClose(code, reason))
-                return
-            }
-            fail(reason.ifBlank { "Disconnected ($code)." })
+            fail(target, closeMessage(code))
         }
     }
 
-    private fun handleMessage(text: String) {
-        val msg = try {
-            JSONObject(text)
+    private fun offer(target: Attempt, raw: Any, cost: Long) {
+        val failure = synchronized(lock) {
+            if (!isCurrent(target)) return
+            when {
+                cost > MAX_MESSAGE_BYTES -> failLocked(target, "Gemini ingress message exceeds 2 MiB (bytes=$cost).")
+                target.queuedMessages >= QUEUE_MAX_MESSAGES || target.queuedBytes + cost > MAX_QUEUE_BYTES ->
+                    failLocked(target, "Narration decode/storage ingress overrun; cannot keep up without losing audio.")
+                else -> {
+                    target.queuedMessages++
+                    target.queuedBytes += cost
+                    target.highWaterMessages = maxOf(target.highWaterMessages, target.queuedMessages)
+                    target.highWaterBytes = maxOf(target.highWaterBytes, target.queuedBytes)
+                    if (target.ingress.trySend(Ingress(raw, cost, target.turn)).isFailure) {
+                        failLocked(target, "Narration decode/storage ingress rejected a message.")
+                    } else {
+                        null
+                    }
+                }
+            }
+        }
+        failure?.let(::log)
+    }
+
+    private suspend fun runWorker(target: Attempt) {
+        try {
+            for (message in target.ingress) {
+                currentCoroutineContext().ensureActive()
+                val startedAt = System.nanoTime()
+                try {
+                    val raw = when (val value = message.raw) {
+                        is String -> value
+                        is ByteString -> value.utf8()
+                        else -> throw ReaderSessionException("Gemini ingress format is invalid.")
+                    }
+                    handleMessage(target, message.turn, JSONObject(raw))
+                } finally {
+                    synchronized(lock) {
+                        if (isCurrent(target)) {
+                            target.queuedMessages--
+                            target.queuedBytes -= message.cost
+                            target.processedMessages++
+                            target.processingNanos += System.nanoTime() - startedAt
+                        }
+                    }
+                }
+            }
+        } catch (e: CancellationException) {
+            fail(target, "Gemini narration worker was cancelled.")
+            throw e
+        } catch (e: ReaderSessionException) {
+            fail(target, e.message ?: "Gemini narration failed.")
         } catch (_: Exception) {
-            log("unparsable server message (${text.length} chars)")
-            return
+            fail(target, "Gemini response could not be decoded.")
         }
-        if (msg.has("error")) {
-            val m = msg.optJSONObject("error")?.optString("message").orEmpty()
-            log("server error: ${m.take(LOG_LIMIT)}")
-            fail(m.ifBlank { "Gemini error." })
-            return
+    }
+
+    private suspend fun handleMessage(target: Attempt, turn: Turn?, message: JSONObject) {
+        if (message.has("error")) {
+            throw ReaderSessionException(serverError(message.optJSONObject("error")?.optInt("code")))
         }
-        if (msg.has("setupComplete") || msg.has("setup_complete")) {
-            if (!setupCompleteLogged) {
-                setupCompleteLogged = true
-                log("setup complete (model=$setupModel)")
+        if (message.has("setupComplete") || message.has("setup_complete")) {
+            val ready = synchronized(lock) {
+                if (!isCurrent(target) || target.ready) return
+                target.ready = true
+                target.connectDeadline?.cancel()
+                target.connectDeadline = null
+                _status.value = ReaderSessionStatus.Ready
+                "setup complete generation=${target.generation}"
             }
-            ready.set(true)
-            _status.value = ReaderSessionStatus.Ready
-            return
+            log(ready)
         }
-        if (msg.has("goAway") || msg.has("go_away")) {
-            log("goAway from server")
-            fail("Gemini is rebalancing the connection. Try Play again.")
-            return
+        if (message.has("goAway") || message.has("go_away")) {
+            throw ReaderSessionException("Gemini is rebalancing the connection. Try Play again.")
         }
-        val content = msg.optJSONObject("serverContent") ?: msg.optJSONObject("server_content") ?: run {
-            log("server message keys: ${msg.keys().asSequence().take(4).joinToString(",")}")
-            return
-        }
-        content.optJSONObject("modelTurn")?.let { turn -> emitParts(turn) }
-        if (content.optBoolean("turnComplete")) {
-            log("turn complete (hadAudio=${hadAudio.get()})")
-            completeTurn()
-        }
-    }
-
-    private fun emitParts(turn: JSONObject) {
-        val parts = turn.optJSONArray("parts") ?: return
-        for (i in 0 until parts.length()) {
-            val part = parts.optJSONObject(i) ?: continue
-            part.optString("text").takeIf { it.isNotEmpty() }?.let { spokenText.append(it) }
-            val inline = part.optJSONObject("inlineData") ?: part.optJSONObject("inline_data") ?: continue
-            val data = inline.optString("data")
-            if (data.isNullOrBlank()) continue
-            val bytes = PcmUtils.fromBase64(data)
-            val pcm = PcmUtils.pcm16ToFloat(bytes)
-            if (pcm.isNotEmpty()) {
-                if (hadAudio.compareAndSet(false, true)) {
-                    val mime = inline.optString("mimeType").ifBlank { inline.optString("mime_type") }
-                    log("first audio: mime=$mime bytes=${bytes.size}")
+        val content = message.optJSONObject("serverContent") ?: message.optJSONObject("server_content") ?: return
+        if (content.optBoolean("interrupted")) throw ReaderSessionException("Gemini narration was interrupted.")
+        if (turn == null || synchronized(lock) { !isCurrent(target) || target.turn !== turn || turn.result.isCompleted }) return
+        val modelTurn = content.optJSONObject("modelTurn") ?: content.optJSONObject("model_turn")
+        val parts = modelTurn?.optJSONArray("parts")
+        if (parts != null) {
+            for (index in 0 until parts.length()) {
+                currentCoroutineContext().ensureActive()
+                val part = parts.getJSONObject(index)
+                if (part.has("text")) {
+                    val text = part.getString("text")
+                    if (text.length > MAX_TEXT_CHARS - turn.text.length) {
+                        throw ReaderSessionException("Gemini narration text exceeds the per-turn limit.")
+                    }
+                    turn.text.append(text)
                 }
-                if (audioChannel.trySend(pcm).isSuccess) {
-                    receivedFrames.addAndGet(pcm.size.toLong())
-                } else {
-                    fail("Narration audio buffer is full.")
-                    return
+                val inline = part.optJSONObject("inlineData") ?: part.optJSONObject("inline_data") ?: continue
+                val mime = inline.optString("mimeType").ifBlank { inline.optString("mime_type") }
+                if (!validPcmMime(mime)) throw ReaderSessionException("Gemini audio must be PCM16 mono at 24000 Hz.")
+                val pcm = Base64.getDecoder().decode(inline.getString("data"))
+                if (pcm.size % 2 != 0) throw ReaderSessionException("Gemini PCM16 audio has an odd byte count.")
+                if (pcm.isEmpty()) continue
+                if (synchronized(lock) { !isCurrent(target) || target.turn !== turn }) return
+                if (!turn.firstMimeLogged) {
+                    turn.firstMimeLogged = true
+                    log("first audio generation=${target.generation} mime=audio/pcm;rate=24000;channels=1 elapsedMs=${elapsedMs(turn.startedAt)}")
+                }
+                currentCoroutineContext().ensureActive()
+                try {
+                    turn.onPcm(pcm)
+                } catch (_: Exception) {
+                    throw ReaderSessionException("Narration PCM storage sink failed.")
+                }
+                turn.audioBytes += pcm.size
+                synchronized(lock) {
+                    if (isCurrent(target)) target.audioBytes += pcm.size
                 }
             }
         }
+        if (content.optBoolean("turnComplete") || content.optBoolean("turn_complete")) {
+            val diagnostics = synchronized(lock) {
+                if (!isCurrent(target) || target.turn !== turn) return
+                turn.result.complete(if (turn.audioBytes == 0L) null else turn.text.toString().trim())
+                "turn complete generation=${target.generation} audioBytes=${turn.audioBytes} " +
+                    "elapsedMs=${elapsedMs(turn.startedAt)} ${metricsLocked(target)}"
+            }
+            log(diagnostics)
+        }
     }
 
-    private fun completeTurn() {
-        pendingTurn?.trySend(Unit)
-        pendingTurn = null
+    private fun validPcmMime(mime: String): Boolean {
+        if (mime.length > 128) return false
+        val fields = mime.lowercase(Locale.ROOT).split(';').map(String::trim)
+        if (fields.first() != "audio/pcm") return false
+        val parameters = mutableMapOf<String, String>()
+        for (field in fields.drop(1)) {
+            val pair = field.split('=', limit = 2).map(String::trim)
+            if (pair.size != 2 || parameters.put(pair[0], pair[1]) != null) return false
+        }
+        return parameters["rate"] == "24000" &&
+            (parameters["channels"] == null || parameters["channels"] == "1") &&
+            (parameters["bits"] == null || parameters["bits"] == "16") &&
+            parameters.keys.all { it == "rate" || it == "channels" || it == "bits" }
     }
 
-    private fun fail(message: String) {
-        _status.value = ReaderSessionStatus.Error(message)
-        completeTurn()
+    private fun isCurrent(target: Attempt): Boolean = !closed && attempt === target && generation == target.generation
+
+    private fun abortLocked(target: Attempt, message: String) {
+        attempt = null
+        target.turn?.result?.completeExceptionally(ReaderSessionException(message))
+        target.turn = null
+        target.ingress.cancel()
+        target.queuedMessages = 0
+        target.queuedBytes = 0
+        target.worker?.cancel()
+        target.connectDeadline?.cancel()
+        target.socket?.cancel()
+        target.socket = null
     }
+
+    private fun failLocked(target: Attempt, message: String): String {
+        val diagnostics = "$message generation=${target.generation} ${metricsLocked(target)}"
+        abortLocked(target, diagnostics)
+        _status.value = ReaderSessionStatus.Error(diagnostics)
+        return diagnostics
+    }
+
+    private fun fail(target: Attempt, message: String) {
+        val diagnostics = synchronized(lock) {
+            if (!isCurrent(target)) return
+            failLocked(target, message)
+        }
+        log(diagnostics)
+    }
+
+    private fun metricsLocked(target: Attempt): String =
+        "queue=${target.queuedMessages}/${target.queuedBytes}B " +
+            "queueHW=${target.highWaterMessages}/${target.highWaterBytes}B " +
+            "processed=${target.processedMessages} workerMs=${TimeUnit.NANOSECONDS.toMillis(target.processingNanos)} " +
+            "audioBytes=${target.audioBytes} elapsedMs=${elapsedMs(target.startedAt)}"
 
     private fun log(line: String) {
-        onLog?.invoke(line)
+        runCatching { onLog?.invoke(line.take(LOG_LIMIT)) }
     }
 
-    private fun mapClose(code: Int, reason: String): String = when {
-        code == 1008 || reason.contains("key", true) -> "Invalid API key. Check the Gemini key in Settings."
-        reason.contains("quota", true) -> "Gemini quota exceeded. Wait or use another key."
-        code == 1006 -> "Network disconnected. Check your connection and try again."
-        reason.isNotBlank() -> reason
-        else -> "Gemini refused the connection."
+    private fun closeMessage(code: Int): String = when (code) {
+        1008 -> "Gemini refused the connection. Check the API key and model access."
+        1006 -> "Network disconnected. Check your connection and try again."
+        else -> "Gemini session closed before further narration (code=$code)."
+    }
+
+    private fun serverError(code: Int?): String = when (code) {
+        401, 403 -> "Gemini denied access. Check the API key and model access."
+        429 -> "Gemini quota exceeded. Wait or use another key."
+        else -> "Gemini reported a server error."
+    }
+
+    private fun setupPayload(instruction: String, model: String, withSpeechConfig: Boolean): String {
+        val config = JSONObject().put("responseModalities", JSONArray().put("AUDIO"))
+        if (withSpeechConfig) {
+            config.put(
+                "speechConfig",
+                JSONObject().put(
+                    "voiceConfig",
+                    JSONObject().put("prebuiltVoiceConfig", JSONObject().put("voiceName", READER_VOICE)),
+                ),
+            )
+        }
+        return JSONObject().put(
+            "setup",
+            JSONObject().put("model", model)
+                .put("generationConfig", config)
+                .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", instruction)))),
+        ).toString()
     }
 
     class ReaderSessionException(message: String) : Exception(message)
@@ -297,14 +471,21 @@ class GeminiReaderSession(
     companion object {
         private const val READER_VOICE = "Kore"
         private const val TURN_TIMEOUT_MS = 180_000L
-        private const val LOG_LIMIT = 300
+        private const val CONNECT_TIMEOUT_MS = 20_000L
+        private const val LOG_LIMIT = 512
+        private const val QUEUE_MAX_MESSAGES = 4096
+        private const val MAX_QUEUE_BYTES = 8L * 1024 * 1024
+        private const val MAX_MESSAGE_BYTES = 2L * 1024 * 1024
+        private const val MAX_TEXT_CHARS = 256 * 1024
+
+        private fun elapsedMs(startedAt: Long): Long = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt)
 
         fun defaultClient(): OkHttpClient =
             OkHttpClient.Builder()
                 .readTimeout(0, TimeUnit.MILLISECONDS)
                 .writeTimeout(30, TimeUnit.SECONDS)
                 .connectTimeout(20, TimeUnit.SECONDS)
-                .pingInterval(12, TimeUnit.SECONDS)
+                .pingInterval(30, TimeUnit.SECONDS)
                 .retryOnConnectionFailure(true)
                 .build()
     }
