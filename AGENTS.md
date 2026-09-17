@@ -64,7 +64,8 @@ Voxora-Android/
 │       │   ├── ChunkQueue.kt
 │       │   └── TextExtractor.kt
 │       ├── ui/
-│       │   ├── HomeScreen.kt
+│       │   ├── HomeScreen.kt         ← Voxora product chooser (Live Dub + Reader entries)
+│       │   ├── DubScreen.kt          ← Live Dub working surface (start/stop, status, error)
 │       │   ├── SettingsScreen.kt
 │       │   ├── LogsScreen.kt
 │       │   ├── OnboardingScreen.kt
@@ -225,6 +226,24 @@ IDLE → EXTRACTING → READY → CONNECTING → [REWRITING → SPEAKING → NEX
 
 ---
 
+## 5A. PRODUCT SHELL — VOXORA HOME & NAVIGATION
+
+Voxora is presented as **two separate products** behind one neutral entry point.
+
+```
+App launch → Voxora Home → Live Dub | Voxora Reader   (Settings reachable from Home)
+```
+
+- `HomeScreen` is the product root and a **chooser only**. It shows the Voxora header and two equally weighted product cards — Live Dub and Voxora Reader — plus a Settings entry. It must never host product controls, status surfaces, or a Reader link rendered as a secondary text button.
+- `HomeScreen` is stateless: `onOpenDub`, `onOpenReader`, `onOpenSettings`, `modifier`. Both product cards use the same `Surface(onClick = …)` surface so neither product looks secondary.
+- `DubScreen` owns the Live Dub working surface (status dot, live waveform, error banner with Settings/Retry, Start/Stop, hints). It drives only the already-public `DubService` start/stop API and must not reach into `dub/` internals.
+- Navigation lives in `VoxoraNav` as a private `VoxoraScreen` enum (`ONBOARDING`, `HOME`, `DUB`, `READER`, `SETTINGS`, `LOGS`) held in local Compose state. Do not add Navigation Compose or any second navigation framework for the product shell.
+- Back behavior: Home is the root; system back from `DUB` / `READER` / `SETTINGS` returns to Home, and from `LOGS` returns to Settings. `VoxoraNav` registers a nav-level `BackHandler`; `ReaderScreen` registers its own later in composition and therefore wins for the Reader destination.
+- Reader playback is owned by `ReaderController` / `ReaderService`, never by navigation state. Leaving the Reader destination — back press, Home, or any other destination change — must not pause or stop narration. `ReaderViewModel` deliberately has no `onCleared` stop.
+- Settings is preserved unchanged and stays reachable from Home and from `DubScreen`.
+
+---
+
 ## 6. LIVE DUB — DO NOT TOUCH (unless explicitly asked)
 
 These files are stable and in production. Do NOT refactor, rename, or restructure:
@@ -315,6 +334,7 @@ VoxoraLog.e("ReaderVM", "Chunk rewrite failed: ${e.message}", e)
 A task is NOT done until:
 - [ ] Code compiles (`./gradlew assembleDebug` passes)
 - [ ] No lint errors on new files (`./gradlew lintDebug`)
+- [ ] Unit tests for both modules compile and pass (`:core:testDebugUnitTest`, `:app:testDebugUnitTest`)
 - [ ] All new strings have Persian translations
 - [ ] New composables have `@Preview` annotations
 - [ ] VoxoraLog calls replace any debug Log calls
@@ -331,6 +351,16 @@ A task is NOT done until:
 5. **applicationId stability**: Package name must never change — breaks existing installs.
 6. **Iran monetization**: No Stripe, no Google Pay integration yet. Deferred.
 7. **API key**: Owner rotates keys himself. Do not warn about leaked keys in code comments.
+8. **JVM unit tests and `org.json`**: Android unit tests run against the mockable `android.jar`, whose `org.json` methods throw "not mocked". Any `:core` test that touches `JSONObject`/`JSONArray` needs `testImplementation("org.json:json:…")`; the real implementation takes classpath precedence over the stub. Pure-JVM code (`GeminiReaderSession`, `ReaderLanguages`, `ChunkQueue`, `ReaderSpool`) must stay free of `android.*` APIs so it stays unit-testable without Robolectric.
+
+---
+
+## 14. TEST & VALIDATION FOUNDATION
+
+- Unit tests live in `core/src/test/` (Gemini session contracts) and `app/src/test/` (chunking, spooling, language catalog).
+- `:core` owns its own test dependencies (`junit`, `org.json`) in `core/build.gradle.kts` — do not assume the `:app` test classpath applies to a library module.
+- GitHub Actions runs `:core:testDebugUnitTest` and `:app:testDebugUnitTest` in a `unit-tests` job that is independent of the APK job, so a contract regression is visible without withholding the debug artifact.
+- Prefer pure-JVM, deterministic tests with `TemporaryFolder` for file-backed code; avoid Robolectric unless an Android API genuinely cannot be avoided.
 
 ---
 

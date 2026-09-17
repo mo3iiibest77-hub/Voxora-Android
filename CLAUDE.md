@@ -130,47 +130,70 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
 
 ## CURRENT STATE (update this section after each major change)
 
-### Last known good commit on main:
-c05ff63 — feat(reader): move narration off main into media playback service
+> Naming note: this repository has no `CloudMD`/`AgentMD` files. The canonical
+> pair is `AGENTS.md` (project law / architecture record) and this `CLAUDE.md`
+> (handoff / cloud context). Update those two — do not add duplicate docs.
 
-### What this commit did:
-- Moved narration pipeline off main thread into ReaderService foreground
-- Added background playback with notification Stop button
-- Fixed volume to use USAGE_MEDIA (hardware volume keys work)
-- Updated AGENTS.md and EN/FA strings
-- CI: PASSED
+### Actual repository state (inspected, not assumed):
+- Working tree was clean before this change. Branch `feat/reader-segmented-spooling`
+  was **2 commits ahead of `main`** and is not merged.
+  - HEAD before this milestone: `af5ff6d fix(build): restore core unit-test compilation and run tests in CI`
+  - `main`: `1f0a719 fix(reader): fix suspend output language persistence`
+- Reader is implemented well **beyond** the roadmap's Milestone 5–8 scope:
+  `ReaderController` (singleton, generation-guarded), segmented `ReaderSpool`,
+  `ChunkQueue` (500-word chunks + 80-word narration units), per-chunk
+  `GeminiReaderSession`, language catalog, document persistence, and a
+  foreground `mediaPlayback` service. Live Dub is untouched.
+- Roadmap Milestone 0 (Foundation & Contracts) was addressed on `af5ff6d`:
+  `:core` now declares JUnit + real `org.json` test dependencies, and CI has an
+  independent `unit-tests` job. It has **not been observed passing** —
+  `android-ci.yml` triggers only on push/PR to `main`, so feature-branch pushes
+  produce no CI run at all.
 
-### What OpenCode is working on RIGHT NOW:
-Fixing the audio pipeline bug confirmed by device test:
+### Last change on this branch (this session) — Milestone 1 slice: Voxora Home
+- `feat(home)`: `HomeScreen` is now a neutral Voxora product chooser — Voxora
+  header plus two equally weighted product cards (Live Dub, Voxora Reader) and a
+  Settings entry. The Live Dub working surface (status, waveform, error banner,
+  Start/Stop, hints) moved into a new `app/.../ui/DubScreen.kt`. `VoxoraNav` now
+  has a `DUB` destination via a private `VoxoraScreen` enum (`ONBOARDING`,
+  `HOME`, `DUB`, `READER`, `SETTINGS`, `LOGS`) plus a nav-level `BackHandler`
+  where Home is the root. **No Navigation Compose graph was added.**
+- Reader is no longer a `TextButton` on the Live Dub surface.
+- Live Dub engine (`dub/**`, `GeminiLiveSession`, `GeminiLiveConfig`) and the
+  Reader engine/pipeline were **not modified**. Reader playback is still owned by
+  `ReaderController` / `ReaderService`; navigating away from Reader does not stop
+  narration (`ReaderViewModel` has no `onCleared` stop).
+- New strings: `home_tagline`, `dub_title`, `dub_card_desc`, `dub_card_action`,
+  `reader_card_desc`, `reader_card_action` — present in `values/` and `values-fa/`.
+- Validation actually performed (no Gradle): repository inspection, XML
+  well-formedness of every `values*/strings.xml`, cross-check that all 122
+  `R.string.*` references in Kotlin resolve against the default locale,
+  unused-import review of the changed files, and verification against the pinned
+  `material-icons-extended:1.7.6` AAR that the chosen icons exist
+  (`Icons.Filled.Translate`, `Icons.AutoMirrored.Filled.MenuBook`).
+  **No local Gradle task was run** (project rule). **No CI result observed.**
+- Not yet verified on a device: the Home → product → back loop, and that Reader
+  narration survives leaving the Reader destination.
 
-Bug 1 — "Narration audio buffer is full." (Fluent mode)
-Root cause: GeminiReaderSession uses Channel<FloatArray>(512) and
-calls trySend() from OkHttp callback thread. Gemini produces audio
-faster than realtime. trySend() fails immediately when channel full.
+### Next milestone (roadmap order):
+- Milestone 1 remainder / Milestone 2 — **Product Navigation**: have the owner
+  install the debug APK, confirm the Home chooser and back loop on a real device,
+  and confirm Reader narration continues after navigating away from Reader. Then
+  continue the roadmap's Product Navigation milestone.
+- Note the roadmap/order mismatch: the repo is ahead on Reader (5–8) and behind
+  on Home (1), Product Navigation (2) and the Design System (3). `Theme.kt` still
+  diverges from the brand palette in `AGENTS.md` §3 — it uses gold `#D4AF37` and
+  near-black `#0A0A0B`, not `#FFD700` / `#0A0A0F`.
 
-Bug 2 — "sent ping but didn't receive pong within 12000ms"
-Root cause: Network instability (VPN + 4G in Iran) + pingInterval
-of 12s is too tight.
+### Pending items (do NOT start before the above):
+1. PDF/chunk caching beyond the last-document URI
+2. Reader UI redesign to match the Live Dub start screen style
+3. PDF viewer alongside audio
 
-Bug 3 — Simple mode: choppy/fragmented audio
-Likely related to Bug 1 and AudioTrack buffer pressure.
-
-The fix being implemented:
-- Decouple OkHttp callback from audio pipeline using a raw bytes
-  Channel(UNLIMITED) + a decode coroutine that does send() with
-  proper backpressure into bounded audioChannel
-- Increase pingInterval from 12s to 25s
-- Remove fail("Narration audio buffer is full.") fatal error
-
-### Pending items AFTER audio pipeline is stable:
-1. PDF/chunk caching (user must re-import book every session)
-2. Reader/Dub entry chooser at app launch (instead of bottom tab)
-3. Reader UI redesign to match Live Dub start screen style
-4. Navigate back while audio plays (currently blocks navigation)
-5. PDF viewer alongside audio (read visually while listening)
-
-DO NOT implement items 1-5 until audio pipeline is confirmed stable
-by real device test.
+Items previously listed as "Reader/Dub entry chooser at app launch" and
+"Navigate back while audio plays" are now **implemented in code** but still need
+real-device confirmation before being treated as done. DO NOT start the pending
+items above until the audio pipeline is confirmed stable by a real device test.
 
 ---
 
