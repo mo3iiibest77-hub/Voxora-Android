@@ -82,4 +82,8 @@
     <string name="toast_connecting">در حال اتصال…</string>
     <string name="toast_gemini_ready">جمینا آماده است</string>
     <string name="toast_reconnecting">در حال اتصال مجدد…</string>
+    <string name="reader_endpoint">تنظیم بازنویسی (برای متن اصلی خالی بگذارید)</string>
+    <string name="reader_privacy">اگر تنظیم بازنویسی خالی نباشد، متن با کلید API ذخیره‌شده مستقیماً به جمینا ارسال می‌شود؛ مقدار آن به‌عنوان نشانی سرور استفاده نمی‌شود. برای خواندن متن اصلی با گفتار اندروید آن را خالی بگذارید. متن PDF باید قابل انتخاب باشد؛ فایل‌های اسکن‌شده به OCR نیاز دارند.</string>
+    <string name="reader_rewrite_http_error">بازنویسی جمینا خطای HTTP %1$d برگرداند. دوباره تلاش کنید.</string>
+    <string name="reader_rewrite_invalid_response">جمینا بازنویسی کاملی برنگرداند. دوباره تلاش کنید.</string>
 </resources>
