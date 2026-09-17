@@ -85,8 +85,10 @@
     <string name="default_web_client_id" translatable="false">REPLACE_WITH_GOOGLE_WEB_CLIENT_ID</string>
     <string name="reader_title">Voxora Reader</string>
     <string name="reader_pick">Choose PDF or TXT</string>
-    <string name="reader_endpoint">HTTPS rewrite endpoint (including /rewrite)</string>
-    <string name="reader_privacy">Play sends document text to your configured backend. PDFs must contain selectable text; scanned PDFs need OCR.</string>
+    <string name="reader_endpoint">Rewrite setting (leave empty for original text)</string>
+    <string name="reader_privacy">A non-empty rewrite setting sends text directly to Gemini using your saved API key; its value is not used as a server URL. Leave it empty to read original text with Android TTS. PDFs must contain selectable text; scanned PDFs need OCR.</string>
+    <string name="reader_rewrite_http_error">Gemini rewrite returned HTTP %1$d. Try again.</string>
+    <string name="reader_rewrite_invalid_response">Gemini did not return a complete rewrite. Try again.</string>
     <string name="reader_pause_hint">Reader pauses when you leave. Resume restarts the current speech segment.</string>
     <string name="reader_simple">Simple</string>
     <string name="reader_fluent">Fluent</string>
