@@ -70,7 +70,8 @@ User picks a PDF/TXT → text extracted → chunked → Gemini narrates
 each chunk as audio → PCM → AudioTrack → background foreground service.
 
 Pipeline:
-PDF/TXT → TextExtractor → ChunkQueue → GeminiReaderSession →
+PDF/TXT → TextExtractor (PDFBox + PdfReadingOrder) → ChunkQueue →
+GeminiReaderSession (ReaderNarrationModes instruction) →
 PCM → ReaderPlayback (AudioTrack) → foreground media service
 
 Reader files:
@@ -79,13 +80,20 @@ Reader files:
 - app/.../reader/ReaderPlayback.kt (AudioTrack, USAGE_MEDIA)
 - app/.../reader/ReaderViewModel.kt
 - app/.../reader/ReaderScreen.kt
+- app/.../reader/TextExtractor.kt (PDF/TXT extraction, returns ExtractedDocument)
+- app/.../reader/PdfReadingOrder.kt (pure-JVM reading-order reconstruction)
 - core/.../gemini/GeminiReaderSession.kt (Gemini WebSocket session)
+- core/.../gemini/ReaderNarrationModes.kt (Faithful/Fluent contract + prompt)
+- core/.../gemini/ReaderLanguageFlags.kt (deterministic flag mapping)
 
 Key policy:
 - Gemini API key from UserPrefs only (no external backend)
 - Reader MUST be isolated from Live Dub
 - Background playback like Live Dub (foreground service + notification)
 - Volume follows hardware media keys (USAGE_MEDIA)
+- Narration modes are a tested contract: Faithful preserves wording, Fluent
+  rewrites for clarity — neither may summarize or invent. See AGENTS.md §5.
+- Source text and AI narration are separate UI surfaces and are never merged.
 
 ---
 
@@ -136,9 +144,14 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
 
 ### Actual repository state (inspected, not assumed):
 - `main`: `1f0a719 fix(reader): fix suspend output language persistence`.
-- `feat/reader-segmented-spooling` (the implementation branch) is at
-  `4e4e17a fix(reader): preserve original sink exception` — **5 commits ahead of
-  `main`**, pushed to `origin`, and **not merged**.
+- `feat/reader-segmented-spooling` (the implementation branch) carries the Reader
+  quality pass — `925ee1d feat(reader): redesign the reader screen`,
+  `72527e7 feat(reader): expose the loaded document name`,
+  `f644d2f feat(reader): map language catalog to deterministic flags`,
+  `b0d556d fix(reader): preserve pdf reading order`,
+  `a74db6c fix(reader): define fluent and faithful narration semantics` — plus the
+  docs commit that follows them. **12 commits ahead of `main` (`1f0a719`)**, pushed
+  to `origin`, and **not merged**.
 - `feat/ci-feature-branch` = `76f0c96` + `dcbf852 ci: run Android CI on feature
   branch`, with **PR #2 open to `main`** (still open; deliberately NOT merged).
 - IMPORTANT — how CI actually runs: the failing run `35279422099`
@@ -153,7 +166,75 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
   `GeminiReaderSession`, language catalog, document persistence, and a
   foreground `mediaPlayback` service. Live Dub is untouched.
 
-### Last change (this session) — sink exception propagation fix
+### Last change (this session) — Reader quality pass (three goals)
+
+**A. Faithful vs Fluent are now an explicit, tested contract.**
+- New `core/src/main/java/com/voxora/core/gemini/ReaderNarrationModes.kt` owns the
+  mode constants (`faithful` default, `fluent`), normalization (unknown →
+  `faithful`), validation, and the single generated instruction. `ReaderController`
+  and `ReaderViewModel` delegate to it; no mode list or prompt text is hard-coded
+  anywhere else, and nothing lives in the UI layer.
+- Faithful = preserve the source wording as much as possible, minimum structural
+  adjustment, priority order words → sentences → terminology → ordering → facts →
+  meaning; only extraction artifacts / whitespace / wrapping / OCR noise /
+  punctuation may change; free paraphrasing is forbidden.
+- Fluent = understand first, then rewrite the same content into the clearest natural
+  spoken form without changing meaning, facts, intent, or important details; may
+  restructure sentences; summarizing, inventing, adding, changing claims,
+  translating, or adding commentary are forbidden.
+- Pinned by `ReaderNarrationModesTest` (8 tests).
+
+**B. PDF reading order — reproduced, root-caused, fixed, regression-tested.**
+- The scrambled output was reproduced with the real PDFBox engine under the
+  production configuration. Responsible layer: `TextExtractor`, not the UI.
+  Root cause: PDFBox collects glyphs in content-stream order and only sorts when
+  `sortByPosition` is on, and the default is `false`.
+- `sortByPosition = true` was measured and **rejected**: it fixes a reversed
+  single-column page but row-interleaves a column-major two-column page.
+- Fix: keep `sortByPosition = false` and override `PDFTextStripper.writePage()` to
+  re-order each article with `PdfReadingOrder.order(...)`. `PdfReadingOrder` is a
+  pure-geometry, pure-JVM `internal object` (fragment-level gutter detection, line
+  grouping, column ordering, stable permutation). 13 tests in
+  `PdfReadingOrderTest` cover the reversed case, already-ordered pages,
+  multi-column de-interleaving, column-major preservation, the full-width-header
+  fallback, that a word gap is not a gutter, and permutation/empty/single/determinism.
+- Limits documented in `AGENTS.md` §5: tables, sidebars, marginalia, rotated text,
+  footnotes and overlapping columns may still be imperfect, and scanned PDFs cannot
+  be recovered. No UI copy claims otherwise.
+
+**C. Reader screen redesigned.**
+- `ReaderScreen` is now a single keyed `LazyColumn` following the listening
+  workflow: document identity → reading mode (cards with visible explanations) →
+  narration language → playback/progress → error → source segments (current one
+  highlighted and tappable) → Gemini narration preview → privacy note.
+- Source text and AI narration are separate cards and are never merged.
+- Language is a tappable row opening a searchable `ModalBottomSheet` with flags.
+- `Theme.kt` gained the Material 3 container/outline roles so grouped surfaces are
+  not tinted purple; the existing brand colours were not changed.
+- New strings have Persian translations; five now-unused strings were removed from
+  both locales.
+
+**Language flags.** New `ReaderLanguageFlags` maps every catalog code to one
+explicit representative ISO 3166-1 alpha-2 country and encodes the emoji from the
+Unicode regional-indicator range (never hand-typed, never derived from the subtag).
+`en → GB`, `fa → IR`, `ar → SA`, `pt-BR → BR` vs `pt-PT → PT`,
+`zh-Hans → CN` vs `zh-Hant → TW`; `eu`/`ca`/`ku`/`qu` use the neutral globe.
+9 tests in `ReaderLanguageFlagsTest`.
+
+**Validation actually performed (no Gradle was run):** compiled the changed sources
+with `kotlinc` against the pinned dependency jars and ran the JUnit classes directly
+with `-ea` (matching Gradle's test JVM). `ReaderNarrationModesTest`,
+`ReaderLanguageFlagsTest`, `GeminiReaderSessionTest` and `PdfReadingOrderTest`
+together: **43 tests, OK**. `ChunkQueueTest` + `ReaderSpoolTest` +
+`ReaderControllerRegressionTest`: **43 tests, OK**. All non-Compose Reader and core
+sources compile cleanly. `ReaderScreen.kt` and `Theme.kt` are Compose files and
+could not be compiled locally, so the debug-APK job is their real check.
+
+**CI status: NOT YET OBSERVED for this pass.** The branch has been pushed; the
+GitHub Actions run for the head commit has to be read before this pass is called
+done. Do not claim it passed until the workflow says so.
+
+### Previous change — sink exception propagation fix
 - **Exact failing test (CI):**
   `GeminiReaderSessionTest.sinkFailurePreservesOriginalExceptionAndSanitizesStatus`.
   `:core` reported "13 tests completed, 1 failed"; the `Assemble debug APK` job
@@ -210,17 +291,23 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
   narration survives leaving the Reader destination.
 
 ### Next milestone (roadmap order):
-- Close out Milestone 1 / Milestone 2 — **Product Navigation**: the green
-  `unit-tests` job has now been obtained (run #63 on `4e4e17a`). The remaining
-  step is owner-side: install the debug APK and confirm the Home chooser, the
-  back loop, and Reader narration surviving navigation.
+- **Verify this pass in CI first.** Read the Android CI run for the pushed head
+  commit; the `unit-tests` job must be green (it runs
+  `:core:testDebugUnitTest :app:testDebugUnitTest`) and the `Assemble debug APK` job
+  must be green, which is the only real compile check for the redesigned Compose UI.
+- Then owner-side real-device confirmation: the Home chooser, the back loop, Reader
+  narration surviving navigation, the new Reader screen on a real device, and — most
+  importantly — whether the PDFs that used to look scrambled now read in order.
 - Roadmap/order mismatch persists: the repo is ahead on Reader (5–8) and behind on
-  Home (1), Product Navigation (2) and the Design System (3). `Theme.kt` still
-  uses gold `#D4AF37` and near-black `#0A0A0B`, not `#FFD700` / `#0A0A0F`.
+  Home (1), Product Navigation (2) and the Design System (3). `Theme.kt` still uses
+  gold `#D4AF37` and near-black `#0A0A0B`, not the `#FFD700` / `#0A0A0F` in
+  `AGENTS.md` §3 — the Reader redesign deliberately reused the existing brand
+  colours rather than silently changing the app palette.
 
 ### Pending items (do NOT start before the above):
 1. PDF/chunk caching beyond the last-document URI
-2. Reader UI redesign to match the Live Dub start screen style
+2. ~~Reader UI redesign to match the Live Dub start screen style~~ — **done in this
+   pass**; it needs device confirmation, not more design work
 3. PDF viewer alongside audio
 
 "Reader/Dub entry chooser at app launch" and "Navigate back while audio plays" are
