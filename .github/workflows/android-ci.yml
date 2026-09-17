@@ -2,7 +2,7 @@ name: Android CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/reader-segmented-spooling]
   pull_request:
     branches: [main]
   workflow_dispatch:
