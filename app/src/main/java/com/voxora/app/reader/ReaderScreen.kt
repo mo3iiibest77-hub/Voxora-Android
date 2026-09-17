@@ -23,8 +23,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -41,6 +43,7 @@ fun ReaderScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val narrationText by viewModel.narrationText.collectAsStateWithLifecycle()
     val mode by viewModel.mode.collectAsStateWithLifecycle()
+    val outputLang by viewModel.outputLang.collectAsStateWithLifecycle(initialValue = "original")
     val ready by viewModel.ready.collectAsStateWithLifecycle()
     val settingsError by viewModel.settingsError.collectAsStateWithLifecycle()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -51,14 +54,17 @@ fun ReaderScreen(
         state = state,
         narrationText = narrationText,
         mode = mode,
+        outputLang = outputLang,
         ready = ready,
         settingsError = settingsError,
         onBack = onBack,
         onModeChange = viewModel::setMode,
+        onLangChange = viewModel::setOutputLang,
         onPick = { picker.launch(arrayOf("application/pdf", "text/plain")) },
         onPlay = viewModel::play,
         onPause = viewModel::pause,
         onStop = viewModel::stop,
+        onJumpToChunk = viewModel::jumpToChunk,
         modifier = modifier,
     )
 }
@@ -68,14 +74,17 @@ private fun ReaderContent(
     state: ReaderState,
     narrationText: String,
     mode: String,
+    outputLang: String,
     ready: Boolean,
     settingsError: String?,
     onBack: () -> Unit,
     onModeChange: (String) -> Unit,
+    onLangChange: (String) -> Unit,
     onPick: () -> Unit,
     onPlay: () -> Unit,
     onPause: () -> Unit,
     onStop: () -> Unit,
+    onJumpToChunk: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val extracting = state.phase == ReaderPhase.EXTRACTING
@@ -102,16 +111,36 @@ private fun ReaderContent(
         Text(stringResource(R.string.reader_privacy), style = MaterialTheme.typography.bodySmall)
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             FilterChip(
-                selected = mode == "simple",
-                onClick = { onModeChange("simple") },
+                selected = mode == "faithful",
+                onClick = { onModeChange("faithful") },
                 enabled = ready && !playing && !extracting,
-                label = { Text(stringResource(R.string.reader_simple)) },
+                label = { Text(stringResource(R.string.reader_faithful)) },
             )
             FilterChip(
                 selected = mode == "fluent",
                 onClick = { onModeChange("fluent") },
                 enabled = ready && !playing && !extracting,
                 label = { Text(stringResource(R.string.reader_fluent)) },
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            FilterChip(
+                selected = outputLang == "original",
+                onClick = { onLangChange("original") },
+                enabled = ready && !playing && !extracting,
+                label = { Text(stringResource(R.string.reader_lang_original)) },
+            )
+            FilterChip(
+                selected = outputLang == "fa",
+                onClick = { onLangChange("fa") },
+                enabled = ready && !playing && !extracting,
+                label = { Text(stringResource(R.string.reader_lang_fa)) },
+            )
+            FilterChip(
+                selected = outputLang == "en",
+                onClick = { onLangChange("en") },
+                enabled = ready && !playing && !extracting,
+                label = { Text(stringResource(R.string.reader_lang_en)) },
             )
         }
         OutlinedButton(
@@ -124,6 +153,25 @@ private fun ReaderContent(
         }
         if (state.total > 0) {
             Text(stringResource(R.string.reader_progress, state.chunk, state.total))
+        }
+        if (state.total > 1 &&
+            state.phase in setOf(ReaderPhase.READY, ReaderPhase.PAUSED, ReaderPhase.STOPPED, ReaderPhase.COMPLETE, ReaderPhase.ERROR)
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                OutlinedButton(
+                    onClick = { onJumpToChunk(state.chunk - 2) },
+                    enabled = state.chunk > 1,
+                ) { Text(stringResource(R.string.reader_prev_chunk)) }
+                Text(
+                    stringResource(R.string.reader_progress, state.chunk, state.total),
+                    modifier = Modifier.weight(1f),
+                    textAlign = TextAlign.Center,
+                )
+                OutlinedButton(
+                    onClick = { onJumpToChunk(state.chunk) },
+                    enabled = state.chunk < state.total,
+                ) { Text(stringResource(R.string.reader_next_chunk)) }
+            }
         }
         state.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         settingsError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -153,15 +201,18 @@ private fun ReaderScreenPreview(modifier: Modifier = Modifier) {
             ReaderContent(
                 state = ReaderState(phase = ReaderPhase.READY, chunk = 1, total = 4),
                 narrationText = "",
-                mode = "simple",
+                mode = "faithful",
+                outputLang = "original",
                 ready = true,
                 settingsError = null,
                 onBack = {},
                 onModeChange = {},
+                onLangChange = {},
                 onPick = {},
                 onPlay = {},
                 onPause = {},
                 onStop = {},
+                onJumpToChunk = {},
             )
         }
     }

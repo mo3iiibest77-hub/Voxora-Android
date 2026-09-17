@@ -17,6 +17,10 @@ class ChunkQueue(chunks: List<String>) {
         position = 0
     }
 
+    fun jumpTo(index: Int) {
+        position = index.coerceIn(0, maxOf(0, size - 1))
+    }
+
     companion object {
         fun split(text: String, wordsPerChunk: Int = 500): List<String> {
             require(wordsPerChunk > 0) { "Words per chunk must be positive." }

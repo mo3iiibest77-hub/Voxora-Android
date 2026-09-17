@@ -100,7 +100,7 @@ class ReaderService : Service() {
         )
         mediaSession.isActive = true
         when (intent?.action) {
-            ACTION_PLAY -> startPlayback(intent.getStringExtra(EXTRA_MODE) ?: "simple")
+            ACTION_PLAY -> startPlayback(intent.getStringExtra(EXTRA_MODE) ?: "faithful")
             ACTION_STOP -> finishPlayback(stop = true)
             else -> finishPlayback(stop = false)
         }

@@ -27,8 +27,10 @@ class ReaderViewModel @Inject constructor(
     private val prefs = UserPrefs(context)
     internal val state = controller.state
     internal val narrationText = controller.narrationText
-    private val mutableMode = MutableStateFlow("simple")
+    private val mutableMode = MutableStateFlow("faithful")
     val mode = mutableMode.asStateFlow()
+    private val mutableOutputLang = MutableStateFlow("original")
+    val outputLang = mutableOutputLang.asStateFlow()
     private val mutableReady = MutableStateFlow(false)
     val ready = mutableReady.asStateFlow()
     private val mutableSettingsError = MutableStateFlow<String?>(null)
@@ -37,7 +39,9 @@ class ReaderViewModel @Inject constructor(
     init {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                mutableMode.value = prefs.readerMode.first().takeIf { it == "fluent" } ?: "simple"
+                mutableMode.value = prefs.readerMode.first().takeIf { it == "fluent" } ?: "faithful"
+                mutableOutputLang.value = prefs.readerOutputLang.first()
+                restoreLastDocument()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -49,12 +53,36 @@ class ReaderViewModel @Inject constructor(
         }
     }
 
+    private suspend fun restoreLastDocument() {
+        val savedUri = prefs.lastDocUri.first()
+        if (savedUri.isEmpty()) return
+        try {
+            controller.load(Uri.parse(savedUri))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            VoxoraLog.w("ReaderVM", "Saved URI no longer accessible, clearing")
+            prefs.clearLastDocUri()
+        }
+    }
+
     fun setMode(value: String) {
-        if (value == mode.value || value !in setOf("simple", "fluent")) return
+        if (value == mode.value || value !in setOf("faithful", "fluent")) return
         mutableMode.value = value
         runCommand { controller.stop() }
         saveMode(value)
     }
+
+    fun setOutputLang(lang: String) {
+        if (lang !in setOf("original", "fa", "en") || lang == mutableOutputLang.value) return
+        mutableOutputLang.value = lang
+        runCommand {
+            prefs.setReaderOutputLang(lang)
+            controller.stop()
+        }
+    }
+
+    fun jumpToChunk(index: Int) = runCommand { controller.jumpToChunk(index) }
 
     fun load(uri: Uri) = runCommand { controller.load(uri) }
 

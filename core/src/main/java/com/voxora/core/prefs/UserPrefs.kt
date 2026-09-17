@@ -20,15 +20,33 @@ class UserPrefs(private val context: Context) {
     private val keySignedIn = booleanPreferencesKey("signed_in")
     private val keyReaderEndpoint = stringPreferencesKey("reader_endpoint")
     private val keyReaderMode = stringPreferencesKey("reader_mode")
+    private val keyReaderOutputLang = stringPreferencesKey("reader_output_lang")
+    private val keyLastDocUri = stringPreferencesKey("last_doc_uri")
 
     val readerEndpoint: Flow<String> = context.dataStore.data.map { it[keyReaderEndpoint].orEmpty() }
-    val readerMode: Flow<String> = context.dataStore.data.map { it[keyReaderMode] ?: "simple" }
+    val readerMode: Flow<String> = context.dataStore.data.map { it[keyReaderMode] ?: "faithful" }
+    val readerOutputLang: Flow<String> =
+        context.dataStore.data.map { it[keyReaderOutputLang] ?: "original" }
+    val lastDocUri: Flow<String> =
+        context.dataStore.data.map { it[keyLastDocUri].orEmpty() }
 
     suspend fun setReaderSettings(endpoint: String, mode: String) {
         context.dataStore.edit {
             it[keyReaderEndpoint] = endpoint.trim()
             it[keyReaderMode] = mode
         }
+    }
+
+    suspend fun setReaderOutputLang(lang: String) {
+        context.dataStore.edit { it[keyReaderOutputLang] = lang }
+    }
+
+    suspend fun setLastDocUri(uri: String) {
+        context.dataStore.edit { it[keyLastDocUri] = uri }
+    }
+
+    suspend fun clearLastDocUri() {
+        context.dataStore.edit { it.remove(keyLastDocUri) }
     }
 
     val apiKey: Flow<String> = context.dataStore.data.map { it[keyApi].orEmpty() }

@@ -101,8 +101,13 @@
     <string name="reader_audio_unavailable">خروجی صدا در دسترس نیست. برنامه‌های رسانه‌ای دیگر را ببندید و دوباره تلاش کنید.</string>
     <string name="reader_title">Voxora Reader</string>
     <string name="reader_pick">انتخاب PDF یا TXT</string>
-    <string name="reader_simple">ساده</string>
+    <string name="reader_faithful">وفادار</string>
     <string name="reader_fluent">روان</string>
+    <string name="reader_lang_original">اصلی</string>
+    <string name="reader_lang_fa">فارسی</string>
+    <string name="reader_lang_en">انگلیسی</string>
+    <string name="reader_prev_chunk">← قبلی</string>
+    <string name="reader_next_chunk">بعدی →</string>
     <string name="reader_play">پخش</string>
     <string name="reader_pause">توقف موقت</string>
     <string name="reader_progress">بخش %1$d از %2$d</string>
