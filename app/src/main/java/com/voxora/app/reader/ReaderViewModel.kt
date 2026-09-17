@@ -21,8 +21,8 @@ class ReaderViewModel @Inject constructor(
 ) : ViewModel() {
     private val prefs = UserPrefs(context)
     internal val state = service.state
+    internal val narrationText = service.narrationText
     private val mutableEndpoint = MutableStateFlow("")
-    val endpoint = mutableEndpoint.asStateFlow()
     private val mutableMode = MutableStateFlow("simple")
     val mode = mutableMode.asStateFlow()
     private val mutableReady = MutableStateFlow(false)
@@ -38,17 +38,11 @@ class ReaderViewModel @Inject constructor(
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
-                mutableSettingsError.value = "Could not load Reader settings. Enter your endpoint again."
+                mutableSettingsError.value = "Could not load Reader settings."
             } finally {
                 mutableReady.value = true
             }
         }
-    }
-
-    fun setEndpoint(value: String) {
-        if (value == endpoint.value) return
-        service.stop()
-        mutableEndpoint.value = value
     }
 
     fun setMode(value: String) {
@@ -60,11 +54,10 @@ class ReaderViewModel @Inject constructor(
     fun load(uri: Uri) = service.load(uri)
 
     fun play() {
-        val endpoint = endpoint.value.trim()
         val mode = mode.value
         viewModelScope.launch {
             try {
-                prefs.setReaderSettings(endpoint, mode)
+                prefs.setReaderSettings(mutableEndpoint.value.trim(), mode)
                 mutableSettingsError.value = null
             } catch (e: CancellationException) {
                 throw e
@@ -72,7 +65,7 @@ class ReaderViewModel @Inject constructor(
                 mutableSettingsError.value = "Could not save Reader settings."
             }
         }
-        service.play(endpoint, mode)
+        service.play(mode)
     }
 
     fun pause() = service.pause()

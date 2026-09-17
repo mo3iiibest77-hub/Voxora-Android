@@ -17,7 +17,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -36,7 +35,7 @@ import com.voxora.app.R
 @Composable
 fun ReaderScreen(onBack: () -> Unit, viewModel: ReaderViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    val endpoint by viewModel.endpoint.collectAsStateWithLifecycle()
+    val narrationText by viewModel.narrationText.collectAsStateWithLifecycle()
     val mode by viewModel.mode.collectAsStateWithLifecycle()
     val ready by viewModel.ready.collectAsStateWithLifecycle()
     val settingsError by viewModel.settingsError.collectAsStateWithLifecycle()
@@ -77,14 +76,6 @@ fun ReaderScreen(onBack: () -> Unit, viewModel: ReaderViewModel = hiltViewModel(
         TextButton(onClick = back) { Text(stringResource(R.string.action_back)) }
         Text(stringResource(R.string.reader_title), style = MaterialTheme.typography.headlineMedium)
         Text(stringResource(R.string.reader_privacy), style = MaterialTheme.typography.bodySmall)
-        OutlinedTextField(
-            value = endpoint,
-            onValueChange = viewModel::setEndpoint,
-            label = { Text(stringResource(R.string.reader_endpoint)) },
-            enabled = ready && !playing && !extracting,
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-        )
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             FilterChip(
                 selected = mode == "simple",
@@ -123,5 +114,9 @@ fun ReaderScreen(onBack: () -> Unit, viewModel: ReaderViewModel = hiltViewModel(
         }
         Text(stringResource(R.string.reader_pause_hint), style = MaterialTheme.typography.bodySmall)
         if (state.text.isNotBlank()) Text(state.text, style = MaterialTheme.typography.bodyLarge)
+        if (narrationText.isNotBlank()) {
+            Text(stringResource(R.string.reader_narrating), style = MaterialTheme.typography.labelMedium)
+            Text(narrationText, style = MaterialTheme.typography.bodyMedium)
+        }
     }
 }
