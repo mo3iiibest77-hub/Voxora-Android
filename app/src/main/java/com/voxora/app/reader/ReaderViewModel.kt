@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.voxora.app.R
 import com.voxora.app.util.VoxoraLog
 import com.voxora.core.gemini.ReaderLanguages
+import com.voxora.core.gemini.ReaderNarrationModes
 import com.voxora.core.prefs.UserPrefs
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -51,7 +52,7 @@ class ReaderViewModel @Inject constructor(
         runCommand {
             try {
                 prefs.migrateReaderLanguage()
-                mutableMode.value = prefs.readerMode.first().takeIf { it == "fluent" } ?: "faithful"
+                mutableMode.value = ReaderNarrationModes.normalize(prefs.readerMode.first())
                 mutableOutputLang.value = prefs.readerOutputLang.first()
             } catch (e: CancellationException) {
                 throw e
@@ -78,7 +79,7 @@ class ReaderViewModel @Inject constructor(
     }
 
     fun setMode(value: String) = runCommand {
-        if (!canConfigure() || value == mode.value || value !in setOf("faithful", "fluent")) return@runCommand
+        if (!canConfigure() || value == mode.value || !ReaderNarrationModes.isValid(value)) return@runCommand
         prefs.setReaderSettings("", value)
         mutableMode.value = value
     }
