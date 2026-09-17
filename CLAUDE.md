@@ -135,45 +135,65 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
 > (handoff / cloud context). Update those two — do not add duplicate docs.
 
 ### Actual repository state (inspected, not assumed):
-- Working tree clean. Branch `feat/reader-segmented-spooling` is **1 commit ahead
-  of `main`** and is not merged.
-  - HEAD: `8259021 feat(reader): complete reader implementation`
+- Working tree was clean before this change. Branch `feat/reader-segmented-spooling`
+  was **2 commits ahead of `main`** and is not merged.
+  - HEAD before this milestone: `af5ff6d fix(build): restore core unit-test compilation and run tests in CI`
   - `main`: `1f0a719 fix(reader): fix suspend output language persistence`
 - Reader is implemented well **beyond** the roadmap's Milestone 5–8 scope:
   `ReaderController` (singleton, generation-guarded), segmented `ReaderSpool`,
   `ChunkQueue` (500-word chunks + 80-word narration units), per-chunk
   `GeminiReaderSession`, language catalog, document persistence, and a
   foreground `mediaPlayback` service. Live Dub is untouched.
-- Roadmap Milestone 0 (Foundation & Contracts) was **not fully satisfied**:
-  `core/src/test/.../GeminiReaderSessionTest.kt` (427 lines) imported JUnit but
-  `:core` declared no test dependencies, so the `:core` test source set could not
-  compile; and CI only ran `:app:assembleDebug`, so no contract test ever ran.
+- Roadmap Milestone 0 (Foundation & Contracts) was addressed on `af5ff6d`:
+  `:core` now declares JUnit + real `org.json` test dependencies, and CI has an
+  independent `unit-tests` job. It has **not been observed passing** —
+  `android-ci.yml` triggers only on push/PR to `main`, so feature-branch pushes
+  produce no CI run at all.
 
-### Last change on this branch (this session):
-- `fix(build)`: added `testImplementation` JUnit + real `org.json` to `:core`,
-  and added an independent `unit-tests` GitHub Actions job running
-  `:core:testDebugUnitTest` and `:app:testDebugUnitTest`.
-- Not yet verified by CI: the branch does not trigger `android-ci.yml`
-  (it triggers on `main` only) and the server has no GitHub credentials.
-  Builds must still go through GitHub Actions — never local Gradle.
+### Last change on this branch (this session) — Milestone 1 slice: Voxora Home
+- `feat(home)`: `HomeScreen` is now a neutral Voxora product chooser — Voxora
+  header plus two equally weighted product cards (Live Dub, Voxora Reader) and a
+  Settings entry. The Live Dub working surface (status, waveform, error banner,
+  Start/Stop, hints) moved into a new `app/.../ui/DubScreen.kt`. `VoxoraNav` now
+  has a `DUB` destination via a private `VoxoraScreen` enum (`ONBOARDING`,
+  `HOME`, `DUB`, `READER`, `SETTINGS`, `LOGS`) plus a nav-level `BackHandler`
+  where Home is the root. **No Navigation Compose graph was added.**
+- Reader is no longer a `TextButton` on the Live Dub surface.
+- Live Dub engine (`dub/**`, `GeminiLiveSession`, `GeminiLiveConfig`) and the
+  Reader engine/pipeline were **not modified**. Reader playback is still owned by
+  `ReaderController` / `ReaderService`; navigating away from Reader does not stop
+  narration (`ReaderViewModel` has no `onCleared` stop).
+- New strings: `home_tagline`, `dub_title`, `dub_card_desc`, `dub_card_action`,
+  `reader_card_desc`, `reader_card_action` — present in `values/` and `values-fa/`.
+- Validation actually performed (no Gradle): repository inspection, XML
+  well-formedness of every `values*/strings.xml`, cross-check that all 122
+  `R.string.*` references in Kotlin resolve against the default locale,
+  unused-import review of the changed files, and verification against the pinned
+  `material-icons-extended:1.7.6` AAR that the chosen icons exist
+  (`Icons.Filled.Translate`, `Icons.AutoMirrored.Filled.MenuBook`).
+  **No local Gradle task was run** (project rule). **No CI result observed.**
+- Not yet verified on a device: the Home → product → back loop, and that Reader
+  narration survives leaving the Reader destination.
 
 ### Next milestone (roadmap order):
-- Milestone 1 — **Voxora Home**: a real product home / entry chooser that
-  presents Live Dub and Voxora Reader as two separate product areas, replacing
-  the current single Dub start screen with a Reader text button.
+- Milestone 1 remainder / Milestone 2 — **Product Navigation**: have the owner
+  install the debug APK, confirm the Home chooser and back loop on a real device,
+  and confirm Reader narration continues after navigating away from Reader. Then
+  continue the roadmap's Product Navigation milestone.
 - Note the roadmap/order mismatch: the repo is ahead on Reader (5–8) and behind
-  on Home (1), Product Navigation (2) and the Design System (3, theme tokens
-  currently diverge from the brand palette in `AGENTS.md` §3).
+  on Home (1), Product Navigation (2) and the Design System (3). `Theme.kt` still
+  diverges from the brand palette in `AGENTS.md` §3 — it uses gold `#D4AF37` and
+  near-black `#0A0A0B`, not `#FFD700` / `#0A0A0F`.
 
-### Pending items (unchanged, do NOT start before the above):
+### Pending items (do NOT start before the above):
 1. PDF/chunk caching beyond the last-document URI
-2. Reader/Dub entry chooser at app launch
-3. Reader UI redesign to match Live Dub start screen style
-4. Navigate back while audio plays
-5. PDF viewer alongside audio
+2. Reader UI redesign to match the Live Dub start screen style
+3. PDF viewer alongside audio
 
-DO NOT implement items 1-5 until the audio pipeline is confirmed stable by a
-real device test.
+Items previously listed as "Reader/Dub entry chooser at app launch" and
+"Navigate back while audio plays" are now **implemented in code** but still need
+real-device confirmation before being treated as done. DO NOT start the pending
+items above until the audio pipeline is confirmed stable by a real device test.
 
 ---
 

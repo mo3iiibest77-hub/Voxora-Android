@@ -64,7 +64,8 @@ Voxora-Android/
 │       │   ├── ChunkQueue.kt
 │       │   └── TextExtractor.kt
 │       ├── ui/
-│       │   ├── HomeScreen.kt
+│       │   ├── HomeScreen.kt         ← Voxora product chooser (Live Dub + Reader entries)
+│       │   ├── DubScreen.kt          ← Live Dub working surface (start/stop, status, error)
 │       │   ├── SettingsScreen.kt
 │       │   ├── LogsScreen.kt
 │       │   ├── OnboardingScreen.kt
@@ -222,6 +223,24 @@ IDLE → EXTRACTING → READY → CONNECTING → [REWRITING → SPEAKING → NEX
 - Treat `CONNECTING` as active playback so Pause remains available and mode changes are disabled while connecting.
 - Hoist previewable content, use lifecycle-aware state collection and theme tokens, and provide a `Modifier` parameter.
 - Explain background playback in both English and Persian; do not claim that leaving Reader pauses playback.
+
+---
+
+## 5A. PRODUCT SHELL — VOXORA HOME & NAVIGATION
+
+Voxora is presented as **two separate products** behind one neutral entry point.
+
+```
+App launch → Voxora Home → Live Dub | Voxora Reader   (Settings reachable from Home)
+```
+
+- `HomeScreen` is the product root and a **chooser only**. It shows the Voxora header and two equally weighted product cards — Live Dub and Voxora Reader — plus a Settings entry. It must never host product controls, status surfaces, or a Reader link rendered as a secondary text button.
+- `HomeScreen` is stateless: `onOpenDub`, `onOpenReader`, `onOpenSettings`, `modifier`. Both product cards use the same `Surface(onClick = …)` surface so neither product looks secondary.
+- `DubScreen` owns the Live Dub working surface (status dot, live waveform, error banner with Settings/Retry, Start/Stop, hints). It drives only the already-public `DubService` start/stop API and must not reach into `dub/` internals.
+- Navigation lives in `VoxoraNav` as a private `VoxoraScreen` enum (`ONBOARDING`, `HOME`, `DUB`, `READER`, `SETTINGS`, `LOGS`) held in local Compose state. Do not add Navigation Compose or any second navigation framework for the product shell.
+- Back behavior: Home is the root; system back from `DUB` / `READER` / `SETTINGS` returns to Home, and from `LOGS` returns to Settings. `VoxoraNav` registers a nav-level `BackHandler`; `ReaderScreen` registers its own later in composition and therefore wins for the Reader destination.
+- Reader playback is owned by `ReaderController` / `ReaderService`, never by navigation state. Leaving the Reader destination — back press, Home, or any other destination change — must not pause or stop narration. `ReaderViewModel` deliberately has no `onCleared` stop.
+- Settings is preserved unchanged and stays reachable from Home and from `DubScreen`.
 
 ---
 

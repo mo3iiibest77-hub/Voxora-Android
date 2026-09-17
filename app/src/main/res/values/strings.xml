@@ -5,6 +5,12 @@
     <string name="home_title">Ready to dub</string>
     <string name="home_subtitle">Play any video or podcast, then start live dubbing.</string>
     <string name="home_now_dubbing">Dubbing into %1$s</string>
+    <string name="home_tagline">Live dubbing and document narration, powered by Gemini</string>
+    <string name="dub_title">Live Dub</string>
+    <string name="dub_card_desc">Translate and dub audio from other apps in real time.</string>
+    <string name="dub_card_action">Open Live Dub</string>
+    <string name="reader_card_desc">Listen to PDF or TXT documents with AI narration.</string>
+    <string name="reader_card_action">Open Reader</string>
     <string name="action_start">Start live dubbing</string>
     <string name="action_stop">Stop</string>
     <string name="action_settings">Settings</string>

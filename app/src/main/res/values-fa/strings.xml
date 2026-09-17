@@ -63,6 +63,12 @@
     <string name="action_show_key">نمایش کلید API</string>
     <string name="action_hide_key">مخفی کردن کلید</string>
     <string name="home_now_dubbing">در حال دوبله به %1$s</string>
+    <string name="home_tagline">دوبله زنده و روایت سند، با قدرت جمینا</string>
+    <string name="dub_title">دوبله زنده</string>
+    <string name="dub_card_desc">صدای اپلیکیشن‌های دیگر را در لحظه ترجمه و دوبله کنید.</string>
+    <string name="dub_card_action">باز کردن دوبله زنده</string>
+    <string name="reader_card_desc">سند‌های PDF یا TXT را با روایت هوش مصنوعی گوش کنید.</string>
+    <string name="reader_card_action">باز کردن Reader</string>
     <string name="settings_app_language_help">زبان منوها و متن‌های Voxora را عوض کن. این جدا از زبان دوبله است.</string>
     <string name="settings_app_language_open">باز کردن تنظیمات زبان</string>
     <string name="error_api_invalid">کلید API نامعتبر است. در تنظیمات بررسی کن.</string>
