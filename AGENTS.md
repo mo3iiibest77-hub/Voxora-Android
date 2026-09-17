@@ -315,6 +315,7 @@ VoxoraLog.e("ReaderVM", "Chunk rewrite failed: ${e.message}", e)
 A task is NOT done until:
 - [ ] Code compiles (`./gradlew assembleDebug` passes)
 - [ ] No lint errors on new files (`./gradlew lintDebug`)
+- [ ] Unit tests for both modules compile and pass (`:core:testDebugUnitTest`, `:app:testDebugUnitTest`)
 - [ ] All new strings have Persian translations
 - [ ] New composables have `@Preview` annotations
 - [ ] VoxoraLog calls replace any debug Log calls
@@ -331,6 +332,16 @@ A task is NOT done until:
 5. **applicationId stability**: Package name must never change — breaks existing installs.
 6. **Iran monetization**: No Stripe, no Google Pay integration yet. Deferred.
 7. **API key**: Owner rotates keys himself. Do not warn about leaked keys in code comments.
+8. **JVM unit tests and `org.json`**: Android unit tests run against the mockable `android.jar`, whose `org.json` methods throw "not mocked". Any `:core` test that touches `JSONObject`/`JSONArray` needs `testImplementation("org.json:json:…")`; the real implementation takes classpath precedence over the stub. Pure-JVM code (`GeminiReaderSession`, `ReaderLanguages`, `ChunkQueue`, `ReaderSpool`) must stay free of `android.*` APIs so it stays unit-testable without Robolectric.
+
+---
+
+## 14. TEST & VALIDATION FOUNDATION
+
+- Unit tests live in `core/src/test/` (Gemini session contracts) and `app/src/test/` (chunking, spooling, language catalog).
+- `:core` owns its own test dependencies (`junit`, `org.json`) in `core/build.gradle.kts` — do not assume the `:app` test classpath applies to a library module.
+- GitHub Actions runs `:core:testDebugUnitTest` and `:app:testDebugUnitTest` in a `unit-tests` job that is independent of the APK job, so a contract regression is visible without withholding the debug artifact.
+- Prefer pure-JVM, deterministic tests with `TemporaryFolder` for file-backed code; avoid Robolectric unless an Android API genuinely cannot be avoided.
 
 ---
 

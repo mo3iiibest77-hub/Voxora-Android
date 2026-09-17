@@ -130,47 +130,50 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
 
 ## CURRENT STATE (update this section after each major change)
 
-### Last known good commit on main:
-c05ff63 — feat(reader): move narration off main into media playback service
+> Naming note: this repository has no `CloudMD`/`AgentMD` files. The canonical
+> pair is `AGENTS.md` (project law / architecture record) and this `CLAUDE.md`
+> (handoff / cloud context). Update those two — do not add duplicate docs.
 
-### What this commit did:
-- Moved narration pipeline off main thread into ReaderService foreground
-- Added background playback with notification Stop button
-- Fixed volume to use USAGE_MEDIA (hardware volume keys work)
-- Updated AGENTS.md and EN/FA strings
-- CI: PASSED
+### Actual repository state (inspected, not assumed):
+- Working tree clean. Branch `feat/reader-segmented-spooling` is **1 commit ahead
+  of `main`** and is not merged.
+  - HEAD: `8259021 feat(reader): complete reader implementation`
+  - `main`: `1f0a719 fix(reader): fix suspend output language persistence`
+- Reader is implemented well **beyond** the roadmap's Milestone 5–8 scope:
+  `ReaderController` (singleton, generation-guarded), segmented `ReaderSpool`,
+  `ChunkQueue` (500-word chunks + 80-word narration units), per-chunk
+  `GeminiReaderSession`, language catalog, document persistence, and a
+  foreground `mediaPlayback` service. Live Dub is untouched.
+- Roadmap Milestone 0 (Foundation & Contracts) was **not fully satisfied**:
+  `core/src/test/.../GeminiReaderSessionTest.kt` (427 lines) imported JUnit but
+  `:core` declared no test dependencies, so the `:core` test source set could not
+  compile; and CI only ran `:app:assembleDebug`, so no contract test ever ran.
 
-### What OpenCode is working on RIGHT NOW:
-Fixing the audio pipeline bug confirmed by device test:
+### Last change on this branch (this session):
+- `fix(build)`: added `testImplementation` JUnit + real `org.json` to `:core`,
+  and added an independent `unit-tests` GitHub Actions job running
+  `:core:testDebugUnitTest` and `:app:testDebugUnitTest`.
+- Not yet verified by CI: the branch does not trigger `android-ci.yml`
+  (it triggers on `main` only) and the server has no GitHub credentials.
+  Builds must still go through GitHub Actions — never local Gradle.
 
-Bug 1 — "Narration audio buffer is full." (Fluent mode)
-Root cause: GeminiReaderSession uses Channel<FloatArray>(512) and
-calls trySend() from OkHttp callback thread. Gemini produces audio
-faster than realtime. trySend() fails immediately when channel full.
+### Next milestone (roadmap order):
+- Milestone 1 — **Voxora Home**: a real product home / entry chooser that
+  presents Live Dub and Voxora Reader as two separate product areas, replacing
+  the current single Dub start screen with a Reader text button.
+- Note the roadmap/order mismatch: the repo is ahead on Reader (5–8) and behind
+  on Home (1), Product Navigation (2) and the Design System (3, theme tokens
+  currently diverge from the brand palette in `AGENTS.md` §3).
 
-Bug 2 — "sent ping but didn't receive pong within 12000ms"
-Root cause: Network instability (VPN + 4G in Iran) + pingInterval
-of 12s is too tight.
-
-Bug 3 — Simple mode: choppy/fragmented audio
-Likely related to Bug 1 and AudioTrack buffer pressure.
-
-The fix being implemented:
-- Decouple OkHttp callback from audio pipeline using a raw bytes
-  Channel(UNLIMITED) + a decode coroutine that does send() with
-  proper backpressure into bounded audioChannel
-- Increase pingInterval from 12s to 25s
-- Remove fail("Narration audio buffer is full.") fatal error
-
-### Pending items AFTER audio pipeline is stable:
-1. PDF/chunk caching (user must re-import book every session)
-2. Reader/Dub entry chooser at app launch (instead of bottom tab)
+### Pending items (unchanged, do NOT start before the above):
+1. PDF/chunk caching beyond the last-document URI
+2. Reader/Dub entry chooser at app launch
 3. Reader UI redesign to match Live Dub start screen style
-4. Navigate back while audio plays (currently blocks navigation)
-5. PDF viewer alongside audio (read visually while listening)
+4. Navigate back while audio plays
+5. PDF viewer alongside audio
 
-DO NOT implement items 1-5 until audio pipeline is confirmed stable
-by real device test.
+DO NOT implement items 1-5 until the audio pipeline is confirmed stable by a
+real device test.
 
 ---
 
