@@ -121,7 +121,7 @@ class ReaderViewModel @Inject constructor(
         }
     }
 
-    private fun runCommand(command: () -> Unit) {
+    private fun runCommand(command: suspend () -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
             try {
                 command()
