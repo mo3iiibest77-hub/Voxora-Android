@@ -206,6 +206,7 @@ IDLE → EXTRACTING → READY → CONNECTING → [REWRITING → SPEAKING → NEX
 - Use only the saved Gemini API key from `UserPrefs`, shared with Live Dub. Do not add another key, backend URL, rewrite endpoint, or phone TextToSpeech fallback. Reader is key-only text→audio.
 - Connection attempts use Reader-specific narration model candidates and bounded timeouts. Never change Dub model configuration to repair Reader.
 - Stream returned PCM through `ReaderPlayback`; complete a chunk only after queued audio has played. Cancellation must release the session, audio output, and focus without corrupting a newer run.
+- `narrate` must rethrow the **exact exception object** the caller's PCM sink threw. Awaiting the turn's `CompletableDeferred` applies coroutine stack-trace recovery, so `await()` hands back a *copy* of the cause whenever JVM assertions are enabled. `GeminiReaderSession` therefore records the sink exception on the turn (`Turn.sinkFailure`) and rethrows that object. Never classify sink failures from the awaited throwable, and never wrap or replace it.
 
 ### Ownership and background lifecycle
 - `ReaderController` is an injectable Hilt `@Singleton` owning document, queue, narration state, Gemini session, and local playback. It exposes `state`, `narrationText`, synchronous `load(Uri)`, `pause()`, `stop()`, and suspending `play(mode: String)`.
@@ -352,6 +353,7 @@ A task is NOT done until:
 6. **Iran monetization**: No Stripe, no Google Pay integration yet. Deferred.
 7. **API key**: Owner rotates keys himself. Do not warn about leaked keys in code comments.
 8. **JVM unit tests and `org.json`**: Android unit tests run against the mockable `android.jar`, whose `org.json` methods throw "not mocked". Any `:core` test that touches `JSONObject`/`JSONArray` needs `testImplementation("org.json:json:…")`; the real implementation takes classpath precedence over the stub. Pure-JVM code (`GeminiReaderSession`, `ReaderLanguages`, `ChunkQueue`, `ReaderSpool`) must stay free of `android.*` APIs so it stays unit-testable without Robolectric.
+9. **Gradle enables JVM assertions**: the `Test` task runs its JVM with `-ea`, which turns on kotlinx-coroutines stack-trace recovery. Any exception crossing a `Deferred.await()` or `withTimeout` boundary comes back as a *copy* of the original object, so `assertSame` against an awaited cause passes under a plain `java -cp` run but fails under Gradle. When validating `:core` contract tests outside Gradle, always run with `-ea` to match CI, and never rely on awaited exception identity without preserving the original object first.
 
 ---
 
@@ -360,6 +362,8 @@ A task is NOT done until:
 - Unit tests live in `core/src/test/` (Gemini session contracts) and `app/src/test/` (chunking, spooling, language catalog).
 - `:core` owns its own test dependencies (`junit`, `org.json`) in `core/build.gradle.kts` — do not assume the `:app` test classpath applies to a library module.
 - GitHub Actions runs `:core:testDebugUnitTest` and `:app:testDebugUnitTest` in a `unit-tests` job that is independent of the APK job, so a contract regression is visible without withholding the debug artifact.
+- `android-ci.yml` triggers on pushes to `main` **and** `feat/reader-segmented-spooling`, on PRs targeting `main`, and on manual dispatch. Work that must be CI-verified has to land on one of those refs.
+- Gradle runs its test JVM with `-ea`. Reproduce that flag when running tests by hand outside Gradle (see §13.9), otherwise stack-trace-recovery differences will hide real failures.
 - Prefer pure-JVM, deterministic tests with `TemporaryFolder` for file-backed code; avoid Robolectric unless an Android API genuinely cannot be avoided.
 
 ---

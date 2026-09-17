@@ -236,9 +236,17 @@ class GeminiReaderSessionTest {
         val failure = IOException(SECRET)
         val pending = start(f) { throw failure }
         f.socket.message(audio(1))
+        // The caller's own exception object must survive await(): coroutine stack
+        // trace recovery would otherwise substitute a copy of it whenever JVM
+        // assertions are enabled, which Gradle's test task does by default.
         assertSame(failure, pending.await().exceptionOrNull())
-        assertTrue(f.error().contains("storage sink failed"))
+        val status = f.error()
+        assertTrue(status.contains("storage sink failed"))
+        assertFalse(status.contains(SECRET))
         assertTrue(f.logs.none { it.contains(SECRET) })
+        // A failed sink retires the session; it must not accept another turn.
+        assertFalse(f.session.reusable)
+        assertTrue(runCatching { f.session.narrate("late") {} }.isFailure)
     }
 
     @Test

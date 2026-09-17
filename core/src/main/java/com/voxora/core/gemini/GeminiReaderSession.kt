@@ -87,6 +87,14 @@ class GeminiReaderSession internal constructor(
 
     private class Turn(val onPcm: (ByteArray) -> Unit) {
         val result = CompletableDeferred<String?>()
+        /**
+         * Exact exception the caller's sink threw. [narrate] rethrows this object
+         * instead of whatever [result] hands back, because coroutine stack trace
+         * recovery substitutes a copy of the cause whenever JVM assertions are
+         * enabled (which Gradle's test task does by default).
+         */
+        @Volatile
+        var sinkFailure: Throwable? = null
         val text = StringBuilder()
         val startedAt = System.nanoTime()
         var audioBytes = 0L
@@ -204,7 +212,10 @@ class GeminiReaderSession internal constructor(
             throw e
         } catch (e: Exception) {
             fail(target, "Gemini narration failed.")
-            throw e
+            // Rethrow the caller's own exception object: awaiting a deferred
+            // recovers the stack trace and hands back a copy when assertions
+            // are enabled, which would break sink-failure error classification.
+            throw turn.sinkFailure ?: e
         } finally {
             synchronized(lock) {
                 if (target.turn === turn) target.turn = null
@@ -359,6 +370,7 @@ class GeminiReaderSession internal constructor(
                 } catch (e: Exception) {
                     val diagnostics = synchronized(lock) {
                         if (isCurrent(target)) {
+                            turn.sinkFailure = e
                             turn.result.completeExceptionally(e)
                             failLocked(target, "Narration PCM storage sink failed.")
                         } else {

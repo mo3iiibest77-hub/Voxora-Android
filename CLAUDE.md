@@ -135,65 +135,82 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
 > (handoff / cloud context). Update those two — do not add duplicate docs.
 
 ### Actual repository state (inspected, not assumed):
-- Working tree was clean before this change. Branch `feat/reader-segmented-spooling`
-  was **2 commits ahead of `main`** and is not merged.
-  - HEAD before this milestone: `af5ff6d fix(build): restore core unit-test compilation and run tests in CI`
-  - `main`: `1f0a719 fix(reader): fix suspend output language persistence`
+- `main`: `1f0a719 fix(reader): fix suspend output language persistence`.
+- `feat/reader-segmented-spooling` (the implementation branch) was at
+  `76f0c96 feat(home): add Voxora product entry home` — **3 commits ahead of
+  `main`**, not merged.
+- `feat/ci-feature-branch` = `76f0c96` + `dcbf852 ci: run Android CI on feature
+  branch`, with **PR #2 open to `main`**.
+- IMPORTANT — how CI actually runs: the failing run `35279422099`
+  (2026-09-17T21:56Z) was triggered by **`pull_request` from
+  `feat/ci-feature-branch`**, not by a push. `android-ci.yml` triggers on pushes
+  to `main` + `feat/reader-segmented-spooling`, on PRs to `main`, and on manual
+  dispatch. Pushing to a branch with no open PR and an old workflow file
+  produces **no run at all**.
 - Reader is implemented well **beyond** the roadmap's Milestone 5–8 scope:
   `ReaderController` (singleton, generation-guarded), segmented `ReaderSpool`,
   `ChunkQueue` (500-word chunks + 80-word narration units), per-chunk
   `GeminiReaderSession`, language catalog, document persistence, and a
   foreground `mediaPlayback` service. Live Dub is untouched.
-- Roadmap Milestone 0 (Foundation & Contracts) was addressed on `af5ff6d`:
-  `:core` now declares JUnit + real `org.json` test dependencies, and CI has an
-  independent `unit-tests` job. It has **not been observed passing** —
-  `android-ci.yml` triggers only on push/PR to `main`, so feature-branch pushes
-  produce no CI run at all.
 
-### Last change on this branch (this session) — Milestone 1 slice: Voxora Home
-- `feat(home)`: `HomeScreen` is now a neutral Voxora product chooser — Voxora
-  header plus two equally weighted product cards (Live Dub, Voxora Reader) and a
-  Settings entry. The Live Dub working surface (status, waveform, error banner,
-  Start/Stop, hints) moved into a new `app/.../ui/DubScreen.kt`. `VoxoraNav` now
-  has a `DUB` destination via a private `VoxoraScreen` enum (`ONBOARDING`,
-  `HOME`, `DUB`, `READER`, `SETTINGS`, `LOGS`) plus a nav-level `BackHandler`
-  where Home is the root. **No Navigation Compose graph was added.**
-- Reader is no longer a `TextButton` on the Live Dub surface.
-- Live Dub engine (`dub/**`, `GeminiLiveSession`, `GeminiLiveConfig`) and the
-  Reader engine/pipeline were **not modified**. Reader playback is still owned by
-  `ReaderController` / `ReaderService`; navigating away from Reader does not stop
-  narration (`ReaderViewModel` has no `onCleared` stop).
-- New strings: `home_tagline`, `dub_title`, `dub_card_desc`, `dub_card_action`,
-  `reader_card_desc`, `reader_card_action` — present in `values/` and `values-fa/`.
-- Validation actually performed (no Gradle): repository inspection, XML
-  well-formedness of every `values*/strings.xml`, cross-check that all 122
-  `R.string.*` references in Kotlin resolve against the default locale,
-  unused-import review of the changed files, and verification against the pinned
-  `material-icons-extended:1.7.6` AAR that the chosen icons exist
-  (`Icons.Filled.Translate`, `Icons.AutoMirrored.Filled.MenuBook`).
-  **No local Gradle task was run** (project rule). **No CI result observed.**
+### Last change (this session) — sink exception propagation fix
+- **Exact failing test (CI):**
+  `GeminiReaderSessionTest.sinkFailurePreservesOriginalExceptionAndSanitizesStatus`.
+  `:core` reported "13 tests completed, 1 failed"; the `Assemble debug APK` job
+  passed.
+- **Root cause (proven, not guessed):** `assertSame(failure, …)` failed because
+  kotlinx-coroutines **stack-trace recovery** substitutes a *copy* of an exception
+  that crosses a `Deferred.await()` boundary. Recovery is gated by JVM assertions
+  and Gradle's `Test` task runs with `-ea` by default — so the test passes under a
+  plain `java -cp` run and fails under Gradle. `abortLocked` was a red herring:
+  `CompletableDeferred.completeExceptionally` is already a no-op on an
+  already-completed deferred, so it never replaced the original exception.
+- **Fix:** `Turn` records `sinkFailure` (the caller's exact exception) when the
+  PCM sink throws, and `narrate` rethrows that object instead of the awaited
+  (possibly recovered) throwable. Nothing else changed — stop / close /
+  connection replacement / cancellation / transport failure / setup timeout /
+  turn timeout / stale callbacks still throw exactly what they threw before.
+- **Files changed:** `core/src/main/java/com/voxora/core/gemini/GeminiReaderSession.kt`
+  and `core/src/test/java/com/voxora/core/gemini/GeminiReaderSessionTest.kt`
+  (assertions added — none removed or weakened) plus `AGENTS.md` and this file.
+- **Validation actually performed (no Gradle):** compiled the exact sources with
+  kotlinc 2.0.21 and the pinned dependency versions, then ran the suite directly
+  under JUnit. Reproduced the CI failure exactly with `-ea`
+  (`Tests run: 13, Failures: 1`); after the fix, 13/13 pass both **with and
+  without** `-ea`, plus 300 iterations of the sink test and 20 full-suite runs
+  pinned to one CPU under load. **No local Gradle task was run.**
+- **GitHub Actions result: NOT YET OBSERVED.** Do not treat this fix as DONE
+  until a green `unit-tests` job has actually been seen.
+- **Next action:** push the fix on `feat/reader-segmented-spooling` (fast-forwarded
+  to include `dcbf852`, so its workflow triggers on that branch) and read the run.
+
+### Previous change — Milestone 1 slice: Voxora Home
+- `feat(home)`: `HomeScreen` is a neutral Voxora product chooser — header plus two
+  equally weighted cards (Live Dub, Voxora Reader) and a Settings entry. The Live
+  Dub working surface moved into `app/.../ui/DubScreen.kt`. `VoxoraNav` gained a
+  `DUB` destination via a private `VoxoraScreen` enum plus a nav-level
+  `BackHandler` where Home is the root. No Navigation Compose graph was added.
+- Live Dub engine and Reader engine were **not modified**; navigating away from
+  Reader does not stop narration (`ReaderViewModel` has no `onCleared` stop).
 - Not yet verified on a device: the Home → product → back loop, and that Reader
   narration survives leaving the Reader destination.
 
 ### Next milestone (roadmap order):
-- Milestone 1 remainder / Milestone 2 — **Product Navigation**: have the owner
-  install the debug APK, confirm the Home chooser and back loop on a real device,
-  and confirm Reader narration continues after navigating away from Reader. Then
-  continue the roadmap's Product Navigation milestone.
-- Note the roadmap/order mismatch: the repo is ahead on Reader (5–8) and behind
-  on Home (1), Product Navigation (2) and the Design System (3). `Theme.kt` still
-  diverges from the brand palette in `AGENTS.md` §3 — it uses gold `#D4AF37` and
-  near-black `#0A0A0B`, not `#FFD700` / `#0A0A0F`.
+- Close out Milestone 1 / Milestone 2 — **Product Navigation**: get a green
+  `unit-tests` job, then have the owner install the debug APK and confirm the Home
+  chooser, the back loop, and Reader narration surviving navigation.
+- Roadmap/order mismatch persists: the repo is ahead on Reader (5–8) and behind on
+  Home (1), Product Navigation (2) and the Design System (3). `Theme.kt` still
+  uses gold `#D4AF37` and near-black `#0A0A0B`, not `#FFD700` / `#0A0A0F`.
 
 ### Pending items (do NOT start before the above):
 1. PDF/chunk caching beyond the last-document URI
 2. Reader UI redesign to match the Live Dub start screen style
 3. PDF viewer alongside audio
 
-Items previously listed as "Reader/Dub entry chooser at app launch" and
-"Navigate back while audio plays" are now **implemented in code** but still need
-real-device confirmation before being treated as done. DO NOT start the pending
-items above until the audio pipeline is confirmed stable by a real device test.
+"Reader/Dub entry chooser at app launch" and "Navigate back while audio plays" are
+implemented in code but still need real-device confirmation. DO NOT start the
+pending items above until the audio pipeline is confirmed stable on a real device.
 
 ---
 
