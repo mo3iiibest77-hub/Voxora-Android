@@ -144,7 +144,7 @@ class ReaderService @Inject constructor(@ApplicationContext private val context:
     private suspend fun connectAndAwait(session: GeminiReaderSession, apiKey: String, instruction: String) {
         session.onLog = { line -> VoxoraLog.d(SESSION_LOG_TAG, line) }
         var lastError: String? = null
-        try {
+        val connected = try {
             withTimeout(CONNECT_TIMEOUT_MS) {
                 var attempt = 0
                 while (attempt < MODEL_CANDIDATES.size) {
@@ -155,7 +155,7 @@ class ReaderService @Inject constructor(@ApplicationContext private val context:
                         when (val s = session.status.value) {
                             is ReaderSessionStatus.Ready -> {
                                 VoxoraLog.i(TAG, "narration ready on $model")
-                                return@withTimeout
+                                return@withTimeout true
                             }
                             is ReaderSessionStatus.Error -> {
                                 VoxoraLog.w(TAG, "candidate failed: $model" +
@@ -176,12 +176,13 @@ class ReaderService @Inject constructor(@ApplicationContext private val context:
                     }
                     attempt++
                 }
+                false
             }
-            // Chain exhausted without Ready: surface the last specific server error,
-            // or a clear generic message when every attempt was silent.
-            throw NarrationException(lastError ?: context.getString(R.string.reader_models_exhausted))
         } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
             throw NarrationException(context.getString(R.string.reader_connect_timeout))
+        }
+        if (!connected) {
+            throw NarrationException(lastError ?: context.getString(R.string.reader_models_exhausted))
         }
     }
 
