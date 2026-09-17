@@ -150,8 +150,9 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
   `f644d2f feat(reader): map language catalog to deterministic flags`,
   `b0d556d fix(reader): preserve pdf reading order`,
   `a74db6c fix(reader): define fluent and faithful narration semantics` — plus the
-  docs commit that follows them. **12 commits ahead of `main` (`1f0a719`)**, pushed
-  to `origin`, and **not merged**.
+  documentation commits that follow them. **13 commits ahead of `main` (`1f0a719`)**,
+  pushed to `origin`, and **not merged**. CI is green at `35120bf` (run #65); the
+  documentation-only commits after it are CI-verified separately.
 - `feat/ci-feature-branch` = `76f0c96` + `dcbf852 ci: run Android CI on feature
   branch`, with **PR #2 open to `main`** (still open; deliberately NOT merged).
 - IMPORTANT — how CI actually runs: the failing run `35279422099`
@@ -230,9 +231,19 @@ together: **43 tests, OK**. `ChunkQueueTest` + `ReaderSpoolTest` +
 sources compile cleanly. `ReaderScreen.kt` and `Theme.kt` are Compose files and
 could not be compiled locally, so the debug-APK job is their real check.
 
-**CI status: NOT YET OBSERVED for this pass.** The branch has been pushed; the
-GitHub Actions run for the head commit has to be read before this pass is called
-done. Do not claim it passed until the workflow says so.
+**CI status: GREEN — VERIFIED for this pass.** Pushing `35120bf` triggered
+`Android CI` run **#65** (run id `35287036680`, event `push`, branch
+`feat/reader-segmented-spooling`, 2026-09-17T23:29:03Z,
+https://github.com/mo3iiibest77-hub/Voxora-Android/actions/runs/35287036680).
+Both jobs passed: **`Unit tests` = success** — including the `Run unit tests` step
+that runs `gradle :core:testDebugUnitTest :app:testDebugUnitTest` — and
+**`Assemble debug APK` = success** — including `Assemble debug` and
+`Upload debug APK`. The APK job is the real compile check for the redesigned
+Compose UI (`ReaderScreen.kt`, `Theme.kt`), which cannot be compiled on the dev
+server. `android-ci.yml` has no `continue-on-error`, so these are genuine passes.
+The same caveat as before applies: job/step conclusions come from the REST API and
+raw logs need admin rights, but a green `Run unit tests` step cannot hide a failing
+`testDebugUnitTest` task.
 
 ### Previous change — sink exception propagation fix
 - **Exact failing test (CI):**
@@ -291,12 +302,10 @@ done. Do not claim it passed until the workflow says so.
   narration survives leaving the Reader destination.
 
 ### Next milestone (roadmap order):
-- **Verify this pass in CI first.** Read the Android CI run for the pushed head
-  commit; the `unit-tests` job must be green (it runs
-  `:core:testDebugUnitTest :app:testDebugUnitTest`) and the `Assemble debug APK` job
-  must be green, which is the only real compile check for the redesigned Compose UI.
-- Then owner-side real-device confirmation: the Home chooser, the back loop, Reader
-  narration surviving navigation, the new Reader screen on a real device, and — most
+- **CI is green for this pass** (run #65, `35287036680`, at `35120bf`): `Unit tests`
+  and `Assemble debug APK` both succeeded. The remaining step is owner-side
+  real-device confirmation: the Home chooser, the back loop, Reader narration
+  surviving navigation, the redesigned Reader screen on a real device, and — most
   importantly — whether the PDFs that used to look scrambled now read in order.
 - Roadmap/order mismatch persists: the repo is ahead on Reader (5–8) and behind on
   Home (1), Product Navigation (2) and the Design System (3). `Theme.kt` still uses
