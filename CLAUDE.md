@@ -136,11 +136,11 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
 
 ### Actual repository state (inspected, not assumed):
 - `main`: `1f0a719 fix(reader): fix suspend output language persistence`.
-- `feat/reader-segmented-spooling` (the implementation branch) was at
-  `76f0c96 feat(home): add Voxora product entry home` — **3 commits ahead of
-  `main`**, not merged.
+- `feat/reader-segmented-spooling` (the implementation branch) is at
+  `4e4e17a fix(reader): preserve original sink exception` — **5 commits ahead of
+  `main`**, pushed to `origin`, and **not merged**.
 - `feat/ci-feature-branch` = `76f0c96` + `dcbf852 ci: run Android CI on feature
-  branch`, with **PR #2 open to `main`**.
+  branch`, with **PR #2 open to `main`** (still open; deliberately NOT merged).
 - IMPORTANT — how CI actually runs: the failing run `35279422099`
   (2026-09-17T21:56Z) was triggered by **`pull_request` from
   `feat/ci-feature-branch`**, not by a push. `android-ci.yml` triggers on pushes
@@ -179,10 +179,24 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
   (`Tests run: 13, Failures: 1`); after the fix, 13/13 pass both **with and
   without** `-ea`, plus 300 iterations of the sink test and 20 full-suite runs
   pinned to one CPU under load. **No local Gradle task was run.**
-- **GitHub Actions result: NOT YET OBSERVED.** Do not treat this fix as DONE
-  until a green `unit-tests` job has actually been seen.
-- **Next action:** push the fix on `feat/reader-segmented-spooling` (fast-forwarded
-  to include `dcbf852`, so its workflow triggers on that branch) and read the run.
+- **GitHub Actions result: GREEN — VERIFIED.** Pushing `4e4e17a` triggered
+  `Android CI` run **#63** (run id `35282478465`, event `push`, branch
+  `feat/reader-segmented-spooling`, 2026-09-17T22:31:51Z → 22:33:47Z,
+  https://github.com/mo3iiibest77-hub/Voxora-Android/actions/runs/35282478465).
+  Both jobs passed: **`Unit tests` = success** — including the `Run unit tests`
+  step that runs `gradle :core:testDebugUnitTest :app:testDebugUnitTest` — and
+  **`Assemble debug APK` = success**. `android-ci.yml` has no `continue-on-error`,
+  so a green `unit-tests` job is a real pass, not a masked failure.
+- **Evidence caveat:** job and step conclusions were read from the GitHub REST
+  API. Raw step logs are not retrievable without admin rights (the run-logs
+  endpoint returns 403 "Must have admin rights to Repository"), so the literal
+  `13 tests completed, 0 failed` line was not read verbatim. The green
+  `Run unit tests` step is still conclusive, because a failing
+  `testDebugUnitTest` task fails that step and therefore the job.
+- **Status: the sink exception propagation fix is DONE and CI-verified.**
+- **Next action:** real-device confirmation (owner action) of the Home chooser,
+  the back loop, and Reader narration surviving navigation. Do not merge PR #2
+  without an explicit owner decision.
 
 ### Previous change — Milestone 1 slice: Voxora Home
 - `feat(home)`: `HomeScreen` is a neutral Voxora product chooser — header plus two
@@ -196,9 +210,10 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
   narration survives leaving the Reader destination.
 
 ### Next milestone (roadmap order):
-- Close out Milestone 1 / Milestone 2 — **Product Navigation**: get a green
-  `unit-tests` job, then have the owner install the debug APK and confirm the Home
-  chooser, the back loop, and Reader narration surviving navigation.
+- Close out Milestone 1 / Milestone 2 — **Product Navigation**: the green
+  `unit-tests` job has now been obtained (run #63 on `4e4e17a`). The remaining
+  step is owner-side: install the debug APK and confirm the Home chooser, the
+  back loop, and Reader narration surviving navigation.
 - Roadmap/order mismatch persists: the repo is ahead on Reader (5–8) and behind on
   Home (1), Product Navigation (2) and the Design System (3). `Theme.kt` still
   uses gold `#D4AF37` and near-black `#0A0A0B`, not `#FFD700` / `#0A0A0F`.
