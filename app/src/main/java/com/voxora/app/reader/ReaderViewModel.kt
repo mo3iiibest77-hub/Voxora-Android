@@ -44,6 +44,8 @@ class ReaderViewModel @Inject constructor(
     val languageOptions = mutableLanguageOptions.asStateFlow()
     private val mutableLanguageLabel = MutableStateFlow("")
     val languageLabel = mutableLanguageLabel.asStateFlow()
+    private val mutableLanguageFlag = MutableStateFlow(ReaderLanguages.language(ReaderLanguages.DEFAULT).flagEmoji)
+    val languageFlag = mutableLanguageFlag.asStateFlow()
     private var commandJob: Job? = null
     private var languageJob: Job? = null
     @Volatile private var languageLocale = Locale.ENGLISH
@@ -71,10 +73,11 @@ class ReaderViewModel @Inject constructor(
         languageJob?.cancel()
         languageJob = viewModelScope.launch(Dispatchers.Default) {
             val options = readerLanguageOptions(locale, query)
-            val label = ReaderLanguages.language(outputLang.value).displayName(locale)
+            val selected = ReaderLanguages.language(outputLang.value)
             ensureActive()
             mutableLanguageOptions.value = options
-            mutableLanguageLabel.value = label
+            mutableLanguageLabel.value = selected.displayName(locale)
+            mutableLanguageFlag.value = selected.flagEmoji
         }
     }
 
@@ -88,7 +91,9 @@ class ReaderViewModel @Inject constructor(
         if (!canConfigure() || !ReaderLanguages.isValid(language) || language == outputLang.value) return@runCommand
         prefs.setReaderOutputLang(language)
         mutableOutputLang.value = language
-        mutableLanguageLabel.value = ReaderLanguages.language(language).displayName(languageLocale)
+        val selected = ReaderLanguages.language(language)
+        mutableLanguageLabel.value = selected.displayName(languageLocale)
+        mutableLanguageFlag.value = selected.flagEmoji
     }
 
     fun jumpToChunk(index: Int) = runCommand { controller.jumpToChunk(index) }

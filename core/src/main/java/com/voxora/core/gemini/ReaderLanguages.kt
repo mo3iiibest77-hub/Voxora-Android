@@ -7,6 +7,9 @@ data class ReaderLanguage(val code: String, val englishName: String) {
         .getDisplayName(locale)
         .takeUnless { it.isBlank() || it == code }
         ?: englishName
+
+    /** Deterministic representative flag; see [ReaderLanguageFlags]. */
+    val flagEmoji: String get() = ReaderLanguageFlags.flagFor(code)
 }
 
 object ReaderLanguages {
