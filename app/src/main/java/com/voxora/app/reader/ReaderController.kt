@@ -86,15 +86,12 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
                     publish(ReaderPhase.CONNECTING)
                     generation
                 }
-                val narration = GeminiReaderSession()
                 val output = ReaderPlayback(context) { pauseOwned(run) }
                 val bytesReceived = AtomicLong()
                 try {
                     require(mode in setOf("simple", "fluent")) { context.getString(R.string.reader_mode_missing) }
                     val key = prefs.apiKey.first().trim()
                     check(key.isNotEmpty()) { context.getString(R.string.error_no_api_key) }
-                    connectAndAwait(narration, key, mode)
-                    currentCoroutineContext().ensureActive()
                     try {
                         output.start()
                     } catch (e: Exception) {
@@ -109,25 +106,32 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
                                 mutableNarrationText.value = it.take(400)
                             }
                         } ?: break
-                        var firstAudio = true
-                        val spoken = narration.narrate(text) { pcmBytes ->
-                            if (firstAudio) {
-                                firstAudio = false
-                                synchronized(lock) {
-                                    if (run == generation) publish(ReaderPhase.SPEAKING)
+                        val narration = GeminiReaderSession()
+                        try {
+                            connectAndAwait(narration, key, mode)
+                            currentCoroutineContext().ensureActive()
+                            var firstAudio = true
+                            val spoken = narration.narrate(text) { pcmBytes ->
+                                if (firstAudio) {
+                                    firstAudio = false
+                                    synchronized(lock) {
+                                        if (run == generation) publish(ReaderPhase.SPEAKING)
+                                    }
                                 }
+                                output.writeFloatsBlocking(PcmUtils.pcm16ToFloat(pcmBytes))
+                                bytesReceived.addAndGet(pcmBytes.size.toLong())
+                            } ?: throw IllegalStateException(context.getString(R.string.reader_no_audio))
+                            synchronized(lock) {
+                                if (run == generation && spoken.isNotBlank()) mutableNarrationText.value = spoken.take(400)
                             }
-                            output.writeFloatsBlocking(PcmUtils.pcm16ToFloat(pcmBytes))
-                            bytesReceived.addAndGet(pcmBytes.size.toLong())
-                        } ?: throw IllegalStateException(context.getString(R.string.reader_no_audio))
-                        synchronized(lock) {
-                            if (run == generation && spoken.isNotBlank()) mutableNarrationText.value = spoken.take(400)
-                        }
-                        withTimeout(300_000) { output.drain() }
-                        synchronized(lock) {
-                            if (run != generation) throw CancellationException()
-                            publish(ReaderPhase.NEXT)
-                            queue.advance()
+                            withTimeout(300_000) { output.drain() }
+                            synchronized(lock) {
+                                if (run != generation) throw CancellationException()
+                                publish(ReaderPhase.NEXT)
+                                queue.advance()
+                            }
+                        } finally {
+                            narration.closeAndJoin()
                         }
                     }
                     synchronized(lock) { if (run == generation) publish(ReaderPhase.COMPLETE) }
@@ -139,7 +143,6 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
                     fail(run, e.message ?: context.getString(R.string.reader_failed_generic))
                 } finally {
                     withContext(NonCancellable) {
-                        narration.closeAndJoin()
                         try {
                             output.stop()
                         } catch (e: Exception) {
