@@ -242,9 +242,13 @@ class GeminiReaderSession(
             val inline = part.optJSONObject("inlineData") ?: part.optJSONObject("inline_data") ?: continue
             val data = inline.optString("data")
             if (data.isNullOrBlank()) continue
-            val pcm = PcmUtils.pcm16ToFloat(PcmUtils.fromBase64(data))
+            val bytes = PcmUtils.fromBase64(data)
+            val pcm = PcmUtils.pcm16ToFloat(bytes)
             if (pcm.isNotEmpty()) {
-                if (hadAudio.compareAndSet(false, true)) log("first audio received")
+                if (hadAudio.compareAndSet(false, true)) {
+                    val mime = inline.optString("mimeType").ifBlank { inline.optString("mime_type") }
+                    log("first audio: mime=$mime bytes=${bytes.size}")
+                }
                 audioChannel.trySend(pcm)
             }
         }
