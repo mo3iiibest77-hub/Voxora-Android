@@ -96,7 +96,36 @@ class TextExtractor @Inject constructor(@ApplicationContext private val context:
                                 super.processPage(page)
                                 coroutineContext.ensureActive()
                             }
+
+                            /**
+                             * PDFBox collects glyphs in content-stream order and only
+                             * sorts them when `sortByPosition` is enabled. That default
+                             * is what scrambles the reading order of PDFs whose stream
+                             * is not painted in visual order, so the fragments are
+                             * ordered here by [PdfReadingOrder] instead — which also
+                             * keeps multi-column pages from being row-interleaved.
+                             */
+                            override fun writePage() {
+                                coroutineContext.ensureActive()
+                                charactersByArticle.forEach { article ->
+                                    if (article.size < 2) return@forEach
+                                    val fragments = article.map { position ->
+                                        PdfReadingOrder.Fragment(
+                                            position.xDirAdj,
+                                            position.yDirAdj,
+                                            position.widthDirAdj,
+                                            position.heightDir,
+                                        )
+                                    }
+                                    val sorted = PdfReadingOrder.order(fragments).map(article::get)
+                                    article.clear()
+                                    article.addAll(sorted)
+                                }
+                                super.writePage()
+                                coroutineContext.ensureActive()
+                            }
                         }
+                        stripper.sortByPosition = false
                         stripper.lineSeparator = "\n"
                         stripper.paragraphStart = ""
                         stripper.paragraphEnd = "\n\n"
