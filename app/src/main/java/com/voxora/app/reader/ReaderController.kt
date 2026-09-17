@@ -47,6 +47,7 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
     private val mutableNarrationText = MutableStateFlow("")
     internal val narrationText = mutableNarrationText.asStateFlow()
     private var queue = ChunkQueue(emptyList())
+    private var documentName = ""
     private var segmentIndex = 0
     private var generation = 0L
     private val navigationRevision = MutableStateFlow(0L)
@@ -89,6 +90,7 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
         val run = generation
         val previous = loadJob
         queue = ChunkQueue(emptyList())
+        documentName = ""
         segmentIndex = 0
         publish(ReaderPhase.EXTRACTING)
         loadJob = documentScope.launch(start = CoroutineStart.LAZY) {
@@ -102,12 +104,13 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
                         VoxoraLog.w("Reader", "Document provider did not grant persistent access")
                     }
                 }
-                val chunks = extractor.extract(uri)
+                val document = extractor.extract(uri)
                 currentCoroutineContext().ensureActive()
                 saveDocument(run, uri.toString())
                 synchronized(lock) {
                     if (run == generation) {
-                        queue = ChunkQueue(chunks)
+                        queue = ChunkQueue(document.chunks)
+                        documentName = document.name
                         segmentIndex = 0
                         loadJob = null
                         publish(ReaderPhase.READY)
@@ -521,6 +524,7 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
             segmentTotal = units.size,
             text = queue.current.orEmpty(),
             segments = units,
+            documentName = documentName,
         )
         if (phase != ReaderPhase.SPEAKING) mutableNarrationText.value = ""
     }

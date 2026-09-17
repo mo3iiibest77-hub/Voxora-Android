@@ -24,8 +24,11 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
+/** Extracted document text plus the display name the provider reported. */
+data class ExtractedDocument(val name: String, val chunks: List<String>)
+
 class TextExtractor @Inject constructor(@ApplicationContext private val context: Context) {
-    suspend fun extract(uri: Uri): List<String> = withContext(Dispatchers.IO) {
+    suspend fun extract(uri: Uri): ExtractedDocument = withContext(Dispatchers.IO) {
         val coroutineContext = currentCoroutineContext()
         try {
             coroutineContext.ensureActive()
@@ -161,7 +164,7 @@ class TextExtractor @Inject constructor(@ApplicationContext private val context:
                     else "This text file is blank. Choose a file containing text."
                 )
             }
-            chunks
+            ExtractedDocument(name = name.trim(), chunks = chunks)
         } catch (error: ExtractionException) {
             coroutineContext.ensureActive()
             throw error

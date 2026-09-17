@@ -41,6 +41,7 @@ internal data class ReaderState(
     val segmentTotal: Int = 0,
     val text: String = "",
     val segments: List<String> = emptyList(),
+    val documentName: String = "",
     val error: String? = null,
 )
 
