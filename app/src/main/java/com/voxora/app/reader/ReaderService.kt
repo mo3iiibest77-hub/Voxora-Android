@@ -37,7 +37,10 @@ internal data class ReaderState(
     val phase: ReaderPhase = ReaderPhase.IDLE,
     val chunk: Int = 0,
     val total: Int = 0,
+    val segment: Int = 0,
+    val segmentTotal: Int = 0,
     val text: String = "",
+    val segments: List<String> = emptyList(),
     val error: String? = null,
 )
 
@@ -48,7 +51,7 @@ class ReaderService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private lateinit var mediaSession: MediaSession
     private var playbackJob: Job? = null
-    private var generation = 0L
+    @Volatile private var generation = 0L
     private var latestStartId = 0
     private var destroyed = false
 
@@ -126,15 +129,7 @@ class ReaderService : Service() {
             try {
                 commandMutex.withLock {
                     ensureActive()
-                    try {
-                        command()
-                    } finally {
-                        withContext(NonCancellable) {
-                            if (run == generation && controller.state.value.phase.isActivePlayback()) {
-                                controller.pause()
-                            }
-                        }
-                    }
+                    command()
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -198,7 +193,6 @@ class ReaderService : Service() {
     override fun onDestroy() {
         destroyed = true
         scope.cancel()
-        if (controller.state.value.phase.isActivePlayback()) controller.pause()
         mediaSession.isActive = false
         mediaSession.release()
         super.onDestroy()

@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.voxora.core.gemini.ReaderLanguages
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -26,7 +27,13 @@ class UserPrefs(private val context: Context) {
     val readerEndpoint: Flow<String> = context.dataStore.data.map { it[keyReaderEndpoint].orEmpty() }
     val readerMode: Flow<String> = context.dataStore.data.map { it[keyReaderMode] ?: "faithful" }
     val readerOutputLang: Flow<String> =
-        context.dataStore.data.map { it[keyReaderOutputLang] ?: "original" }
+        context.dataStore.data.map { ReaderLanguages.normalize(it[keyReaderOutputLang]) }
+
+    suspend fun migrateReaderLanguage() {
+        context.dataStore.edit {
+            it[keyReaderOutputLang] = ReaderLanguages.normalize(it[keyReaderOutputLang])
+        }
+    }
     val lastDocUri: Flow<String> =
         context.dataStore.data.map { it[keyLastDocUri].orEmpty() }
 
@@ -38,7 +45,7 @@ class UserPrefs(private val context: Context) {
     }
 
     suspend fun setReaderOutputLang(lang: String) {
-        context.dataStore.edit { it[keyReaderOutputLang] = lang }
+        context.dataStore.edit { it[keyReaderOutputLang] = ReaderLanguages.normalize(lang) }
     }
 
     suspend fun setLastDocUri(uri: String) {
@@ -47,6 +54,14 @@ class UserPrefs(private val context: Context) {
 
     suspend fun clearLastDocUri() {
         context.dataStore.edit { it.remove(keyLastDocUri) }
+    }
+
+    suspend fun updateReaderDocument(uri: String?, isCurrent: () -> Boolean) {
+        context.dataStore.edit {
+            if (isCurrent()) {
+                if (uri == null) it.remove(keyLastDocUri) else it[keyLastDocUri] = uri
+            }
+        }
     }
 
     val apiKey: Flow<String> = context.dataStore.data.map { it[keyApi].orEmpty() }

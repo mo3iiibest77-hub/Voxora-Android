@@ -85,8 +85,8 @@
     <string name="default_web_client_id" translatable="false">REPLACE_WITH_GOOGLE_WEB_CLIENT_ID</string>
     <string name="reader_title">Voxora Reader</string>
     <string name="reader_pick">Choose PDF or TXT</string>
-    <string name="reader_privacy">Reader sends each chunk to Gemini with your saved API key (the same key as Live Dub). Gemini rewrites it in the selected style and narrates it with its own voice — no phone text-to-speech and no external server. PDFs must contain selectable text; scanned PDFs need OCR.</string>
-    <string name="reader_pause_hint">Reader keeps playing in the background and with the screen off. Pause here or stop from the notification. Resume restarts the current chunk.</string>
+    <string name="reader_privacy">Reader sends the current and next chunk to Gemini using your saved API key (shared with Live Dub). Gemini narrates the complete text in your selected language and style, translating when needed. Temporary audio is cached on this device. No phone text-to-speech or separate backend is used. PDFs need selectable text; scans require OCR.</string>
+    <string name="reader_pause_hint">Reader keeps playing in the background and with the screen off. Pause here or stop from the notification. Resume restarts the selected segment; Stop returns to the first chunk.</string>
     <string name="reader_connecting">Connecting to Gemini…</string>
     <string name="reader_notif_channel_name">Voxora Reader</string>
     <string name="reader_notif_channel_description">Background document narration and playback controls</string>
@@ -122,4 +122,19 @@
     <string name="reader_stopped">Stopped</string>
     <string name="reader_complete">Finished</string>
     <string name="reader_error">Reader error</string>
+    <string name="reader_mode_help">Both styles narrate the complete text in your selected language. Faithful keeps wording close to the source; Fluent uses natural spoken phrasing without losing facts or details.</string>
+    <string name="reader_output_language">Narration language: %1$s</string>
+    <string name="reader_choose_language">Narration language</string>
+    <string name="reader_search_language">Search languages</string>
+    <string name="reader_no_languages">No matching languages</string>
+    <string name="reader_segment_progress">Segment %1$d of %2$d</string>
+    <string name="reader_prev_segment">Previous segment</string>
+    <string name="reader_next_segment">Next segment</string>
+    <string name="reader_source_chunk">Full source chunk · tap a segment to navigate</string>
+    <string name="reader_source_segment">Current / selected segment</string>
+    <string name="reader_partial_audio">Narration stopped partway through this segment. Received audio has finished playing. Your position is kept; Play retries this segment from its beginning.</string>
+    <string name="reader_retry_unit">This segment could not be narrated. Your position is kept. Check your connection, key and model access, then press Play to retry.</string>
+    <string name="reader_document_failed">Could not read this document. Choose an accessible UTF-8 TXT or unlocked, selectable-text PDF (up to 20 MB). Scanned PDFs need OCR.</string>
+    <string name="reader_preview_source">This is the selected source segment. The highlight follows the audio actually played, not an estimated translation timeline.</string>
+    <string name="reader_preview_next">The next segment remains visible and can be selected during playback.</string>
 </resources>

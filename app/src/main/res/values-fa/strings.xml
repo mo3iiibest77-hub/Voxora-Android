@@ -82,8 +82,8 @@
     <string name="toast_connecting">در حال اتصال…</string>
     <string name="toast_gemini_ready">جمینا آماده است</string>
     <string name="toast_reconnecting">در حال اتصال مجدد…</string>
-    <string name="reader_privacy">Reader هر بخش را با کلید API ذخیره‌شده (همان کلید Live Dub) برای جمینا می‌فرستد. جمینا آن را به سبک انتخاب‌شده بازنویسی و با صدای خودش روایت می‌کند — بدون گفتار دستگاه و بدون سرور خارجی. متن PDF باید قابل انتخاب باشد؛ فایل‌های اسکن‌شده به OCR نیاز دارند.</string>
-    <string name="reader_pause_hint">Reader در پس‌زمینه و با صفحه خاموش به پخش ادامه می‌دهد. از اینجا موقتاً مکث کنید یا از اعلان پخش را متوقف کنید. ادامه پخش از ابتدای بخش فعلی است.</string>
+    <string name="reader_privacy">Reader بخش فعلی و بعدی را با کلید API ذخیره‌شده (مشترک با Live Dub) به جمینا می‌فرستد. جمینا متن کامل را به زبان و سبک انتخابی روایت می‌کند و در صورت نیاز ترجمه می‌کند. صدای موقت روی دستگاه ذخیره می‌شود. از گفتار دستگاه یا سرور واسط استفاده نمی‌شود. متن PDF باید قابل انتخاب باشد؛ اسکن‌ها به OCR نیاز دارند.</string>
+    <string name="reader_pause_hint">Reader در پس‌زمینه و با صفحه خاموش به پخش ادامه می‌دهد. از اینجا مکث کنید یا از اعلان پخش را متوقف کنید. ادامه پخش از ابتدای قطعه انتخاب‌شده است؛ توقف به بخش اول برمی‌گردد.</string>
     <string name="reader_connecting">در حال اتصال به جمینا…</string>
     <string name="reader_notif_channel_name">Voxora Reader</string>
     <string name="reader_notif_channel_description">روایت سند در پس‌زمینه و کنترل‌های پخش</string>
@@ -121,4 +121,19 @@
     <string name="reader_stopped">متوقف شد</string>
     <string name="reader_complete">تمام شد</string>
     <string name="reader_error">خطای Reader</string>
+    <string name="reader_mode_help">هر دو سبک، متن کامل را به زبان انتخابی روایت می‌کنند. سبک وفادار به واژگان متن نزدیک می‌ماند؛ سبک روان از بیان گفتاری طبیعی استفاده می‌کند، بدون حذف واقعیت‌ها یا جزئیات.</string>
+    <string name="reader_output_language">زبان روایت: %1$s</string>
+    <string name="reader_choose_language">زبان روایت</string>
+    <string name="reader_search_language">جستجوی زبان‌ها</string>
+    <string name="reader_no_languages">زبانی پیدا نشد</string>
+    <string name="reader_segment_progress">قطعه %1$d از %2$d</string>
+    <string name="reader_prev_segment">قطعه قبلی</string>
+    <string name="reader_next_segment">قطعه بعدی</string>
+    <string name="reader_source_chunk">متن کامل بخش · برای جابه‌جایی یک قطعه را لمس کنید</string>
+    <string name="reader_source_segment">قطعه فعلی / انتخاب‌شده</string>
+    <string name="reader_partial_audio">روایت در میانه این قطعه قطع شد. صدای دریافت‌شده پخش شده است. موقعیت شما حفظ می‌شود؛ با زدن پخش، این قطعه از ابتدا دوباره روایت می‌شود.</string>
+    <string name="reader_retry_unit">روایت این قطعه ممکن نشد. موقعیت شما حفظ می‌شود. اتصال، کلید و دسترسی به مدل را بررسی کنید و برای تلاش دوباره پخش را بزنید.</string>
+    <string name="reader_document_failed">خواندن سند ممکن نشد. فایل UTF-8 TXT یا PDF بدون رمز با متن قابل انتخاب و دسترسی معتبر (تا ۲۰ مگابایت) انتخاب کنید. PDF اسکن‌شده به OCR نیاز دارد.</string>
+    <string name="reader_preview_source">این قطعه انتخاب‌شده از متن اصلی است. برجسته‌سازی بر اساس صدای واقعاً پخش‌شده تغییر می‌کند، نه زمان‌بندی تخمینی ترجمه.</string>
+    <string name="reader_preview_next">قطعه بعدی قابل مشاهده است و هنگام پخش هم می‌توانید آن را انتخاب کنید.</string>
 </resources>

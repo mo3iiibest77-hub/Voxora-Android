@@ -97,6 +97,10 @@ class TextExtractor @Inject constructor(@ApplicationContext private val context:
                                 coroutineContext.ensureActive()
                             }
                         }
+                        stripper.lineSeparator = "\n"
+                        stripper.paragraphStart = ""
+                        stripper.paragraphEnd = "\n\n"
+                        stripper.pageEnd = "\n\n"
                         stripper.writeText(document, writer)
                     }
                 } else {
@@ -120,7 +124,7 @@ class TextExtractor @Inject constructor(@ApplicationContext private val context:
                 writer.toString()
             }
             coroutineContext.ensureActive()
-            val chunks = ChunkQueue.split(text)
+            val chunks = ChunkQueue.documentChunks(text)
             coroutineContext.ensureActive()
             if (chunks.isEmpty()) {
                 throw ExtractionException(

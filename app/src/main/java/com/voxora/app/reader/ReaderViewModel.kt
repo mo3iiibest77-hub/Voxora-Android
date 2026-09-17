@@ -8,12 +8,16 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.voxora.app.R
 import com.voxora.app.util.VoxoraLog
+import com.voxora.core.gemini.ReaderLanguages
 import com.voxora.core.prefs.UserPrefs
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.util.Locale
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
@@ -29,77 +33,81 @@ class ReaderViewModel @Inject constructor(
     internal val narrationText = controller.narrationText
     private val mutableMode = MutableStateFlow("faithful")
     val mode = mutableMode.asStateFlow()
-    private val mutableOutputLang = MutableStateFlow("original")
+    private val mutableOutputLang = MutableStateFlow(ReaderLanguages.DEFAULT)
     val outputLang = mutableOutputLang.asStateFlow()
     private val mutableReady = MutableStateFlow(false)
     val ready = mutableReady.asStateFlow()
     private val mutableSettingsError = MutableStateFlow<String?>(null)
     val settingsError = mutableSettingsError.asStateFlow()
+    private val mutableLanguageOptions = MutableStateFlow<List<ReaderLanguageOption>>(emptyList())
+    val languageOptions = mutableLanguageOptions.asStateFlow()
+    private val mutableLanguageLabel = MutableStateFlow("")
+    val languageLabel = mutableLanguageLabel.asStateFlow()
+    private var commandJob: Job? = null
+    private var languageJob: Job? = null
+    @Volatile private var languageLocale = Locale.ENGLISH
 
     init {
-        viewModelScope.launch(Dispatchers.IO) {
+        runCommand {
             try {
+                prefs.migrateReaderLanguage()
                 mutableMode.value = prefs.readerMode.first().takeIf { it == "fluent" } ?: "faithful"
                 mutableOutputLang.value = prefs.readerOutputLang.first()
-                restoreLastDocument()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                VoxoraLog.e("ReaderVM", "Could not load Reader settings", e)
+                VoxoraLog.w("ReaderVM", "Reader settings load failed: ${e.javaClass.simpleName}")
                 mutableSettingsError.value = context.getString(R.string.reader_settings_load_failed)
             } finally {
                 mutableReady.value = true
             }
+            controller.restoreLastDocument()
         }
     }
 
-    private suspend fun restoreLastDocument() {
-        val savedUri = prefs.lastDocUri.first()
-        if (savedUri.isEmpty()) return
-        try {
-            controller.load(Uri.parse(savedUri))
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            VoxoraLog.w("ReaderVM", "Saved URI no longer accessible, clearing")
-            prefs.clearLastDocUri()
+    fun searchLanguages(query: String, locale: Locale) {
+        languageLocale = locale
+        languageJob?.cancel()
+        languageJob = viewModelScope.launch(Dispatchers.Default) {
+            val options = readerLanguageOptions(locale, query)
+            val label = ReaderLanguages.language(outputLang.value).displayName(locale)
+            ensureActive()
+            mutableLanguageOptions.value = options
+            mutableLanguageLabel.value = label
         }
     }
 
-    fun setMode(value: String) {
-        if (value == mode.value || value !in setOf("faithful", "fluent")) return
+    fun setMode(value: String) = runCommand {
+        if (!canConfigure() || value == mode.value || value !in setOf("faithful", "fluent")) return@runCommand
+        prefs.setReaderSettings("", value)
         mutableMode.value = value
-        runCommand { controller.stop() }
-        saveMode(value)
     }
 
-    fun setOutputLang(lang: String) {
-        if (lang !in setOf("original", "fa", "en") || lang == mutableOutputLang.value) return
-        mutableOutputLang.value = lang
-        runCommand {
-            prefs.setReaderOutputLang(lang)
-            controller.stop()
-        }
+    fun setOutputLang(language: String) = runCommand {
+        if (!canConfigure() || !ReaderLanguages.isValid(language) || language == outputLang.value) return@runCommand
+        prefs.setReaderOutputLang(language)
+        mutableOutputLang.value = language
+        mutableLanguageLabel.value = ReaderLanguages.language(language).displayName(languageLocale)
     }
 
     fun jumpToChunk(index: Int) = runCommand { controller.jumpToChunk(index) }
 
+    fun jumpToSegment(index: Int) = runCommand { controller.jumpToSegment(index) }
+
     fun load(uri: Uri) = runCommand { controller.load(uri) }
 
-    fun play() {
-        if (!ready.value) return
-        val selectedMode = mode.value
+    fun play() = runCommand {
+        if (!ready.value || state.value.total == 0 || state.value.phase == ReaderPhase.EXTRACTING) return@runCommand
         try {
             ContextCompat.startForegroundService(
                 context,
                 Intent(context, ReaderService::class.java)
                     .setAction(ReaderService.ACTION_PLAY)
-                    .putExtra(ReaderService.EXTRA_MODE, selectedMode),
+                    .putExtra(ReaderService.EXTRA_MODE, mode.value),
             )
             mutableSettingsError.value = null
-            saveMode(selectedMode)
         } catch (e: Exception) {
-            VoxoraLog.e("ReaderVM", "Could not start Reader service", e)
+            VoxoraLog.w("ReaderVM", "Could not start Reader service: ${e.javaClass.simpleName}")
             mutableSettingsError.value = context.getString(R.string.reader_service_start_failed)
         }
     }
@@ -108,28 +116,21 @@ class ReaderViewModel @Inject constructor(
 
     fun stop() = runCommand { controller.stop() }
 
-    private fun saveMode(value: String) {
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                prefs.setReaderSettings("", value)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                VoxoraLog.e("ReaderVM", "Could not save Reader settings", e)
-                mutableSettingsError.value = context.getString(R.string.reader_settings_save_failed)
-            }
-        }
-    }
+    private fun canConfigure(): Boolean = ready.value && state.value.phase !in setOf(
+        ReaderPhase.EXTRACTING, ReaderPhase.CONNECTING, ReaderPhase.REWRITING, ReaderPhase.SPEAKING, ReaderPhase.NEXT,
+    )
 
     private fun runCommand(command: suspend () -> Unit) {
-        viewModelScope.launch(Dispatchers.IO) {
+        val previous = commandJob
+        commandJob = viewModelScope.launch(Dispatchers.IO) {
+            previous?.join()
             try {
                 command()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                VoxoraLog.e("ReaderVM", "Reader command failed", e)
-                mutableSettingsError.value = context.getString(R.string.reader_failed_generic)
+                VoxoraLog.w("ReaderVM", "Reader command failed: ${e.javaClass.simpleName}")
+                mutableSettingsError.value = context.getString(R.string.reader_settings_save_failed)
             }
         }
     }
