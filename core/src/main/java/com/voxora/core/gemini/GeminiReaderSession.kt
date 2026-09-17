@@ -203,7 +203,7 @@ class GeminiReaderSession(
             val data = inline.optString("data")
             if (data.isNullOrBlank()) continue
             val pcm = PcmUtils.pcm16ToFloat(PcmUtils.fromBase64(data))
-            if (pcm.isNotEmpty()) audioChannel.tryEmit(pcm)
+            if (pcm.isNotEmpty()) audioChannel.trySend(pcm)
         }
     }
 
