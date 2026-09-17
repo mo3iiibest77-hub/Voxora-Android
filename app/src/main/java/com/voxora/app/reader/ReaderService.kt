@@ -1,32 +1,37 @@
 package com.voxora.app.reader
 
-import android.content.Context
-import android.net.Uri
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.media.AudioAttributes
+import android.media.MediaMetadata
+import android.media.session.MediaSession
+import android.media.session.PlaybackState
+import android.os.IBinder
+import com.voxora.app.MainActivity
 import com.voxora.app.R
 import com.voxora.app.util.VoxoraLog
-import com.voxora.core.gemini.GeminiReaderSession
-import com.voxora.core.gemini.ReaderSessionStatus
-import com.voxora.core.prefs.UserPrefs
-import dagger.hilt.android.qualifiers.ApplicationContext
+import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
-internal enum class ReaderPhase { IDLE, EXTRACTING, READY, REWRITING, SPEAKING, NEXT, PAUSED, STOPPED, COMPLETE, ERROR }
+internal enum class ReaderPhase { IDLE, EXTRACTING, READY, CONNECTING, REWRITING, SPEAKING, NEXT, PAUSED, STOPPED, COMPLETE, ERROR }
 
 internal data class ReaderState(
     val phase: ReaderPhase = ReaderPhase.IDLE,
@@ -36,264 +41,183 @@ internal data class ReaderState(
     val error: String? = null,
 )
 
-/**
- * Reader pipeline: extract → chunk → per chunk: Gemini rewrites + speaks it
- * (text → AUDIO over BidiGenerateContent) → PCM playback. There is no device TTS
- * and no external rewrite endpoint; the Gemini key from UserPrefs is the only
- * credential, shared with Live Dub.
- */
-class ReaderService @Inject constructor(@ApplicationContext private val context: Context) {
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    private val mutableState = MutableStateFlow(ReaderState())
-    internal val state = mutableState.asStateFlow()
-    private val extractor = TextExtractor(context)
-    private val prefs = UserPrefs(context)
-    private var session: GeminiReaderSession? = null
-    private var sessionJob: Job? = null
-    private var playback: ReaderPlayback? = null
-    private var queue = ChunkQueue(emptyList())
-    private var job: Job? = null
+@AndroidEntryPoint
+class ReaderService : Service() {
+    @Inject lateinit var controller: ReaderController
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private lateinit var mediaSession: MediaSession
+    private var playbackJob: Job? = null
     private var generation = 0L
-    private val mutableNarrationText = MutableStateFlow("")
-    internal val narrationText = mutableNarrationText.asStateFlow()
-    private val mutableAudio = MutableSharedFlow<FloatArray>(
-        extraBufferCapacity = 64,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST,
-    )
-    internal val audio: SharedFlow<FloatArray> = mutableAudio.asSharedFlow()
+    private var latestStartId = 0
+    private var destroyed = false
 
-    fun load(uri: Uri) {
-        cancelPlayback()
-        queue = ChunkQueue(emptyList())
-        mutableNarrationText.value = ""
-        mutableState.value = ReaderState(phase = ReaderPhase.EXTRACTING)
-        job = scope.launch {
-            try {
-                queue = ChunkQueue(extractor.extract(uri))
-                publish(ReaderPhase.READY)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                fail(e.message ?: "Could not read this document.")
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        val channel = NotificationChannel(
+            CHANNEL_ID,
+            getString(R.string.reader_notif_channel_name),
+            NotificationManager.IMPORTANCE_LOW,
+        ).apply {
+            description = getString(R.string.reader_notif_channel_description)
+            setShowBadge(false)
+        }
+        getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        mediaSession = MediaSession(this, "VoxoraReader").apply {
+            setPlaybackToLocal(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build(),
+            )
+            setMetadata(
+                MediaMetadata.Builder()
+                    .putString(MediaMetadata.METADATA_KEY_TITLE, getString(R.string.reader_title))
+                    .build(),
+            )
+            setCallback(object : MediaSession.Callback() {
+                override fun onPause() = finishPlayback(stop = false)
+                override fun onStop() = finishPlayback(stop = true)
+            })
+        }
+        scope.launch {
+            controller.state.collect { state ->
+                withContext(Dispatchers.Main.immediate) {
+                    if (!destroyed) updateMediaState(state.phase)
+                }
             }
         }
     }
 
-    fun play(mode: String) {
-        if (job?.isActive == true || queue.size == 0) return
-        if (mode !in setOf("simple", "fluent")) {
-            fail(context.getString(R.string.reader_mode_missing))
-            return
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        latestStartId = startId
+        startForeground(
+            NOTIFICATION_ID,
+            buildNotification(),
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK,
+        )
+        mediaSession.isActive = true
+        when (intent?.action) {
+            ACTION_PLAY -> startPlayback(intent.getStringExtra(EXTRA_MODE) ?: "simple")
+            ACTION_STOP -> finishPlayback(stop = true)
+            else -> finishPlayback(stop = false)
         }
-        if (queue.current == null) queue.reset()
+        return START_NOT_STICKY
+    }
+
+    private fun startPlayback(mode: String) {
+        runCommand { controller.play(mode) }
+    }
+
+    private fun finishPlayback(stop: Boolean) {
+        runCommand {
+            if (stop) controller.stop() else controller.pause()
+        }
+    }
+
+    private fun runCommand(command: suspend () -> Unit) {
         val run = ++generation
-        job = scope.launch {
+        val previous = playbackJob
+        previous?.cancel()
+        playbackJob = scope.launch {
+            previous?.cancelAndJoin()
             try {
-                val apiKey = prefs.apiKey.first().trim()
-                if (apiKey.isEmpty()) {
-                    VoxoraLog.w(TAG, "no API key; aborting play")
-                    throw NarrationException(context.getString(R.string.error_no_api_key))
-                }
-                val narration = GeminiReaderSession()
-                session = narration
-                val collector = launch { collectAudio(narration, run) }
-                connectAndAwait(narration, apiKey, instructionFor(mode))
-                playback = ReaderPlayback(context)
-                try {
-                    playback?.start()
-                } catch (e: IllegalStateException) {
-                    throw NarrationException(context.getString(R.string.reader_audio_unavailable))
-                }
-                mutableState.value = ReaderState(
-                    phase = ReaderPhase.SPEAKING,
-                    chunk = minOf(queue.index + 1, queue.size),
-                    total = queue.size,
-                )
-                while (queue.current != null) {
-                    if (run != generation) throw NarrationException(STALE_RUN)
-                    publish(ReaderPhase.REWRITING)
-                    mutableNarrationText.value = queue.current!!.take(NARRATION_PREVIEW_CHARS)
-                    val spoken = narration.narrate(queue.current!!)
-                    if (spoken == null) {
-                        throw NarrationException(context.getString(R.string.reader_no_audio))
-                    }
-                    if (spoken.isNotBlank()) {
-                        mutableNarrationText.value = spoken.take(NARRATION_PREVIEW_CHARS)
-                    }
-                    publish(ReaderPhase.SPEAKING)
-                    awaitPlaybackDrain(run)
-                    publish(ReaderPhase.NEXT)
-                    queue.advance()
-                }
-                publish(ReaderPhase.COMPLETE)
-                collector.cancel()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                fail(e.message ?: context.getString(R.string.reader_failed_generic))
-            } finally {
-                closeSession()
-                if (run == generation) {
-                    playback?.stop()
-                    playback = null
-                }
-            }
-        }
-    }
-
-    private suspend fun connectAndAwait(session: GeminiReaderSession, apiKey: String, instruction: String) {
-        session.onLog = { line -> VoxoraLog.d(SESSION_LOG_TAG, line) }
-        var lastError: String? = null
-        val connected = try {
-            withTimeout(CONNECT_TIMEOUT_MS) {
-                var attempt = 0
-                while (attempt < MODEL_CANDIDATES.size) {
-                    val (model, withSpeechConfig) = MODEL_CANDIDATES[attempt]
-                    val attemptStart = System.currentTimeMillis()
-                    session.connect(apiKey, instruction, model, withSpeechConfig)
-                    while (true) {
-                        when (val s = session.status.value) {
-                            is ReaderSessionStatus.Ready -> {
-                                VoxoraLog.i(TAG, "narration ready on $model")
-                                return@withTimeout true
-                            }
-                            is ReaderSessionStatus.Error -> {
-                                VoxoraLog.w(TAG, "candidate failed: $model" +
-                                    (if (withSpeechConfig) "" else " (no voiceConfig)") +
-                                    " — ${s.message.take(200)}")
-                                lastError = s.message
-                                break
-                            }
-                            else -> {
-                                if (System.currentTimeMillis() - attemptStart > PER_ATTEMPT_TIMEOUT_MS) {
-                                    VoxoraLog.w(TAG, "candidate silent: $model; trying next")
-                                    session.stop()
-                                    break
-                                }
+                commandMutex.withLock {
+                    ensureActive()
+                    try {
+                        command()
+                    } finally {
+                        withContext(NonCancellable) {
+                            if (run == generation && controller.state.value.phase.isActivePlayback()) {
+                                controller.pause()
                             }
                         }
-                        delay(50)
                     }
-                    attempt++
                 }
-                false
-            }
-        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
-            throw NarrationException(context.getString(R.string.reader_connect_timeout))
-        }
-        if (!connected) {
-            throw NarrationException(lastError ?: context.getString(R.string.reader_models_exhausted))
-        }
-    }
-
-    private suspend fun collectAudio(narration: GeminiReaderSession, run: Long) {
-        try {
-            narration.audio.collect { pcm ->
-                if (run == generation) {
-                    playback?.writeFloats(pcm)
-                    mutableAudio.emit(pcm)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                VoxoraLog.e(TAG, "Reader service command failed", e)
+            } finally {
+                withContext(NonCancellable + Dispatchers.Main.immediate) {
+                    if (!destroyed && run == generation) {
+                        playbackJob = null
+                        mediaSession.isActive = false
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        stopSelf(latestStartId)
+                    }
                 }
             }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            VoxoraLog.w(TAG, "audio collection stopped: ${e.message}")
         }
     }
 
-    private suspend fun awaitPlaybackDrain(run: Long) {
-        val p = playback ?: return
-        val deadline = System.currentTimeMillis() + DRAIN_TIMEOUT_MS
-        while (System.currentTimeMillis() < deadline) {
-            if (run != generation) throw NarrationException(STALE_RUN)
-            val t = p.undrainedFrames()
-            if (t <= DRAIN_THRESHOLD_FRAMES) return
-            kotlinx.coroutines.delay(50)
+    private fun updateMediaState(phase: ReaderPhase) {
+        val state = when (phase) {
+            ReaderPhase.CONNECTING, ReaderPhase.REWRITING, ReaderPhase.NEXT -> PlaybackState.STATE_BUFFERING
+            ReaderPhase.SPEAKING -> PlaybackState.STATE_PLAYING
+            ReaderPhase.PAUSED -> PlaybackState.STATE_PAUSED
+            ReaderPhase.ERROR -> PlaybackState.STATE_ERROR
+            else -> PlaybackState.STATE_STOPPED
         }
-        VoxoraLog.w(TAG, "drain timeout; continuing to next chunk")
-    }
-
-    fun pause() {
-        if (state.value.phase !in setOf(ReaderPhase.REWRITING, ReaderPhase.SPEAKING, ReaderPhase.NEXT)) return
-        cancelPlayback()
-        publish(ReaderPhase.PAUSED, mutableNarrationText.value)
-    }
-
-    fun stop() {
-        cancelPlayback()
-        queue.reset()
-        publish(ReaderPhase.STOPPED)
-    }
-
-    fun close() {
-        cancelPlayback()
-        scope.cancel()
-    }
-
-    private fun cancelPlayback() {
-        job?.cancel()
-        job = null
-        closeSession()
-        if (generation > 0) {
-            playback?.stop()
-            playback = null
-        }
-    }
-
-    private fun closeSession() {
-        sessionJob?.cancel()
-        sessionJob = null
-        session?.stop()
-        session = null
-    }
-
-    private fun publish(phase: ReaderPhase, text: String = "") {
-        mutableState.value = ReaderState(phase, minOf(queue.index + 1, queue.size), queue.size, text)
-        VoxoraLog.d("Reader", phase.name)
-    }
-
-    private fun fail(message: String) {
-        mutableState.value = state.value.copy(phase = ReaderPhase.ERROR, error = message)
-        VoxoraLog.w("Reader", "Reader operation failed: $message")
-    }
-
-    private class NarrationException(message: String) : Exception(message)
-
-    private companion object {
-        const val TAG = "Reader"
-        const val SESSION_LOG_TAG = "ReaderSession"
-        const val STALE_RUN = "stale"
-        const val CONNECT_TIMEOUT_MS = 30_000L
-        const val PER_ATTEMPT_TIMEOUT_MS = 10_000L
-        const val DRAIN_TIMEOUT_MS = 10_000L
-        const val DRAIN_THRESHOLD_FRAMES = 2_000
-        const val NARRATION_PREVIEW_CHARS = 400
-
-        /**
-         * Fallback chain for text→AUDIO Live narration: per model, with Kore
-         * speechConfig first, then once without (in case a model rejects the
-         * voice config). Each attempt runs on a fresh socket within the overall
-         * connect budget; fast server rejections skip through quickly, silent
-         * sockets are capped at [PER_ATTEMPT_TIMEOUT_MS].
-         */
-        val MODEL_CANDIDATES: List<Pair<String, Boolean>> = listOf(
-            "models/gemini-2.5-flash-native-audio-preview-12-2025" to true,
-            "models/gemini-2.5-flash-native-audio-preview-12-2025" to false,
-            "models/gemini-2.0-flash-live-001" to true,
-            "models/gemini-2.0-flash-live-001" to false,
-            "models/gemini-live-2.5-flash-preview" to true,
-            "models/gemini-live-2.5-flash-preview" to false,
+        mediaSession.setPlaybackState(
+            PlaybackState.Builder()
+                .setActions(PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_STOP)
+                .setState(state, PlaybackState.PLAYBACK_POSITION_UNKNOWN, if (phase.isActivePlayback()) 1f else 0f)
+                .build(),
         )
+    }
 
-        fun instructionFor(mode: String): String = when (mode) {
-            "fluent" -> "You are a professional audiobook narrator. First silently rewrite the text you are " +
-                "given into fluent, natural prose that reads aloud smoothly while preserving its exact meaning, " +
-                "facts and language — never invent facts, never summarize, never translate. " +
-                "Then speak the rewritten text aloud. Speak only the rewritten text."
-            else -> "You are a professional audiobook narrator. First silently rewrite the text you are " +
-                "given using clear, simple vocabulary and short, easy sentences while preserving its exact " +
-                "meaning, facts and language — no invented facts, no summarizing, no translating. " +
-                "Then speak the rewritten text aloud. Speak only the rewritten text."
-        }
+    private fun buildNotification(): Notification {
+        val open = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val stop = PendingIntent.getService(
+            this,
+            0,
+            Intent(this, ReaderService::class.java).setAction(ACTION_STOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        return Notification.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_stat_notify)
+            .setContentTitle(getString(R.string.reader_title))
+            .setContentText(getString(R.string.reader_notif_body))
+            .setContentIntent(open)
+            .setStyle(Notification.MediaStyle().setMediaSession(mediaSession.sessionToken).setShowActionsInCompactView(0))
+            .addAction(Notification.Action.Builder(null, getString(R.string.reader_notif_stop), stop).build())
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setCategory(Notification.CATEGORY_TRANSPORT)
+            .build()
+    }
+
+    override fun onDestroy() {
+        destroyed = true
+        scope.cancel()
+        if (controller.state.value.phase.isActivePlayback()) controller.pause()
+        mediaSession.isActive = false
+        mediaSession.release()
+        super.onDestroy()
+    }
+
+    private fun ReaderPhase.isActivePlayback(): Boolean = this in setOf(
+        ReaderPhase.CONNECTING,
+        ReaderPhase.REWRITING,
+        ReaderPhase.SPEAKING,
+        ReaderPhase.NEXT,
+    )
+
+    companion object {
+        const val ACTION_PLAY = "com.voxora.app.reader.PLAY"
+        const val ACTION_STOP = "com.voxora.app.reader.STOP"
+        const val EXTRA_MODE = "reader_mode"
+        private const val CHANNEL_ID = "voxora_reader"
+        private const val NOTIFICATION_ID = 43
+        private const val TAG = "ReaderService"
+        private val commandMutex = Mutex()
     }
 }

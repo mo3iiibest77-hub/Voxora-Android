@@ -6,101 +6,93 @@ import android.media.AudioFocusRequest
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import android.os.Handler
+import android.os.Looper
 import com.voxora.app.util.VoxoraLog
-import com.voxora.core.GeminiLiveConfig
-import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withTimeout
 
-/**
- * Streams Gemini narration PCM (16-bit mono @ [GeminiLiveConfig.OUTPUT_SAMPLE_RATE])
- * via [AudioTrack]. Reader is a foreground listening experience — no source-music
- * ducking and no volume-provider session; plain media focus is enough.
- */
-class ReaderPlayback(context: Context) {
-    private val appContext = context.applicationContext
-    private val audioManager = appContext.getSystemService(AudioManager::class.java)
+class ReaderPlayback(context: Context, onFocusLost: () -> Unit) {
+    private val manager = context.getSystemService(AudioManager::class.java)
     private val attributes = AudioAttributes.Builder()
         .setUsage(AudioAttributes.USAGE_MEDIA)
         .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
         .build()
-    private val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+    private val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
         .setAudioAttributes(attributes)
-        .setOnAudioFocusChangeListener { change ->
-            if (change != AudioManager.AUDIOFOCUS_GAIN) VoxoraLog.i("ReaderPlayback", "focus lost ($change); Reader pauses via service")
-        }
+        .setOnAudioFocusChangeListener({ change ->
+            if (change != AudioManager.AUDIOFOCUS_GAIN) onFocusLost()
+        }, Handler(Looper.getMainLooper()))
         .build()
     private var track: AudioTrack? = null
-    private val playing = AtomicBoolean(false)
     private var framesWritten = 0L
+    private var lastHead = 0L
+    private var headWraps = 0L
 
     fun start() {
-        stop()
-        if (audioManager?.requestAudioFocus(focusRequest) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
-            throw IllegalStateException("audio focus denied")
-        }
-        val minBuf = AudioTrack.getMinBufferSize(
-            GeminiLiveConfig.OUTPUT_SAMPLE_RATE,
-            AudioFormat.CHANNEL_OUT_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-        )
-        val bufSize = (minBuf * 8).coerceAtLeast(GeminiLiveConfig.OUTPUT_SAMPLE_RATE * 2)
+        check(manager?.requestAudioFocus(focus) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED)
+        val minimum = AudioTrack.getMinBufferSize(24_000, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_FLOAT)
+        check(minimum > 0)
         track = AudioTrack.Builder()
             .setAudioAttributes(attributes)
-            .setAudioFormat(
-                AudioFormat.Builder()
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setSampleRate(GeminiLiveConfig.OUTPUT_SAMPLE_RATE)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                    .build(),
-            )
-            .setBufferSizeInBytes(bufSize)
+            .setAudioFormat(AudioFormat.Builder()
+                .setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
+                .setSampleRate(24_000)
+                .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                .build())
+            .setBufferSizeInBytes(maxOf(minimum * 2, 24_000))
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
+        check(track?.state == AudioTrack.STATE_INITIALIZED)
         track?.play()
-        playing.set(true)
-        framesWritten = 0
-        VoxoraLog.i("ReaderPlayback", "started, buf=$bufSize")
+        VoxoraLog.i("ReaderPlayback", "Media playback started")
     }
 
-    /** Frames written but not yet played out (approximate playback buffer backlog). */
-    fun undrainedFrames(): Long {
-        val t = track ?: return 0
-        return if (!playing.get()) 0 else (framesWritten - t.playbackHeadPosition.toLong()).coerceAtLeast(0)
-    }
-
-    /** Blocking write of one PCM chunk; safe to call repeatedly while playing. */
-    fun writeFloats(samples: FloatArray) {
-        if (!playing.get()) return
-        val t = track ?: return
-        val shorts = ShortArray(samples.size) { i ->
-            val s = samples[i].coerceIn(-1f, 1f)
-            (if (s < 0) s * 0x8000 else s * 0x7fff).toInt().toShort()
-        }
+    suspend fun writeFloats(samples: FloatArray) {
+        val output = checkNotNull(track)
         var offset = 0
-        while (offset < shorts.size && playing.get()) {
-            val written = t.write(shorts, offset, shorts.size - offset, AudioTrack.WRITE_BLOCKING)
-            if (written < 0) {
-                VoxoraLog.w("ReaderPlayback", "write error $written")
-                break
+        withTimeout(30_000) {
+            while (offset < samples.size) {
+                currentCoroutineContext().ensureActive()
+                val count = output.write(samples, offset, minOf(2400, samples.size - offset), AudioTrack.WRITE_NON_BLOCKING)
+                check(count >= 0)
+                offset += count
+                framesWritten += count
+                if (count == 0) delay(10)
             }
-            offset += written
-            framesWritten += written
+        }
+    }
+
+    suspend fun drain() {
+        val output = checkNotNull(track)
+        withTimeout(30_000) {
+            while (true) {
+                currentCoroutineContext().ensureActive()
+                val head = output.playbackHeadPosition.toLong() and 0xffffffffL
+                if (head < lastHead) headWraps += 1L shl 32
+                lastHead = head
+                if (headWraps + head >= framesWritten) break
+                delay(10)
+            }
         }
     }
 
     fun stop() {
-        playing.set(false)
-        try {
-            track?.pause()
-            track?.flush()
-            track?.stop()
-            track?.release()
-        } catch (_: Exception) {
-        }
+        val output = track
         track = null
         try {
-            audioManager?.abandonAudioFocusRequest(focusRequest)
-        } catch (_: Exception) {
+            output?.pause()
+            output?.flush()
+        } catch (e: Exception) {
+            VoxoraLog.w("ReaderPlayback", "Audio stop failed: ${e.javaClass.simpleName}")
+        } finally {
+            try {
+                output?.release()
+            } finally {
+                manager?.abandonAudioFocusRequest(focus)
+            }
         }
-        VoxoraLog.i("ReaderPlayback", "stopped")
     }
 }

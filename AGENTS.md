@@ -55,10 +55,12 @@ Voxora-Android/
 │       │   ├── FloatingBubbleService.kt
 │       │   ├── SystemAudioCapture.kt
 │       │   └── DelayedScreenOverlay.kt
-│       ├── reader/                  ← Voxora Reader feature (new; isolated)
+│       ├── reader/                  ← Isolated background document narration
 │       │   ├── ReaderScreen.kt
 │       │   ├── ReaderViewModel.kt
-│       │   ├── ReaderService.kt
+│       │   ├── ReaderService.kt      ← Android mediaPlayback foreground service
+│       │   ├── ReaderController.kt   ← Hilt singleton; document and narration state
+│       │   ├── ReaderPlayback.kt     ← Local PCM playback and audio focus
 │       │   ├── ChunkQueue.kt
 │       │   └── TextExtractor.kt
 │       ├── ui/
@@ -73,6 +75,7 @@ Voxora-Android/
 └── core/
     └── src/main/java/com/voxora/core/
         ├── gemini/GeminiLiveSession.kt
+        ├── gemini/GeminiReaderSession.kt ← Independent text-to-AUDIO Gemini session
         ├── GeminiLiveConfig.kt
         └── prefs/UserPrefs.kt
 ```
@@ -185,76 +188,40 @@ sealed interface ReaderUiState {
 
 ## 5. VOXORA READER — FEATURE SPEC
 
-### Pipeline State Machine
+### Pipeline and state
 ```
-IDLE → FILE_PICKED → EXTRACTING → CHUNKED → [REWRITING + SPEAKING loop] → DONE
-                                                ↑__________________________|
-```
-
-### TextChunk model
-```kotlin
-data class TextChunk(
-    val index: Int,
-    val rawText: String,
-    val rewrittenText: String? = null,
-    val audioReady: Boolean = false,
-    val state: ChunkState = ChunkState.PENDING
-)
-
-enum class ChunkState { PENDING, REWRITING, READY, SPEAKING, DONE, ERROR }
+IDLE → EXTRACTING → READY → CONNECTING → [REWRITING → SPEAKING → NEXT] → COMPLETE
+                                            ↘ PAUSED / STOPPED / ERROR
 ```
 
-### Chunk size
-- Target: ~400–600 words per chunk
-- Split on paragraph boundaries first, then word count
-- Never cut mid-sentence
+- `TextExtractor` reads selectable-text PDF or UTF-8 TXT using the system document picker. Scanned PDFs require OCR outside the app.
+- `ChunkQueue` owns extracted strings and the current index; its current splitter uses a 500-word target. Paragraph/sentence-aware splitting is a future improvement, not an existing guarantee.
+- `ReaderState` exposes `phase`, `chunk`, `total`, `text`, and `error`; `ReaderPhase` includes connection, playback, pause, stop, completion, and failure states.
+- `narrationText: StateFlow<String>` exposes the current narration preview separately.
 
-### Backend API contract (configurable URL in UserPrefs)
-```
-POST {readerBackendUrl}/rewrite
-Content-Type: application/json
+### Gemini narration — no rewrite backend or device TTS
+- `GeminiReaderSession` is an independent text-to-AUDIO session over Gemini BidiGenerateContent. Never route Reader through `GeminiLiveSession`, Dub services, capture, or overlays.
+- Send each document chunk with the selected `simple` or `fluent` instruction. Gemini rewrites and speaks in the document language while preserving meaning and facts; it must not summarize, invent facts, or translate.
+- Use only the saved Gemini API key from `UserPrefs`, shared with Live Dub. Do not add another key, backend URL, rewrite endpoint, or phone TextToSpeech fallback. Reader is key-only text→audio.
+- Connection attempts use Reader-specific narration model candidates and bounded timeouts. Never change Dub model configuration to repair Reader.
+- Stream returned PCM through `ReaderPlayback`; complete a chunk only after queued audio has played. Cancellation must release the session, audio output, and focus without corrupting a newer run.
 
-Request:
-{
-  "text": "...",
-  "mode": "simple" | "faithful" | "academic" | "colloquial" | "custom",
-  "custom_prompt": "..." // only when mode=custom
-}
+### Ownership and background lifecycle
+- `ReaderController` is an injectable Hilt `@Singleton` owning document, queue, narration state, Gemini session, and local playback. It exposes `state`, `narrationText`, synchronous `load(Uri)`, `pause()`, `stop()`, and suspending `play(mode: String)`.
+- `play` must suspend until narration completes, cancels, or fails. It must not launch detached narration and return early. Commands must be safe across ViewModel and service IO callers; old cleanup must not stop a newer generation.
+- `ReaderViewModel` observes the singleton and delegates load, pause, stop, and settings work off Main. Play starts `ReaderService` with `ContextCompat.startForegroundService` and the mode extra; it never calls `controller.play` directly.
+- `ReaderService` is a real `@AndroidEntryPoint` Android `Service`, not an injected pipeline class. Promote immediately with foreground type `mediaPlayback`, then run narration in its own IO coroutine scope.
+- Use a Reader-branded media notification with a Stop action and a content intent opening `MainActivity`. Stop calls `controller.stop()` and ends the service. Completion and errors remove foreground state and stop the service without clearing the loaded document.
+- Repeated starts must be serialized (`cancelAndJoin` the previous run before a new one); a stale job must never remove the notification or stop a newer service run. Destruction cancels service coroutines and pauses only a still-active owned playback run, never a normally completed document.
+- The service owns a local `MediaSession` with `setPlaybackToLocal` and `USAGE_MEDIA`/speech attributes, including pause and stop callbacks. Never use remote volume providers; hardware volume keys control ordinary media volume.
+- Back navigation, composition disposal, Activity `ON_STOP`, and ViewModel clearing must not pause or close the singleton. Narration continues when switching apps or turning off the screen while the foreground service is alive; process death does not automatically resume narration.
+- Explicit Pause preserves the current chunk; resume restarts that chunk. Stop resets the queue position while retaining the document.
 
-Response:
-{
-  "rewritten_text": "...",
-  "tokens_used": 123  // optional
-}
-```
-
-- If `readerBackendUrl` is empty → skip rewrite, use raw text
-- Timeout: 30 seconds per chunk
-- Retry: 2 times with exponential backoff on 5xx
-
-### TTS (Android built-in for MVP)
-```kotlin
-// Use TextToSpeech with QUEUE_FLUSH for current, QUEUE_ADD for next
-// Pitch: 1.0f, Speech rate: user-configurable (0.7 – 1.5)
-// Language: match app locale or user selection
-```
-
-### Reader UI layout
-```
-┌─────────────────────────────────┐
-│  📄 filename.pdf          [✕]   │  ← TopAppBar
-├─────────────────────────────────┤
-│                                 │
-│   [Current chunk text display]  │  ← Scrollable, highlights current sentence
-│   Chunk 3 of 24                 │
-│                                 │
-├─────────────────────────────────┤
-│  Mode: [Simple ▾]               │  ← Dropdown chip
-│                                 │
-│  ◀◀   ⏸   ▶▶      🔊 1.0x     │  ← Playback controls
-│  ████████░░░░░░░  3 / 24       │  ← Progress bar
-└─────────────────────────────────┘
-```
+### Reader UI
+- Keep Simple/Fluent mode selection, PDF/TXT picker, progress/status, Play/Pause and Stop, error text, and narration preview.
+- Treat `CONNECTING` as active playback so Pause remains available and mode changes are disabled while connecting.
+- Hoist previewable content, use lifecycle-aware state collection and theme tokens, and provide a `Modifier` parameter.
+- Explain background playback in both English and Persian; do not claim that leaving Reader pauses playback.
 
 ---
 
@@ -275,10 +242,8 @@ If a bug is found in these files, report it — do not silently fix.
 ## 7. MANIFEST RULES
 
 ```xml
-<!-- Required for Reader feature -->
-<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
-    android:maxSdkVersion="32" />
-<uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
 
 <!-- ReaderService must be declared -->
 <service
@@ -304,7 +269,7 @@ If a bug is found in these files, report it — do not silently fix.
 - `com.tom-roush:pdfbox-android` — PDF text extraction
 - `org.jetbrains.kotlinx:kotlinx-coroutines-android`
 - `androidx.lifecycle:lifecycle-viewmodel-compose`
-- `com.squareup.okhttp3:okhttp` — HTTP client for rewrite backend
+- `com.squareup.okhttp3:okhttp` — HTTP client
 - `com.squareup.moshi:moshi-kotlin` — JSON parsing
 
 ### Ask before adding
@@ -340,6 +305,8 @@ VoxoraLog.e("ReaderVM", "Chunk rewrite failed: ${e.message}", e)
 - Commit messages: `feat(reader): add TextExtractor with PDFBox support`
 - Format: `type(scope): description` — types: feat, fix, refactor, style, chore, docs
 - When implementing a feature, commit in logical slices — not one giant commit
+- Update `AGENTS.md` whenever architecture, feature contracts, or project policies change, in the same commit or the immediately following commit. Preserve unrelated instructions.
+- STANDING RULE: `AGENTS.md` is the canonical architecture record. Keep the Reader (controller + foreground `mediaPlayback` service, background lifecycle, IO-off-Main commands, normal `USAGE_MEDIA` volume via local `MediaSession`, isolation from Dub) and any future feature contracts documented there as code lands.
 
 ---
 
@@ -367,5 +334,4 @@ A task is NOT done until:
 
 ---
 
-*Last updated: auto-generated by Claude for Voxora project*  
-*Applies to: all agents (OpenCode, Claude Code, Grok, ChatGPT, etc.)*
+*Last updated: auto-generated by Claude for Voxora project*

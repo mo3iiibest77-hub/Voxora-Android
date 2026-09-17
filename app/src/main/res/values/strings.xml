@@ -86,7 +86,15 @@
     <string name="reader_title">Voxora Reader</string>
     <string name="reader_pick">Choose PDF or TXT</string>
     <string name="reader_privacy">Reader sends each chunk to Gemini with your saved API key (the same key as Live Dub). Gemini rewrites it in the selected style and narrates it with its own voice — no phone text-to-speech and no external server. PDFs must contain selectable text; scanned PDFs need OCR.</string>
-    <string name="reader_pause_hint">Reader pauses when you leave. Resume starts from the current chunk.</string>
+    <string name="reader_pause_hint">Reader keeps playing in the background and with the screen off. Pause here or stop from the notification. Resume restarts the current chunk.</string>
+    <string name="reader_connecting">Connecting to Gemini…</string>
+    <string name="reader_notif_channel_name">Voxora Reader</string>
+    <string name="reader_notif_channel_description">Background document narration and playback controls</string>
+    <string name="reader_notif_body">Preparing or playing your document. Tap Stop Reader to end narration.</string>
+    <string name="reader_notif_stop">Stop Reader</string>
+    <string name="reader_settings_load_failed">Could not load Reader settings.</string>
+    <string name="reader_settings_save_failed">Could not save Reader settings.</string>
+    <string name="reader_service_start_failed">Could not start Reader playback. Keep the app open and try again.</string>
     <string name="reader_narrating">Gemini is narrating</string>
     <string name="reader_mode_missing">Select a narration style.</string>
     <string name="reader_failed_generic">Reader failed. Try Play again.</string>

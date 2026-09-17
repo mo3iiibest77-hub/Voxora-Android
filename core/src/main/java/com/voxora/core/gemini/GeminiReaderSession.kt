@@ -60,7 +60,9 @@ class GeminiReaderSession(
     /** One-line diagnostic hook; called from WebSocket threads. */
     var onLog: ((String) -> Unit)? = null
 
-    private val audioChannel = Channel<FloatArray>(capacity = Channel.UNLIMITED)
+    private val receivedFrames = java.util.concurrent.atomic.AtomicLong()
+    val audioFramesReceived: Long get() = receivedFrames.get()
+    private val audioChannel = Channel<FloatArray>(capacity = 512)
     val audio: Flow<FloatArray> = audioChannel.receiveAsFlow()
 
     private val closedByUs = AtomicBoolean(false)
@@ -98,6 +100,14 @@ class GeminiReaderSession(
         ws?.close(1000, "stop")
         ws = null
         _status.value = ReaderSessionStatus.Idle
+    }
+
+    fun close() {
+        stop()
+        audioChannel.cancel()
+        wsClient.dispatcher.cancelAll()
+        wsClient.connectionPool.evictAll()
+        wsClient.dispatcher.executorService.shutdown()
     }
 
     /**
@@ -141,6 +151,7 @@ class GeminiReaderSession(
             throw ReaderSessionException("Gemini session closed before the chunk finished.")
         }
         pendingTurn = null
+        (status.value as? ReaderSessionStatus.Error)?.let { throw ReaderSessionException(it.message) }
         if (!hadAudio.get()) return null
         return spokenText.toString().trim()
     }
@@ -249,7 +260,12 @@ class GeminiReaderSession(
                     val mime = inline.optString("mimeType").ifBlank { inline.optString("mime_type") }
                     log("first audio: mime=$mime bytes=${bytes.size}")
                 }
-                audioChannel.trySend(pcm)
+                if (audioChannel.trySend(pcm).isSuccess) {
+                    receivedFrames.addAndGet(pcm.size.toLong())
+                } else {
+                    fail("Narration audio buffer is full.")
+                    return
+                }
             }
         }
     }

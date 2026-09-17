@@ -83,7 +83,15 @@
     <string name="toast_gemini_ready">جمینا آماده است</string>
     <string name="toast_reconnecting">در حال اتصال مجدد…</string>
     <string name="reader_privacy">Reader هر بخش را با کلید API ذخیره‌شده (همان کلید Live Dub) برای جمینا می‌فرستد. جمینا آن را به سبک انتخاب‌شده بازنویسی و با صدای خودش روایت می‌کند — بدون گفتار دستگاه و بدون سرور خارجی. متن PDF باید قابل انتخاب باشد؛ فایل‌های اسکن‌شده به OCR نیاز دارند.</string>
-    <string name="reader_pause_hint">وقتی از صفحه خارج شوید Reader متوقف می‌شود. ادامه از بخش فعلی شروع می‌کند.</string>
+    <string name="reader_pause_hint">Reader در پس‌زمینه و با صفحه خاموش به پخش ادامه می‌دهد. از اینجا موقتاً مکث کنید یا از اعلان پخش را متوقف کنید. ادامه پخش از ابتدای بخش فعلی است.</string>
+    <string name="reader_connecting">در حال اتصال به جمینا…</string>
+    <string name="reader_notif_channel_name">Voxora Reader</string>
+    <string name="reader_notif_channel_description">روایت سند در پس‌زمینه و کنترل‌های پخش</string>
+    <string name="reader_notif_body">سند شما در حال آماده‌سازی یا پخش است. برای پایان روایت، توقف Reader را بزنید.</string>
+    <string name="reader_notif_stop">توقف Reader</string>
+    <string name="reader_settings_load_failed">بارگذاری تنظیمات Reader ممکن نشد.</string>
+    <string name="reader_settings_save_failed">ذخیره تنظیمات Reader ممکن نشد.</string>
+    <string name="reader_service_start_failed">شروع پخش Reader ممکن نشد. برنامه را باز نگه دارید و دوباره تلاش کنید.</string>
     <string name="reader_narrating">جمینا در حال روایت است</string>
     <string name="reader_mode_missing">سبک روایت را انتخاب کنید.</string>
     <string name="reader_failed_generic">Reader ناموفق بود. دوباره Play را بزنید.</string>
