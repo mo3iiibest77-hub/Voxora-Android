@@ -25,7 +25,7 @@ class ReaderPlayback(context: Context) {
     private val focusRequest = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
         .setAudioAttributes(attributes)
         .setOnAudioFocusChangeListener { change ->
-            if (change != AudioManager.AUDIOFOCUS_GAIN) VoxoraLog.i(TAG, "focus lost ($change); Reader pauses via service")
+            if (change != AudioManager.AUDIOFOCUS_GAIN) VoxoraLog.i("ReaderPlayback", "focus lost ($change); Reader pauses via service")
         }
         .build()
     private var track: AudioTrack? = null
