@@ -85,6 +85,7 @@ class ReaderService @Inject constructor(@ApplicationContext private val context:
             fail(context.getString(R.string.reader_mode_missing))
             return
         }
+        if (queue.current == null) queue.reset()
         val run = ++generation
         job = scope.launch {
             try {
@@ -101,7 +102,7 @@ class ReaderService @Inject constructor(@ApplicationContext private val context:
                 try {
                     playback?.start()
                 } catch (e: IllegalStateException) {
-                    throw NarrationException(context.getString(R.string.error_capture_failed))
+                    throw NarrationException(context.getString(R.string.reader_audio_unavailable))
                 }
                 mutableState.value = ReaderState(
                     phase = ReaderPhase.SPEAKING,
@@ -141,18 +142,44 @@ class ReaderService @Inject constructor(@ApplicationContext private val context:
     }
 
     private suspend fun connectAndAwait(session: GeminiReaderSession, apiKey: String, instruction: String) {
-        session.connect(apiKey, instruction)
+        session.onLog = { line -> VoxoraLog.d(SESSION_LOG_TAG, line) }
+        var lastError: String? = null
         try {
             withTimeout(CONNECT_TIMEOUT_MS) {
-                while (true) {
-                    when (val s = session.status.value) {
-                        is ReaderSessionStatus.Ready -> return@withTimeout
-                        is ReaderSessionStatus.Error -> throw NarrationException(s.message)
-                        else -> { /* still connecting */ }
+                var attempt = 0
+                while (attempt < MODEL_CANDIDATES.size) {
+                    val (model, withSpeechConfig) = MODEL_CANDIDATES[attempt]
+                    val attemptStart = System.currentTimeMillis()
+                    session.connect(apiKey, instruction, model, withSpeechConfig)
+                    while (true) {
+                        when (val s = session.status.value) {
+                            is ReaderSessionStatus.Ready -> {
+                                VoxoraLog.i(TAG, "narration ready on $model")
+                                return@withTimeout
+                            }
+                            is ReaderSessionStatus.Error -> {
+                                VoxoraLog.w(TAG, "candidate failed: $model" +
+                                    (if (withSpeechConfig) "" else " (no voiceConfig)") +
+                                    " — ${s.message.take(200)}")
+                                lastError = s.message
+                                break
+                            }
+                            else -> {
+                                if (System.currentTimeMillis() - attemptStart > PER_ATTEMPT_TIMEOUT_MS) {
+                                    VoxoraLog.w(TAG, "candidate silent: $model; trying next")
+                                    session.stop()
+                                    break
+                                }
+                            }
+                        }
+                        delay(50)
                     }
-                    delay(50)
+                    attempt++
                 }
             }
+            // Chain exhausted without Ready: surface the last specific server error,
+            // or a clear generic message when every attempt was silent.
+            throw NarrationException(lastError ?: context.getString(R.string.reader_models_exhausted))
         } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
             throw NarrationException(context.getString(R.string.reader_connect_timeout))
         }
@@ -233,11 +260,29 @@ class ReaderService @Inject constructor(@ApplicationContext private val context:
 
     private companion object {
         const val TAG = "Reader"
+        const val SESSION_LOG_TAG = "ReaderSession"
         const val STALE_RUN = "stale"
-        const val CONNECT_TIMEOUT_MS = 20_000L
+        const val CONNECT_TIMEOUT_MS = 30_000L
+        const val PER_ATTEMPT_TIMEOUT_MS = 10_000L
         const val DRAIN_TIMEOUT_MS = 10_000L
         const val DRAIN_THRESHOLD_FRAMES = 2_000
         const val NARRATION_PREVIEW_CHARS = 400
+
+        /**
+         * Fallback chain for text→AUDIO Live narration: per model, with Kore
+         * speechConfig first, then once without (in case a model rejects the
+         * voice config). Each attempt runs on a fresh socket within the overall
+         * connect budget; fast server rejections skip through quickly, silent
+         * sockets are capped at [PER_ATTEMPT_TIMEOUT_MS].
+         */
+        val MODEL_CANDIDATES: List<Pair<String, Boolean>> = listOf(
+            "models/gemini-2.5-flash-native-audio-preview-12-2025" to true,
+            "models/gemini-2.5-flash-native-audio-preview-12-2025" to false,
+            "models/gemini-2.0-flash-live-001" to true,
+            "models/gemini-2.0-flash-live-001" to false,
+            "models/gemini-live-2.5-flash-preview" to true,
+            "models/gemini-live-2.5-flash-preview" to false,
+        )
 
         fun instructionFor(mode: String): String = when (mode) {
             "fluent" -> "You are a professional audiobook narrator. First silently rewrite the text you are " +

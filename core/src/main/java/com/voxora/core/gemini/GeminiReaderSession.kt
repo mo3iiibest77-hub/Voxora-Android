@@ -31,13 +31,24 @@ sealed class ReaderSessionStatus {
  * Text → audio narration session over BidiGenerateContent (same host family as
  * [GeminiLiveConfig.WS_PATH]) for the Reader feature.
  *
- * Model choice: `gemini-2.0-flash-live-001` — a public Live model that accepts text
- * client content and streams spoken PCM (16-bit, 24 kHz). Deliberately NOT
- * [GeminiLiveConfig.MODEL]: that translate-preview model is tuned for live audio
- * translation and does not fit text→audio narration.
+ * The model/voice setup is supplied per [connect] call so the caller can run a
+ * fallback chain across candidate Live models (each attempt on a fresh socket).
+ * Deliberately NOT [GeminiLiveConfig.MODEL]: the translate-preview model used by
+ * Live Dub is tuned for live audio translation, not text→audio narration.
  *
- * Live Dub ([GeminiLiveSession]) is untouched; this class only adds a parallel API
- * with its own setup (responseModalities=AUDIO, no translationConfig).
+ * Setup payload shape verified against the official v1beta schema
+ * (google/ai/generativelanguage/v1beta/generative_service.proto):
+ * BidiGenerateContentSetup { model, generation_config { response_modalities,
+ * speech_config { voice_config { prebuilt_voice_config { voice_name } } } },
+ * system_instruction }. `language_code` is OPTIONAL, so no language is sent.
+ * Wire format is camelCase, proven in production by [GeminiLiveSession].
+ *
+ * Diagnostics: [onLog] receives one-line lifecycle events (never the API key or
+ * URL — the key is embedded in the WS URL, so URLs are never logged). The core
+ * module cannot depend on the app module, so the caller bridges these lines into
+ * its ring-buffer logger.
+ *
+ * Live Dub ([GeminiLiveSession]) is untouched; this class only adds a parallel API.
  */
 class GeminiReaderSession(
     client: OkHttpClient = defaultClient(),
@@ -46,6 +57,9 @@ class GeminiReaderSession(
     private val _status = MutableStateFlow<ReaderSessionStatus>(ReaderSessionStatus.Idle)
     val status: StateFlow<ReaderSessionStatus> = _status.asStateFlow()
 
+    /** One-line diagnostic hook; called from WebSocket threads. */
+    var onLog: ((String) -> Unit)? = null
+
     private val audioChannel = Channel<FloatArray>(capacity = Channel.UNLIMITED)
     val audio: Flow<FloatArray> = audioChannel.receiveAsFlow()
 
@@ -53,6 +67,9 @@ class GeminiReaderSession(
     private val ready = AtomicBoolean(false)
     private var ws: WebSocket? = null
     private var narrationInstruction: String = ""
+    private var setupModel: String = ""
+    private var withSpeechConfig: Boolean = true
+    private var setupCompleteLogged = false
 
     @Volatile
     private var pendingTurn: Channel<Unit>? = null
@@ -60,12 +77,16 @@ class GeminiReaderSession(
     private val hadAudio = AtomicBoolean(false)
     private val spokenText = StringBuilder()
 
-    fun connect(apiKey: String, instruction: String) {
+    fun connect(apiKey: String, instruction: String, model: String, withSpeechConfig: Boolean = true) {
         stop()
         closedByUs.set(false)
         ready.set(false)
+        setupCompleteLogged = false
         narrationInstruction = instruction
+        setupModel = model
+        this.withSpeechConfig = withSpeechConfig
         _status.value = ReaderSessionStatus.Connecting
+        log("connecting (model=$model, speechConfig=${if (withSpeechConfig) "on" else "off"})")
         val url = "${GeminiLiveConfig.WS_PATH}?key=${java.net.URLEncoder.encode(apiKey.trim(), "UTF-8")}"
         ws = wsClient.newWebSocket(Request.Builder().url(url).build(), listener)
     }
@@ -109,6 +130,7 @@ class GeminiReaderSession(
             pendingTurn = null
             throw ReaderSessionException("Gemini connection was lost.")
         }
+        log("turn sent (${text.length} chars)")
         try {
             withTimeout(TURN_TIMEOUT_MS) { channel.receive() }
         } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
@@ -125,29 +147,29 @@ class GeminiReaderSession(
 
     private val listener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
+            val genConfig = JSONObject().put("responseModalities", JSONArray().put("AUDIO"))
+            if (withSpeechConfig) {
+                genConfig.put(
+                    "speechConfig",
+                    JSONObject().put(
+                        "voiceConfig",
+                        JSONObject().put("prebuiltVoiceConfig", JSONObject().put("voiceName", READER_VOICE)),
+                    ),
+                )
+            }
             val setup = JSONObject()
                 .put(
                     "setup",
                     JSONObject()
-                        .put("model", READER_MODEL)
-                        .put(
-                            "generationConfig",
-                            JSONObject()
-                                .put("responseModalities", JSONArray().put("AUDIO"))
-                                .put(
-                                    "speechConfig",
-                                    JSONObject().put(
-                                        "voiceConfig",
-                                        JSONObject().put("prebuiltVoiceConfig", JSONObject().put("voiceName", READER_VOICE)),
-                                    ),
-                                ),
-                        )
+                        .put("model", setupModel)
+                        .put("generationConfig", genConfig)
                         .put(
                             "systemInstruction",
                             JSONObject().put("parts", JSONArray().put(JSONObject().put("text", narrationInstruction))),
                         ),
                 )
                 .toString()
+            log("connected; sending setup (model=$setupModel, speechConfig=${if (withSpeechConfig) "on" else "off"})")
             webSocket.send(setup)
         }
 
@@ -157,11 +179,15 @@ class GeminiReaderSession(
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             if (closedByUs.get()) return
-            fail(t.message ?: "Connection failed.")
+            val httpCode = response?.code?.let { " (http $it)" } ?: ""
+            log("onFailure: ${t.message.orEmpty().take(LOG_LIMIT)}$httpCode")
+            val msg = t.message?.takeIf { it.isNotBlank() } ?: "Connection failed."
+            fail(msg + httpCode)
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
             if (closedByUs.get()) return
+            log("onClosed: code=$code reason=${reason.take(LOG_LIMIT)}")
             if (!ready.get()) {
                 fail(mapClose(code, reason))
                 return
@@ -174,22 +200,36 @@ class GeminiReaderSession(
         val msg = try {
             JSONObject(text)
         } catch (_: Exception) {
+            log("unparsable server message (${text.length} chars)")
             return
         }
         if (msg.has("error")) {
             val m = msg.optJSONObject("error")?.optString("message").orEmpty()
+            log("server error: ${m.take(LOG_LIMIT)}")
             fail(m.ifBlank { "Gemini error." })
             return
         }
         if (msg.has("setupComplete") || msg.has("setup_complete")) {
+            if (!setupCompleteLogged) {
+                setupCompleteLogged = true
+                log("setup complete (model=$setupModel)")
+            }
             ready.set(true)
             _status.value = ReaderSessionStatus.Ready
             return
         }
-        val content = msg.optJSONObject("serverContent") ?: msg.optJSONObject("server_content") ?: return
+        if (msg.has("goAway") || msg.has("go_away")) {
+            log("goAway from server")
+            fail("Gemini is rebalancing the connection. Try Play again.")
+            return
+        }
+        val content = msg.optJSONObject("serverContent") ?: msg.optJSONObject("server_content") ?: run {
+            log("server message keys: ${msg.keys().asSequence().take(4).joinToString(",")}")
+            return
+        }
         content.optJSONObject("modelTurn")?.let { turn -> emitParts(turn) }
         if (content.optBoolean("turnComplete")) {
-            hadAudio.set(true)
+            log("turn complete (hadAudio=${hadAudio.get()})")
             completeTurn()
         }
     }
@@ -203,7 +243,10 @@ class GeminiReaderSession(
             val data = inline.optString("data")
             if (data.isNullOrBlank()) continue
             val pcm = PcmUtils.pcm16ToFloat(PcmUtils.fromBase64(data))
-            if (pcm.isNotEmpty()) audioChannel.trySend(pcm)
+            if (pcm.isNotEmpty()) {
+                if (hadAudio.compareAndSet(false, true)) log("first audio received")
+                audioChannel.trySend(pcm)
+            }
         }
     }
 
@@ -217,6 +260,10 @@ class GeminiReaderSession(
         completeTurn()
     }
 
+    private fun log(line: String) {
+        onLog?.invoke(line)
+    }
+
     private fun mapClose(code: Int, reason: String): String = when {
         code == 1008 || reason.contains("key", true) -> "Invalid API key. Check the Gemini key in Settings."
         reason.contains("quota", true) -> "Gemini quota exceeded. Wait or use another key."
@@ -228,9 +275,9 @@ class GeminiReaderSession(
     class ReaderSessionException(message: String) : Exception(message)
 
     companion object {
-        private const val READER_MODEL = "models/gemini-2.0-flash-live-001"
         private const val READER_VOICE = "Kore"
         private const val TURN_TIMEOUT_MS = 180_000L
+        private const val LOG_LIMIT = 300
 
         fun defaultClient(): OkHttpClient =
             OkHttpClient.Builder()

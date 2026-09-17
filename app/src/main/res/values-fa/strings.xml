@@ -89,6 +89,8 @@
     <string name="reader_failed_generic">Reader ناموفق بود. دوباره Play را بزنید.</string>
     <string name="reader_connect_timeout">اتصال به جمینا ممکن نشد. اتصال را بررسی و دوباره تلاش کنید.</string>
     <string name="reader_no_audio">جمینا برای این بخش صدایی برنگرداند. دوباره تلاش کنید.</string>
+    <string name="reader_models_exhausted">اتصال به هیچ‌کدام از مدل‌های روایت جمینا ممکن نشد. اتصال و کلید را بررسی و دوباره تلاش کنید.</string>
+    <string name="reader_audio_unavailable">خروجی صدا در دسترس نیست. برنامه‌های رسانه‌ای دیگر را ببندید و دوباره تلاش کنید.</string>
     <string name="reader_title">Voxora Reader</string>
     <string name="reader_pick">انتخاب PDF یا TXT</string>
     <string name="reader_simple">ساده</string>

@@ -92,6 +92,8 @@
     <string name="reader_failed_generic">Reader failed. Try Play again.</string>
     <string name="reader_connect_timeout">Could not connect to Gemini. Check your connection and try again.</string>
     <string name="reader_no_audio">Gemini did not return audio for this chunk. Try again.</string>
+    <string name="reader_models_exhausted">Could not connect to any supported Gemini narration model. Check your connection and key, then try again.</string>
+    <string name="reader_audio_unavailable">Audio output is unavailable. Close other media apps and try again.</string>
     <string name="reader_simple">Simple</string>
     <string name="reader_fluent">Fluent</string>
     <string name="reader_play">Play</string>
