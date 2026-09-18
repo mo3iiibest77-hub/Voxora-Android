@@ -52,6 +52,7 @@ import com.voxora.app.ui.theme.VoxoraColors
 import com.voxora.app.ui.theme.VoxoraTheme
 import com.voxora.core.prefs.UsagePrefs
 import com.voxora.core.prefs.UserPrefs
+import com.voxora.core.cloud.CloudProjectUsage
 import com.voxora.core.usage.ApiUsageSnapshot
 import com.voxora.core.usage.GeminiKeyProbe
 import com.voxora.core.usage.GeminiKeyProbeResult
@@ -90,28 +91,40 @@ fun ApiUsageScreen(
     val scope = rememberCoroutineScope()
 
     var apiKey by remember { mutableStateOf("") }
-    var accountEmail by remember { mutableStateOf("") }
     var probeResult by remember { mutableStateOf<GeminiKeyProbeResult?>(null) }
     var probing by remember { mutableStateOf(false) }
     val ledger by usagePrefs.ledger.collectAsStateWithLifecycle(initialValue = GeminiUsageLedger())
+    // The same singleton Settings uses, so the account, project and key shown here are the ones
+    // the user actually selected.
+    val repository = rememberCloudRepository(context)
+    val cloudAuth by repository.auth.collectAsStateWithLifecycle()
+    val cloudSelection by repository.selection.collectAsStateWithLifecycle()
+    val cloudUsage by repository.usage.collectAsStateWithLifecycle()
+
+    // Read the project's usage when the selection changes, and only while a Cloud grant is held:
+    // an API key cannot read project usage, and asking would only produce a refusal.
+    LaunchedEffect(cloudAuth, cloudSelection.selectedProject?.projectId) {
+        if (cloudAuth.isAuthorized && cloudSelection.selectedProject != null) repository.refreshUsage()
+    }
 
     LaunchedEffect(Unit) {
         apiKey = prefs.apiKey.first()
-        // The email is only shown when the account is actually signed in, so a stale stored
-        // address cannot appear on the dashboard after a sign-out.
-        val signedIn = prefs.signedIn.first()
-        accountEmail = if (signedIn) prefs.userEmail.first() else ""
     }
 
     ApiUsageContent(
         snapshot = ApiUsageSnapshot.assemble(
             apiKey = apiKey,
-            accountEmail = accountEmail,
+            // The account shown is the one Cloud authorization actually established, so it can
+            // never be a leftover address from a sign-out.
+            accountEmail = cloudSelection.accountEmail,
             probe = probeResult,
             ledger = ledger,
             nowMillis = System.currentTimeMillis(),
         ),
         probing = probing,
+        cloudProjectLabel = cloudSelection.selectedProject?.label,
+        cloudUsage = cloudUsage,
+        onRefreshCloudUsage = repository::refreshUsage,
         onTest = {
             // Ignore a second tap while a check is in flight, so overlapping probes cannot race
             // each other's results onto the screen.
@@ -135,6 +148,9 @@ fun ApiUsageScreen(
 private fun ApiUsageContent(
     snapshot: ApiUsageSnapshot,
     probing: Boolean,
+    cloudProjectLabel: String?,
+    cloudUsage: CloudProjectUsage?,
+    onRefreshCloudUsage: () -> Unit,
     onTest: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
@@ -269,26 +285,88 @@ private fun ApiUsageContent(
             }
         }
 
-        item(key = "project-header") { UsageSectionHeader(stringResource(R.string.usage_section_project)) }
+        item(key = "project-header") { UsageSectionHeader(stringResource(R.string.usage_google_section)) }
         item(key = "project") {
             UsageCard {
-                UsageRow(
-                    label = stringResource(R.string.usage_section_project),
-                    value = stringResource(R.string.usage_project_unknown),
-                )
-                UsageNote(stringResource(R.string.usage_project_help))
-                UsageMetricRow(
-                    label = stringResource(R.string.usage_project_quota),
-                    metric = snapshot.projectQuota,
-                )
-                UsageNote(stringResource(R.string.usage_project_quota_help))
-                UsageMetricRow(
-                    label = stringResource(R.string.usage_billing),
-                    metric = snapshot.billing,
-                )
-                UsageNote(stringResource(R.string.usage_billing_help))
-                if (snapshot.accountEmail != null) {
-                    UsageNote(stringResource(R.string.usage_account_not_linked))
+                if (cloudProjectLabel != null && cloudUsage != null) {
+                    // Google's own report for the selected project. Every figure is present only
+                    // when the API actually returned it; a gap names its reason instead of a zero.
+                    UsageRow(
+                        label = stringResource(R.string.settings_project_section),
+                        value = cloudProjectLabel,
+                        emphasised = true,
+                    )
+                    UsageNote(stringResource(R.string.usage_google_source, cloudProjectLabel))
+                    UsageMetricRow(
+                        label = stringResource(R.string.usage_google_requests),
+                        metric = cloudUsage.requests,
+                    )
+                    UsageMetricRow(
+                        label = stringResource(R.string.usage_google_tokens_input),
+                        metric = cloudUsage.inputTokens,
+                    )
+                    UsageMetricRow(
+                        label = stringResource(R.string.usage_google_tokens_output),
+                        metric = cloudUsage.outputTokens,
+                    )
+                    UsageMetricRow(
+                        label = stringResource(R.string.usage_project_quota),
+                        metric = cloudUsage.quotaLimit,
+                    )
+                    UsageMetricRow(
+                        label = stringResource(R.string.usage_google_quota_remaining),
+                        metric = cloudUsage.quotaRemaining,
+                    )
+                    UsageMetricRow(
+                        label = stringResource(R.string.usage_billing),
+                        metric = cloudUsage.billing,
+                    )
+                    OutlinedButton(
+                        onClick = onRefreshCloudUsage,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(46.dp),
+                        shape = RoundedCornerShape(14.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Refresh,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.usage_google_refresh))
+                    }
+                    UsageNote(stringResource(R.string.usage_billing_help))
+                } else if (cloudProjectLabel != null) {
+                    // A project is selected but Google's report has not arrived yet. Say that
+                    // rather than showing a figure that was never read.
+                    UsageRow(
+                        label = stringResource(R.string.settings_project_section),
+                        value = cloudProjectLabel,
+                    )
+                    UsageNote(stringResource(R.string.usage_google_loading))
+                } else {
+                    // No project selected: say so, and keep the API-key limits honest rather
+                    // than pretending a key can read project quota.
+                    UsageRow(
+                        label = stringResource(R.string.usage_section_project),
+                        value = stringResource(R.string.usage_project_unknown),
+                    )
+                    UsageNote(stringResource(R.string.usage_google_no_project))
+                    UsageNote(stringResource(R.string.usage_project_help))
+                    UsageMetricRow(
+                        label = stringResource(R.string.usage_project_quota),
+                        metric = snapshot.projectQuota,
+                    )
+                    UsageNote(stringResource(R.string.usage_project_quota_help))
+                    UsageMetricRow(
+                        label = stringResource(R.string.usage_billing),
+                        metric = snapshot.billing,
+                    )
+                    UsageNote(stringResource(R.string.usage_billing_help))
+                    if (snapshot.accountEmail != null) {
+                        UsageNote(stringResource(R.string.usage_account_not_linked))
+                    }
                 }
             }
         }
@@ -497,6 +575,13 @@ private fun ApiUsageScreenPreview(modifier: Modifier = Modifier) {
                     nowMillis = now,
                 ),
                 probing = false,
+                cloudProjectLabel = "Alpha project",
+                cloudUsage = CloudProjectUsage.observed(
+                    projectId = "alpha-123",
+                    requests = 1_284,
+                    quotaLimit = 3_000,
+                ),
+                onRefreshCloudUsage = {},
                 onTest = {},
                 onBack = {},
             )
@@ -518,6 +603,9 @@ private fun ApiUsageScreenUnconfiguredPreview(modifier: Modifier = Modifier) {
                     nowMillis = 1_760_000_000_000L,
                 ),
                 probing = false,
+                cloudProjectLabel = null,
+                cloudUsage = null,
+                onRefreshCloudUsage = {},
                 onTest = {},
                 onBack = {},
             )

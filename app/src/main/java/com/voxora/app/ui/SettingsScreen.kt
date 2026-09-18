@@ -26,18 +26,15 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.DataUsage
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.OpenInNew
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -71,11 +68,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.os.LocaleListCompat
 import com.voxora.app.R
-import com.voxora.app.auth.AuthFailure
-import com.voxora.app.auth.AuthUiState
-import com.voxora.app.auth.GoogleAuthHelper
 import com.voxora.app.reader.languageOptions
-import com.voxora.app.ui.theme.VoxoraColors
 import com.voxora.app.ui.theme.VoxoraTheme
 import com.voxora.core.i18n.AppLocales
 import com.voxora.core.prefs.UserPrefs
@@ -118,24 +111,6 @@ private fun List<LanguageChoice>.labelOf(code: String): String =
     firstOrNull { it.code == code }?.label ?: code
 
 /**
- * The user-facing explanation for a failed sign-in.
- *
- * Each reason gets its own sentence because the next action differs: a missing client ID is the
- * build's problem and guest mode still works, a cancellation needs no action at all, and a network
- * problem is worth retrying.
- */
-@Composable
-private fun authFailureMessage(reason: AuthFailure): String = when (reason) {
-    AuthFailure.CONFIGURATION_MISSING -> stringResource(R.string.auth_failure_configuration)
-    AuthFailure.CANCELLED -> stringResource(R.string.auth_failure_cancelled)
-    AuthFailure.NO_CREDENTIAL -> stringResource(R.string.auth_failure_no_credential)
-    AuthFailure.PROVIDER_UNAVAILABLE -> stringResource(R.string.auth_failure_provider)
-    AuthFailure.NETWORK -> stringResource(R.string.auth_failure_network)
-    AuthFailure.UNSUPPORTED_CREDENTIAL -> stringResource(R.string.auth_failure_unsupported)
-    AuthFailure.UNKNOWN -> stringResource(R.string.auth_failure_unknown)
-}
-
-/**
  * Voxora Settings.
  *
  * Laid out with the same visual system as the Reader screen — one keyed
@@ -154,22 +129,17 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val prefs = remember { UserPrefs(context) }
-    val auth = remember { GoogleAuthHelper(context, prefs) }
     val scope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
     var apiKey by remember { mutableStateOf("") }
     var lang by remember { mutableStateOf("fa") }
     var appLang by remember { mutableStateOf("en") }
     var saved by remember { mutableStateOf(false) }
-    // One typed state instead of separate flags: there is no way to hold a stale email while
-    // signed out, because only SignedIn carries an identity.
-    var authState by remember { mutableStateOf<AuthUiState>(AuthUiState.SignedOut) }
 
     LaunchedEffect(Unit) {
         apiKey = prefs.apiKey.first()
         lang = prefs.targetLanguage.first()
         appLang = prefs.appLanguage.first()
-        authState = auth.currentState()
     }
 
     fun applyAppLocale(code: String) {
@@ -186,7 +156,6 @@ fun SettingsScreen(
         onDubbingLanguageChange = { lang = it; saved = false },
         appLanguage = appLang,
         onAppLanguageChange = { appLang = it; applyAppLocale(it) },
-        authState = authState,
         saved = saved,
         onBack = onBack,
         onSave = {
@@ -199,26 +168,6 @@ fun SettingsScreen(
             }
         },
         onOpenAiStudio = { uriHandler.openUri(AI_STUDIO_URL) },
-        onSignIn = {
-            // Ignore a second tap while an operation is running: launching an overlapping
-            // credential request would race two results onto the same card.
-            if (!authState.isBusy) {
-                scope.launch {
-                    authState = AuthUiState.SigningIn
-                    authState = auth.signIn()
-                }
-            }
-        },
-        onSignOut = {
-            if (!authState.isBusy) {
-                scope.launch {
-                    authState = AuthUiState.SigningOut
-                    // signOut always reports SignedOut, even when the provider call failed, so
-                    // the card can never be left showing an account the user removed.
-                    authState = auth.signOut()
-                }
-            }
-        },
         onOpenOverlay = {
             onRequestOverlayPermission()
             context.startActivity(
@@ -242,13 +191,10 @@ private fun SettingsContent(
     onDubbingLanguageChange: (String) -> Unit,
     appLanguage: String,
     onAppLanguageChange: (String) -> Unit,
-    authState: AuthUiState,
     saved: Boolean,
     onBack: () -> Unit,
     onSave: () -> Unit,
     onOpenAiStudio: () -> Unit,
-    onSignIn: () -> Unit,
-    onSignOut: () -> Unit,
     onOpenOverlay: () -> Unit,
     onOpenLogs: () -> Unit,
     onOpenUsage: () -> Unit,
@@ -417,93 +363,10 @@ private fun SettingsContent(
             SettingsSectionHeader(stringResource(R.string.settings_account))
         }
         item(key = "account") {
-            SettingsCard {
-                if (authState.isSignedIn) {
-                    SettingsRowHeader(
-                        icon = Icons.Filled.Person,
-                        title = authState.nameOrEmpty,
-                        subtitle = authState.emailOrEmpty.takeIf {
-                            it.isNotBlank() && !it.equals(authState.nameOrEmpty, ignoreCase = true)
-                        },
-                    )
-                    OutlinedButton(
-                        onClick = onSignOut,
-                        enabled = !authState.isBusy,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(46.dp),
-                        shape = RoundedCornerShape(14.dp),
-                    ) {
-                        if (authState is AuthUiState.SigningOut) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(16.dp),
-                                strokeWidth = 2.dp,
-                                color = colors.primary,
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(stringResource(R.string.auth_signing_out))
-                        } else {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.Logout,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp),
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(stringResource(R.string.action_sign_out))
-                        }
-                    }
-                } else {
-                    SettingsRowHeader(
-                        icon = Icons.Filled.Person,
-                        title = stringResource(R.string.settings_sign_in),
-                        subtitle = stringResource(R.string.auth_optional_hint),
-                    )
-                    Button(
-                        onClick = onSignIn,
-                        enabled = !authState.isBusy,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(50.dp),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = colors.primary,
-                            contentColor = colors.onPrimary,
-                        ),
-                    ) {
-                        if (authState is AuthUiState.SigningIn) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(18.dp),
-                                strokeWidth = 2.dp,
-                                color = colors.onPrimary,
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = stringResource(R.string.auth_signing_in),
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        } else {
-                            Text(
-                                text = stringResource(R.string.settings_sign_in),
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                        }
-                    }
-                    // The failure reason used to be discarded entirely, so a build with no Web
-                    // client ID looked as if the button did nothing at all.
-                    val failure = (authState as? AuthUiState.Failed)?.reason
-                    if (failure != null) {
-                        Text(
-                            text = authFailureMessage(failure),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (failure == AuthFailure.CONFIGURATION_MISSING) {
-                                colors.onSurfaceVariant
-                            } else {
-                                VoxoraColors.danger
-                            },
-                        )
-                    }
-                }
-            }
+            // The account hierarchy — Google account, then project, then key — is its own
+            // composable so the three levels stay together and the invalidation rules live
+            // in one tested model (CloudSelection).
+            CloudAccountCard()
         }
 
         item(key = "overlay-header") {
@@ -718,13 +581,10 @@ private fun SettingsContentPreview(modifier: Modifier = Modifier) {
                 onDubbingLanguageChange = {},
                 appLanguage = "en",
                 onAppLanguageChange = {},
-                authState = AuthUiState.SignedOut,
                 saved = false,
                 onBack = {},
                 onSave = {},
                 onOpenAiStudio = {},
-                onSignIn = {},
-                onSignOut = {},
                 onOpenOverlay = {},
                 onOpenLogs = {},
                 onOpenUsage = {},
@@ -745,13 +605,10 @@ private fun SettingsContentSignedInPreview(modifier: Modifier = Modifier) {
                 onDubbingLanguageChange = {},
                 appLanguage = "fa",
                 onAppLanguageChange = {},
-                authState = AuthUiState.SignedIn("owner@voxora.app", "Mo3i"),
                 saved = true,
                 onBack = {},
                 onSave = {},
                 onOpenAiStudio = {},
-                onSignIn = {},
-                onSignOut = {},
                 onOpenOverlay = {},
                 onOpenLogs = {},
                 onOpenUsage = {},
