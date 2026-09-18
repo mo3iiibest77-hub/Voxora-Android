@@ -142,8 +142,8 @@
     <string name="reader_mode_selected">انتخاب‌شده</string>
     <string name="reader_language_section">زبان روایت</string>
     <string name="reader_language_change">تغییر زبان</string>
-    <string name="reader_source_section">متن منبع</string>
-    <string name="reader_source_hint">دقیقاً همان متنی که از فایل شما استخراج شده است. برای شروع از هر بخش، روی آن بزنید.</string>
+    <string name="reader_display_section">متن خواندن · %1$s</string>
+    <string name="reader_display_hint">همان‌طور که جمینا روایت می‌کند، این متن به زبان روایت انتخابی نمایش داده می‌شود. بخشی که هنوز به آن زبان روایت نشده، متن اصلی سند را نشان می‌دهد. برای شروع از هر بخش، روی آن بزنید.</string>
     <string name="reader_segment_now">در حال روایت</string>
     <string name="reader_narration_section">روایت Gemini</string>
     <string name="reader_narration_empty">روایت Gemini هنگام پخش اینجا نمایش داده می‌شود.</string>

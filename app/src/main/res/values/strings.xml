@@ -143,8 +143,8 @@
     <string name="reader_mode_selected">Selected</string>
     <string name="reader_language_section">Narration language</string>
     <string name="reader_language_change">Change language</string>
-    <string name="reader_source_section">Source document</string>
-    <string name="reader_source_hint">Exactly the text extracted from your file. Tap a segment to start there.</string>
+    <string name="reader_display_section">Reading text · %1$s</string>
+    <string name="reader_display_hint">Shown in your narration language as Gemini narrates. A unit not narrated in that language yet still shows the document\'s original text. Tap a unit to start there.</string>
     <string name="reader_segment_now">Now narrating</string>
     <string name="reader_narration_section">Gemini narration</string>
     <string name="reader_narration_empty">Gemini\'s narration appears here while it speaks.</string>

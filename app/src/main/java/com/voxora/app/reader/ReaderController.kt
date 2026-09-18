@@ -49,6 +49,14 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
     private var queue = ChunkQueue(emptyList())
     private var documentName = ""
     private var segmentIndex = 0
+    /**
+     * Selected-language reading text, keyed by language. The canonical extracted
+     * document stays in [queue]; this only holds the selected-language rendering of
+     * individual units, derived from the Gemini transcript for that unit.
+     */
+    private val displayText = ReaderDisplayText()
+    /** Language the display text and the narration instruction are rendered in. */
+    private var outputLanguage = ReaderLanguages.DEFAULT
     private var generation = 0L
     private val navigationRevision = MutableStateFlow(0L)
     private val navigation: Long get() = navigationRevision.value
@@ -90,6 +98,9 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
         val run = generation
         val previous = loadJob
         queue = ChunkQueue(emptyList())
+        // Chunk indices now refer to a different document, so no rendering from the
+        // previous one may survive.
+        displayText.clear()
         documentName = ""
         segmentIndex = 0
         publish(ReaderPhase.EXTRACTING)
@@ -171,6 +182,10 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
                     val key = prefs.apiKey.first().trim()
                     if (key.isEmpty()) throw NarrationFailure(R.string.error_no_api_key)
                     val language = prefs.readerOutputLang.first()
+                    // The instruction and the displayed reading text must always agree on
+                    // one language for the whole run, so the run's language is recorded
+                    // here and every unit is stored under exactly this key.
+                    synchronized(lock) { outputLanguage = language }
                     while (true) {
                         currentCoroutineContext().ensureActive()
                         val position = synchronized(lock) {
@@ -343,6 +358,9 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
                             producerContext.ensureActive()
                             checkOwned(run, revision)
                             slot.spool.endUnit(unit, transcript)
+                            // Gemini narrated this unit in `language`, so the transcript is
+                            // that unit's selected-language reading text.
+                            displayText.record(language, slot.index, unit, transcript)
                         }
                         break
                     } catch (e: CancellationException) {
@@ -514,8 +532,27 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
         if (run != generation || revision != navigation) throw CancellationException()
     }
 
+    /**
+     * Selects the language of the displayed reading text.
+     *
+     * Display text is cached per language, so switching languages can never surface a
+     * rendering produced for another one; units not yet narrated in the new language
+     * fall back to the extracted source until narration renders them. The canonical
+     * extracted document in [queue] is untouched.
+     */
+    fun setOutputLanguage(language: String) = synchronized(lock) {
+        val normalized = ReaderLanguages.normalize(language)
+        if (normalized == outputLanguage) return@synchronized
+        outputLanguage = normalized
+        publish(state.value.phase)
+    }
+
     private fun publish(phase: ReaderPhase) {
         val units = queue.segments(queue.index)
+        // Reading text follows the selected language. A unit that has not been narrated
+        // in that language yet has no rendering, so the extracted source is shown for it
+        // rather than a blank card.
+        val displayed = displayText.readingText(outputLanguage, queue.index, units)
         mutableState.value = ReaderState(
             phase = phase,
             chunk = if (queue.size == 0) 0 else queue.index + 1,
@@ -523,7 +560,7 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
             segment = if (units.isEmpty()) 0 else segmentIndex + 1,
             segmentTotal = units.size,
             text = queue.current.orEmpty(),
-            segments = units,
+            segments = displayed,
             documentName = documentName,
         )
         if (phase != ReaderPhase.SPEAKING) mutableNarrationText.value = ""

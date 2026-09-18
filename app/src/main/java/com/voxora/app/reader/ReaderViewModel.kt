@@ -64,6 +64,9 @@ class ReaderViewModel @Inject constructor(
             } finally {
                 mutableReady.value = true
             }
+            // Keep the display language in step with the persisted selection before the
+            // document is restored, so the reading text is never rendered in a stale one.
+            controller.setOutputLanguage(mutableOutputLang.value)
             controller.restoreLastDocument()
         }
     }
@@ -94,6 +97,10 @@ class ReaderViewModel @Inject constructor(
         val selected = ReaderLanguages.language(language)
         mutableLanguageLabel.value = selected.displayName(languageLocale)
         mutableLanguageFlag.value = selected.flagEmoji
+        // The controller owns the reading text, so it has to learn about the change too.
+        // Its cache is keyed by language, which is what stops text rendered for the
+        // previous language from being shown after the switch.
+        controller.setOutputLanguage(language)
     }
 
     fun jumpToChunk(index: Int) = runCommand { controller.jumpToChunk(index) }

@@ -81,9 +81,10 @@ import com.voxora.core.gemini.ReaderNarrationModes
  * Playback itself is owned by [ReaderController] / [ReaderService], so leaving this
  * destination never interrupts narration.
  *
- * The source text and the narration preview are deliberately different surfaces:
- * the source is what extraction produced, the narration is what Gemini returned.
- * They are never merged.
+ * The reading text and the narration preview are deliberately different surfaces: the
+ * reading text is the current chunk rendered in the selected narration language (a unit
+ * not narrated in that language yet shows the extracted source), and the narration is
+ * the live transcript of the unit being spoken. They are never merged.
  */
 @Composable
 fun ReaderScreen(
@@ -225,8 +226,8 @@ private fun ReaderContent(
         if (state.segments.isNotEmpty()) {
             item(key = "source-header") {
                 SectionHeader(
-                    title = stringResource(R.string.reader_source_section),
-                    hint = stringResource(R.string.reader_source_hint),
+                    title = stringResource(R.string.reader_display_section, languageLabel),
+                    hint = stringResource(R.string.reader_display_hint),
                 )
             }
             itemsIndexed(state.segments, key = { index, _ -> "segment-$index" }) { index, text ->
