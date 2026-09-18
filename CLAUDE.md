@@ -417,17 +417,17 @@ confirm the previous account's project and key disappear immediately.
   `a74db6c fix(reader): define fluent and faithful narration semantics` — plus the
   reading-order fix `6d826e0 fix(reader): de-interleave pdf columns when a page
   carries a running header` and the documentation commits. **Pushed to `origin`,
-  and not merged.** The Reader/Logs half of this cycle (`d7ba68c`, `ab726f7`, `f4ee4f1`) and the
-  documentation commit `82ddc11` are CI-verified at `82ddc110e` — runs #96 (push) and #97
-  (pull_request), both jobs success on each, completed 2026-09-18T13:21Z. The last code head
-  verified before that was `9dfc204`: runs #90 (push) and #91 (pull_request) both succeeded there,
-  and runs #92/#93 are green for the documentation commit `a96d201`. **The Settings reframe
-  (`f5088a8`) and the background-playback surface (`80a0244`) are not yet CI-verified at the time
-  this line was written** — they touch Compose, Play Services and the Android service layer, none of
-  which the local harness compiles, so check their push run before trusting the local suite. The runs
-  before `9dfc204` failed on the three compile errors listed above (#86–#89 at
-  `089a71f`/`14e5403`). Older green points were `7f47805` (run `35294468431`, both jobs) and
-  `707cc3c` (run #66).
+  and not merged.** The whole cycle is CI-verified. The Reader/Logs half (`d7ba68c`, `ab726f7`,
+  `f4ee4f1`) with the documentation commit `82ddc11` is green at `82ddc110e` — runs #96 (push) and
+  #97 (pull_request), both jobs success. The Settings reframe (`f5088a8`), the background-playback
+  surface (`80a0244`), the wording alignment (`9007129`) and the documentation commit `c6f5727` are
+  green at `c6f5727c3` — runs #100 (push) and #101 (pull_request), both jobs success on each,
+  completed 2026-09-18T13:46Z. Those runs' `Assemble debug` step is the only compile check for the
+  Compose, Play Services and Android service layer in this cycle. The last code head verified before
+  this cycle was `9dfc204`: runs #90 (push) and #91 (pull_request) both succeeded there, and runs
+  #92/#93 are green for the documentation commit `a96d201`. The runs before `9dfc204` failed on the
+  three compile errors listed above (#86–#89 at `089a71f`/`14e5403`). Older green points were
+  `7f47805` (run `35294468431`, both jobs) and `707cc3c` (run #66).
 - `feat/ci-feature-branch` = `76f0c96` + `dcbf852 ci: run Android CI on feature
   branch`, with **PR #2 open to `main`** (still open; deliberately NOT merged).
 - **PR #3 "Feat/reader segmented spooling"** (`feat/reader-segmented-spooling` →
