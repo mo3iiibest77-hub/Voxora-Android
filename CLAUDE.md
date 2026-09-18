@@ -145,6 +145,95 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
 > pair is `AGENTS.md` (project law / architecture record) and this `CLAUDE.md`
 > (handoff / cloud context). Update those two — do not add duplicate docs.
 
+### Last change (this session) — Persian localization, Reader segment swipe, Logs, Cloud authorization
+
+Five commits on `feat/reader-segmented-spooling`:
+
+- `7c12b7d fix(reader): navigate segments independently from chunks` (already on the branch)
+- `2d953fa fix(ui): modernize logs screen` (already on the branch)
+- `2644b57 fix(i18n): rewrite Persian UI terminology and unify the register`
+- `12eb52b fix(ui): correct the dub screen's RTL back navigation and typography`
+- `2ebf1d5 feat(cloud): add the authorized Google Cloud discovery layer`
+- plus the app-side wiring commit that connects Settings, the usage screen and the authorizer.
+
+**DONE — the Reader swipe moves segments, not chunks.** The branch already carried this in
+`7c12b7d`, and it was verified rather than assumed: `ReaderPager.swipeStep` is the whole swipe rule
+and is bounded by the current chunk's unit count, so no gesture can express a chunk move; chunk
+navigation stays on the explicit Previous/Next controls through `jumpToChunk`, segment navigation
+goes through `jumpToSegment`, and the two are independent. The gesture state machine returns the card
+to exactly zero offset on a sub-threshold release — the reported bug was `animate(0f, released)`,
+which animated *away* from rest and left the card permanently displaced. `ReaderSegmentNavigationTest`
+pins the separation and both boundaries.
+
+**DONE — the Logs screen is product UI.** `2d953fa` replaced the literal "← Back" text button with an
+auto-mirrored `ArrowBack`, moved Copy / Share / Clear into the header as icon buttons carrying their
+localized labels as accessibility descriptions (Persian labels are too wide for a three-button row),
+localized the counter and empty state, and moved colours and typography onto the theme tokens. The
+log lines themselves are untouched: same snapshot, same `formatted()` output, same monospace, and the
+list is an explicit LTR region because a timestamp and a bracketed tag are technical identifiers, not
+prose.
+
+**DONE — Persian is rewritten, not translated.** `values-fa/strings.xml` was audited end to end
+against a written decision list. One register (informal second person) replaced the previous mix of
+`تلاش کن` and `انتخاب کنید`. Product names stay Latin — `جمینا` became `Gemini`. `document` is no
+longer `سند` (a deed in ordinary Persian) but `فایل`, with `کتاب` for prose about a book; `PDF` is
+`فایل PDF` and `TXT` is `فایل متنی`. `chunk` is `بخش` and a narration `segment` is `قطعه`, so the
+Reader's two navigation levels cannot be confused. `Unavailable` and `Not available` no longer share
+one label. The `DubScreen` back control, which concatenated a literal `←` into its label, is now an
+auto-mirrored icon, and its eleven hardcoded `sp` sizes became typography tokens.
+
+**DONE — Google Sign-In is replaced by real Google Cloud authorization.** The old Credential Manager
+identity layer (`GoogleAuthHelper`, `AuthUiState`) is deleted: an ID token identifies the user but
+authorises no Cloud read, so it could never discover a project or a key. The account system is now
+**Google account → Cloud project → Gemini API key**:
+
+- `GoogleCloudAuthorizer` requests an OAuth **access token** through Google Identity Services
+  (`Identity.getAuthorizationClient(activity).authorize(request)`), asking for exactly two read-only
+  scopes: `cloud-platform.read-only` and `monitoring.read`. Consent is the documented two-step flow
+  (`hasResolution()` → launch the `PendingIntent` → call again for the token).
+- `CloudRepository` (Hilt singleton) holds the token **in memory only** — never DataStore, never a
+  log, never saved state — and drops it on sign-out, account switch and any `401`.
+- `CloudSelection` owns the invalidation rules: switching account drops the previous projects,
+  selection, keys and active key, so account B seeing account A's project is unrepresentable.
+- Discovery uses **official APIs only**: Resource Manager v1 `projects.list`, API Keys v1
+  `keys.list` (**metadata only** — `list`/`get` do not return the key secret, so the model has no
+  field for one and `keys.getKeyString` is deliberately not called), Cloud Monitoring v3
+  `timeSeries` for `serviceruntime.googleapis.com/api/request_count`, and Cloud Quotas v1
+  `quotaInfos` as an independent second call.
+- `401` and `403` stay distinct (re-authorize vs no access), and `CloudLoadState` keeps loading,
+  empty, denied, network and failure apart so the screen can say which one it is.
+- Usage is now two clearly separate sources: **local observed usage** (Voxora's own counts, shown in
+  its own section) and **Google project usage** (what Google reports for the selected project).
+  Tokens, remaining quota and billing stay `NOT_OFFERED` because no official API in this path exposes
+  them; nothing is estimated, and an unavailable figure is never rendered as `0`.
+- **Manual API-key mode remains a first-class fallback** and is unaffected by sign-out.
+
+**Tests actually run (no Gradle).** `kotlinc 2.0.21` + JUnit with `-ea`, matching Gradle's test JVM:
+**364 tests OK across 32 classes**, including the new `CloudSelectionTest`, `CloudAuthStateTest`,
+`CloudParsersTest`, `CloudUsageTest`, `GoogleCloudHttpTest` (driven against `MockWebServer`, so
+nothing reaches Google), `CloudLoadStateTest` and `CloudAuthFailureClassifierTest`. Static checks:
+the `R.string.*` cross-check passes for both locales with matching format args, the Compose/AndroidX
+import guard passes, and the auth-layer removal left no dangling references.
+
+**Real-device verification was NOT performed.** Nothing in this cycle was tested on a physical
+device, and no device behaviour may be claimed.
+
+**BLOCKED on external configuration (not on code):**
+- **`default_web_client_id` is still `REPLACE_WITH_GOOGLE_WEB_CLIENT_ID`.** Cloud authorization
+  cannot run until the owner creates an OAuth client in Google Cloud Console: an OAuth consent screen
+  configured for the two scopes above, an **Android** OAuth client with package `com.voxora.app` and
+  the debug/release SHA-1 fingerprints, and a **Web** client whose ID goes into
+  `app/src/main/res/values/strings.xml` at `default_web_client_id`. The code handles the missing
+  value correctly and says so in the UI; do not invent a client ID.
+- **The Cloud APIs must be enabled** on the project being queried (Resource Manager, API Keys, Cloud
+  Monitoring, Cloud Quotas), and the signed-in account needs the corresponding IAM permissions. A
+  `403` is shown as a refusal, not as an error.
+
+**NEXT:** the real-device list in the previous section is unchanged, plus: sign in and confirm the
+project list loads; select a project and confirm key **names** appear with no key value anywhere;
+confirm project usage shows a request count or an honest unavailable reason; and switch accounts and
+confirm the previous account's project and key disappear immediately.
+
 ### Actual repository state (inspected, not assumed):
 - `main`: `1f0a719 fix(reader): fix suspend output language persistence`.
 - `feat/reader-segmented-spooling` (the implementation branch) HEAD is

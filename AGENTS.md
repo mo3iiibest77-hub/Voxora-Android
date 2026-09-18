@@ -67,14 +67,17 @@ Voxora-Android/
 │       │   ├── ChunkQueue.kt
 │       │   └── TextExtractor.kt
 │       ├── auth/
-│       │   ├── GoogleAuthHelper.kt   ← Credential Manager wrapper (local identity only)
-│       │   └── AuthUiState.kt        ← Pure-JVM account state + failure classification
+│       │   ├── GoogleCloudAuthorizer.kt   ← Identity Services OAuth (Cloud access token)
+│       │   ├── CloudAuthFailureClassifier.kt ← Pure-JVM failure classification
+│       │   ├── CloudRepository.kt         ← Hilt singleton: grant, discovery, selection
+│       │   └── CloudEntryPoint.kt         ← Hilt entry point for plain composables
 │       ├── ui/
 │       │   ├── HomeScreen.kt         ← Voxora product chooser (Live Dub + Reader entries)
 │       │   ├── DubScreen.kt          ← Live Dub working surface (start/stop, status, error)
 │       │   ├── SettingsScreen.kt
 │       │   ├── ApiUsageScreen.kt     ← Key check + observed usage; never invents quota
 │       │   ├── UsageStatusVisual.kt  ← Pure-JVM usage tone mapping
+│       │   ├── CloudAccountCard.kt   ← Account → project → key hierarchy
 │       │   ├── LogsScreen.kt
 │       │   ├── OnboardingScreen.kt
 │       │   └── VoxoraNav.kt
@@ -93,8 +96,20 @@ Voxora-Android/
         ├── usage/GeminiUsageMetadata.kt  ← Optional usageMetadata from server messages
         ├── usage/GeminiUsageLedger.kt    ← Bounded observed-usage record + JSON codec
         ├── usage/UsageRecorder.kt        ← Batched writer, discards usage on failure
-        ├── usage/ApiUsageSnapshot.kt     ← Dashboard model; every gap has a reason
         ├── usage/ApiKeyMask.kt           ← Display-safe key masking
+        ├── usage/ApiUsageSnapshot.kt     ← Dashboard model; every gap has a reason
+        ├── usage/UsageStore.kt           ← Usage ledger storage port
+        ├── cloud/CloudScopes.kt          ← The only scope set Voxora requests (read-only)
+        ├── cloud/CloudAuthState.kt       ← Authorization state + token-expiry policy (no token)
+        ├── cloud/CloudProject.kt         ← Resource Manager project + parser
+        ├── cloud/CloudApiKey.kt          ← API key **metadata** (never a secret) + parser
+        ├── cloud/CloudResult.kt          ← Read outcome: refusal vs failure vs success
+        ├── cloud/CloudLoadState.kt       ← Presentation state per read (empty ≠ denied)
+        ├── cloud/CloudUsage.kt           ← Project usage, every gap carries a reason
+        ├── cloud/CloudSelection.kt       ← Account → project → key + invalidation rules
+        ├── cloud/GoogleCloudDirectory.kt ← Directory port + pure-JVM payload parsers
+        ├── cloud/GoogleCloudHttp.kt      ← Official Cloud REST client (Bearer token)
+        └── cloud/CloudEndpoints.kt       ← Injectable API hosts (tests only)
         ├── GeminiLiveConfig.kt
         └── prefs/UserPrefs.kt
         └── prefs/UsagePrefs.kt           ← Separate DataStore for the usage ledger
@@ -318,11 +333,12 @@ There is exactly **one** language catalog: `core/.../gemini/ReaderLanguages.kt`.
 9. privacy note
 
 **The reading surface is a page, not a scroll.**
-- `ChunkPage` composes **exactly one chunk** — the current one. Never render every chunk as a card: a 210-chunk PDF must still compose one page. Do not add a document-wide list, and do not build a per-chunk animation for chunks that are not on screen.
-- Chunks change **horizontally**, with a short page-turn transition: the leaving page recedes and fades, the arriving page enters from the side it was turned towards. Keep it Compose-native (`Animatable`, `graphicsLayer`, `animateFloatAsState`) and keep it short. Never animate audio state — the transition is UI-only.
-- Page turns go through the controller's existing `jumpToChunk`. Do not add a second navigation state machine, and do not add a pager library: `androidx.compose.foundation` is not a declared dependency and the custom drag is deliberately dependency-free.
-- `ReaderPager` is the pure-JVM page model and the only place turn logic lives: `target` (bounded, single-step), `visible`, `turnFor` (gesture → logical turn), `enterOffset` (which side the new page comes from). It is unit-tested in `ReaderPagerTest`.
-- **"Next" and "previous" are logical, not physical.** The same finger movement means opposite things in LTR and RTL, and `turnFor` maps each layout's gesture to the same logical turn. A Persian reader must never get reversed chunk order. Use auto-mirrored icons (`Icons.AutoMirrored.Filled.KeyboardArrowLeft/Right`) for the arrows.
+- `ChunkPage` composes **exactly one narration segment** of the current chunk — never every chunk, and never a whole chunk as one card. A 210-chunk PDF with 8 units each still composes one unit, so the page is bounded by the 80-word narration split, not by the document. Do not add a document-wide list.
+- **The horizontal swipe moves one narration segment, never a chunk.** This is the distinction the model exists to keep: a document with 129 chunks and 8 units each is swiped `Segment 1 → Segment 2 → … → Segment 8` *inside the current chunk*. A swipe must never express `Chunk 1 → Chunk 2`; that is what the explicit Previous/Next controls are for. Swiping at the first or last unit of a chunk does nothing — it does not roll into the neighbouring chunk.
+- **Chunk navigation and segment navigation are two independent operations.** Chunk moves go through the controller's `jumpToChunk`; segment moves go through `jumpToSegment`. Both are bounded and single-step, both return whether the position actually moved, and neither may be implemented in terms of the other. Do not add a second navigation state machine and do not add a pager library — the custom drag is deliberately dependency-free.
+- `ReaderPager` is the pure-JVM model and the only place turn logic lives: `target` (bounded, single-step), `swipeStep` (the whole swipe rule, bounded by the current chunk's unit count, so it cannot produce a step outside it), `segmentIndex` (safe zero-based derivation from the one-based state), `turnFor` (gesture → logical turn) and `enterOffset` (which side the incoming unit comes from). Unit-tested in `ReaderPagerTest` and `ReaderSegmentNavigationTest`.
+- **The gesture state machine always returns to rest.** A release below the threshold animates the offset back to **exactly** zero — never a partially shifted card and never an accumulated offset. A release above it recedes and fades the current unit towards the side the finger was already moving, steps the segment exactly once, and brings the arriving unit in from the opposite side. The resting offset is restored by a `LaunchedEffect` keyed on the displayed unit, and a turn guard plus a cancellable settle job make rapid repeated swipes resolve one at a time. Never use `Handler.postDelayed` or an arbitrary delay.
+- **"Next" and "previous" are logical, not physical.** The same finger movement means opposite things in LTR and RTL, and `turnFor` maps each layout's gesture to the same logical turn. A Persian reader must never get reversed segment or chunk order. Use auto-mirrored icons (`Icons.AutoMirrored.Filled.KeyboardArrowLeft/Right`) for the arrows.
 - The page header states the chunk and total compactly (`reader_page_chunk`, "Chunk 12 of 210"), the segment progress, and the narration language. Do **not** put a bare `12 / 210` numeric indicator next to the arrows: it reorders unpredictably under RTL bidi. This is an audiobook reader, not a diagnostics panel — keep the surface compact.
 - **RTL is a layout property, not a text hack.** Persian must shape, align and order correctly through Compose's RTL-aware layout (`LocalLayoutDirection`). Fix the real cause — a fixed-width container, a wrong `TextAlign`, a forced LTR, bad icon/text spacing, an inappropriate single-line constraint. Do not insert invisible Unicode directional characters to paper over a layout bug.
 - A unit still waiting for its selected-language rendering shows the temporary "preparing" treatment (see "Display language"), not the source language presented as the selection.
@@ -388,8 +404,9 @@ Both Settings language pickers are built from the one catalog (see "One language
 
 `ApiUsageScreen` (`app/src/main/java/com/voxora/app/ui/ApiUsageScreen.kt`) answers "what is my Gemini access doing", and its defining rule is that **a figure is shown only when it was observed**. A missing figure is never rendered as `0`, because a zero is a claim and "unknown" is the truth.
 
-- **Three different things must never be conflated:** the **API key** (a secret Voxora holds), the **Google account** (a local identity Voxora can display), and the **Google Cloud project** (which owns quota and billing, and which Voxora cannot identify from a key). The screen shows them as separate rows and states plainly that signing in does not tell Voxora that the key belongs to that account. `ApiUsageSnapshot.accountLinkedToKey` is hard-coded `false` for exactly this reason — do not set it from a signed-in state.
-- **An API key cannot read project quota or billing.** Those need OAuth credentials for the owning project, which the app does not hold. They are therefore always `UsageUnavailable.AUTH_REQUIRED`, never a number and never an estimate. Do not add a Cloud Monitoring/Billing/Service-Usage call behind an API key: it cannot succeed.
+- **Two usage sources must never be conflated.** *Local observed usage* is what Voxora counted from the requests it made on this device (`ApiUsageSnapshot`), and it can never answer "what is my project quota doing". *Google project usage* is what Google officially reports for the selected authorized project (`CloudProjectUsage`, `CloudUsageSource.GOOGLE_PROJECT`). They are shown in separate sections and neither is labelled as the other.
+- **An API key still cannot read project quota or billing**, and the key path must not pretend otherwise: `ApiUsageSnapshot.projectQuota`/`.billing` stay `UsageUnavailable.AUTH_REQUIRED`, and `accountLinkedToKey` stays hard-coded `false` because nothing can verify that the key belongs to the signed-in account. Do not add a Cloud call behind an API key — it cannot succeed.
+- **With a Cloud grant, the project figures are read for real, and each gap still names its reason.** `CloudProjectUsage` reports request count and quota limit only when Google returned them; tokens, remaining quota and billing are `NOT_OFFERED` because no official API in this path exposes them, and a refusal or network problem propagates as `PERMISSION_DENIED`/`NETWORK_ERROR`. Never estimate, never substitute a local count, and never render an unavailable figure as `0`.
 - **The key check uses only official, non-generative surface.** `GeminiKeyProbe` calls the documented `models.list` endpoint (`https://generativelanguage.googleapis.com/v1beta/models`), which accepts an API key and generates no content, so it consumes no tokens. Never point a key test at a generative method.
 - **The key travels in the `x-goog-api-key` header, not a `?key=` query parameter.** A URL is the part of a request most likely to reach a log, a crash report or a proxy trace, so the secret must not be in one. Never log the probe URL or any request-specific URL.
 - **Classification prefers the body's `error.status` over the HTTP code**, because the code alone is ambiguous: Google returns `400` for both a malformed request and an invalid key, and `403` for both a blocked API and a permission problem. An unparseable body falls back to the code; an unrecognisable answer is `UNKNOWN`, never a confident guess. `GeminiKeyClassifier` is pure JVM and every branch is unit-tested against a synthetic response.
@@ -404,16 +421,67 @@ Both Settings language pickers are built from the one catalog (see "One language
 - **Tones are semantic, not alarming.** `UsageStatusVisual` maps each state to `OK` / `WARNING` / `ERROR` / `NEUTRAL` onto `VoxoraColors`. An unconfigured key, a source needing credentials, and a figure the API does not expose are all **expected** gaps and stay neutral; only a refusal or a network problem is coloured. Do not turn "we cannot read this" into a red error.
 - The usage screen is its own destination reached from Settings, using the existing `VoxoraScreen` enum — do not add a second navigation framework for it.
 
-### Google account — a local identity layer, not an account system
+### Google account — an authorized Cloud connection, not a local profile
 
-`GoogleAuthHelper` obtains a Google ID token credential through Credential Manager and keeps the account's email and display name so the app can greet the user. **It is not a backend account system, and it does not link a Google account to the configured API key** — an API key carries no owner information this app can verify. Nothing in the UI may imply that relationship.
+The account system is **Google Cloud authorization**. An ID token identifies the user but authorises
+no Cloud read, so it could never discover a project or a key; it is no longer the Settings entry
+point, and the Credential Manager identity layer was removed with it. The relationship the app
+represents is explicit and three-level: **Google account → Cloud project → Gemini API key**.
 
-- **Configuration is not failure.** `GoogleAuthHelper.configured` is false while `default_web_client_id` still holds the shipped `REPLACE_…` placeholder. In that state `signIn()` returns `AuthFailure.CONFIGURATION_MISSING` **without touching the credential provider**, so an unconfigured build reports the real problem instead of a generic failure, and guest use with an API key keeps working. The message says so in as many words.
-- **`AuthUiState` is a sealed hierarchy, not a bag of booleans.** There is no way to be simultaneously signing in and signed out, and no way to hold a stale email while signed out: only `SignedIn` carries an identity. This is what makes stale state after sign-out unrepresentable rather than merely unlikely.
-- **Every failure has its own reason** — cancelled, no credential, provider unavailable, network, unsupported credential, unknown — because the user's next action differs for each. A dismissed picker is not an error worth shouting about. `AuthFailureClassifier` classifies by exception *type name* and message so it stays testable on a plain JVM.
-- **`signOut()` always reports `SignedOut`**, even when clearing the provider's credential state throws, because leaving the app showing an account the user removed is worse than a failed cleanup.
-- **The ID token is never read into a variable, never persisted and never logged.** Only the email and display name reach `UserPrefs`. Log lines carry the classification and the exception's class name only — never a message verbatim, which a provider could populate with credential material. Logging goes through `VoxoraLog`; direct `android.util.Log` in this file was a violation of §9 and is gone.
-- **The UI must disable its action while an operation is in flight and ignore a second tap**, so two credential requests cannot race their results onto the same card.
+- **`GoogleCloudAuthorizer`** requests an OAuth access token through Google Identity Services
+  (`Identity.getAuthorizationClient(activity).authorize(request)`), asking for exactly
+  `CloudScopes.ALL` — `cloud-platform.read-only` and `monitoring.read`, both read-only. It never asks
+  for write access and never invents a scope.
+- **Consent is a two-step flow.** When `AuthorizationResult.hasResolution()` is true the caller must
+  launch the returned `PendingIntent` and then call `requestAuthorization` again; that second call is
+  what yields the access token. `CloudAccountCard` owns that loop.
+- **The access token is never UI state.** `CloudAuthState` deliberately has no token field, and
+  `CloudRepository` holds the token in memory only — never DataStore, never a log, never a saved-state
+  bundle. It is dropped on sign-out, on account switch, and whenever Google answers `401`
+  (`CloudAuthFailure.EXPIRED`).
+- **Configuration is not failure.** While `default_web_client_id` holds the shipped `REPLACE_…`
+  placeholder, `GoogleCloudAuthorizer.configured` is false and `requestAuthorization` reports
+  `CONFIGURATION_MISSING` **without touching the authorization provider**, so an unconfigured build
+  says the real thing and manual API-key use keeps working.
+- **`CloudSelection` owns the invalidation rules, and they are unit-tested.** `withAccount` drops the
+  previous account's projects, selection, keys and active key, so account B seeing account A's project
+  is unrepresentable rather than merely unlikely. `withProjects`/`withKeys` drop a selection that
+  disappeared from a refresh; `selectProject` clears keys because keys are project-scoped.
+- **`keyLinkedToAccount` is the only thing the UI may use to imply a link**, and it is true only when
+  the key came from discovery *and* a project *and* an account are present. A manually pasted key can
+  never satisfy it, so the app cannot claim a relationship it cannot verify.
+- **Every failure has its own reason** — configuration missing, cancelled, no account, provider
+  unavailable, network, permission denied, expired, unsupported, unknown — because the user's next
+  action differs. `CloudAuthFailureClassifier` classifies by type name, message and the Google status
+  code so it stays testable on a plain JVM.
+- **The UI disables its action while an operation is in flight and ignores a second tap**, so two
+  authorization requests cannot race their results onto the same card.
+- **Manual API-key mode remains a first-class fallback** and is unaffected by sign-out: the key is not
+  a Google credential and stays where the user put it. The card labels the mode and says the key is
+  not linked to the signed-in account.
+
+### Google Cloud discovery — official APIs only
+
+`core/.../cloud/` is pure JVM and talks to documented Google Cloud REST endpoints through
+`GoogleCloudHttpDirectory`. Nothing is fabricated, and an unavailable answer is never a zero.
+
+- **Projects** come from Resource Manager v1 `projects.list`, which returns only what the account may
+  see. Voxora never assumes the AI Studio project is the only one, and never invents one.
+- **Keys** come from API Keys v1 `projects.locations.keys.list` — **metadata only**. `list` and `get`
+  do not return the key secret, so `CloudApiKey` has no field for one and the UI shows a name, never a
+  value. `keys.getKeyString` is deliberately not called.
+- **Usage** comes from Cloud Monitoring v3 `timeSeries` for
+  `serviceruntime.googleapis.com/api/request_count`, with Cloud Quotas v1 `quotaInfos` read as a
+  second, independent call so a quota refusal cannot discard a real request count.
+- **401 and 403 stay distinct.** `401` means the grant is gone and re-authorization is required;
+  `403` means the account is fine but not allowed to read that project. Both are `CloudResult`
+  variants, not exceptions, and `CloudLoadState` keeps empty, loading, denied, network and failure
+  apart so the screen can say which one it is.
+- **The token travels in the `Authorization: Bearer` header, never a URL**, and no request URL,
+  response body or credential is ever logged. `CloudEndpoints` is injectable so the whole HTTP
+  contract is driven against `MockWebServer` without reaching Google.
+- **Parsers never turn "unreadable" into a number.** A malformed body is `null`; only a genuinely
+  empty Monitoring window is `0`.
 
 ### Onboarding — both products, honestly described
 
@@ -472,6 +540,13 @@ If a bug is found in these files, report it — do not silently fix.
 - `com.squareup.okhttp3:okhttp` — HTTP client
 - `com.squareup.moshi:moshi-kotlin` — JSON parsing
 
+### Google Play Services (added with explicit owner approval)
+- `com.google.android.gms:play-services-auth:21.2.0` — Google Identity Services **Authorization**
+  (`Identity.getAuthorizationClient(...).authorize(...)`). Credential Manager and `googleid` can only
+  return an ID token, which authorises no Cloud API; the Cloud scope grant needs this. Do not replace
+  it with Credential Manager, and do not use the ID token as if it were an access token.
+- `com.squareup.okhttp3:mockwebserver:4.12.0` — **test only**, drives the Cloud HTTP contract locally.
+
 ### Ask before adding
 - Any library > 5MB
 - Any library requiring `minSdk` bump
@@ -488,7 +563,7 @@ VoxoraLog.d("ReaderVM", "Starting extraction for ${file.name}")
 VoxoraLog.e("ReaderVM", "Chunk rewrite failed: ${e.message}", e)
 ```
 
-- Never log a credential: no API key, ID token, OAuth token, `Authorization` header, or any URL that carries a key in its query string. `GoogleAuthHelper` was the last non-protected file still using `android.util.Log` directly; it now logs only the failure classification and the exception's class name.
+- Never log a credential: no API key, ID token, OAuth access token, `Authorization` header, or any URL that carries a key in its query string. `GoogleCloudAuthorizer` and `CloudRepository` log only a classification and an exception's class name — never a token, never a message verbatim, and never a Cloud request URL. `GoogleCloudHttpDirectory` does not log at all.
 - The remaining direct `android.util.Log` calls are inside `dub/**`, which is protected — do not "tidy" them without an explicit request.
 
 ---
@@ -499,6 +574,26 @@ VoxoraLog.e("ReaderVM", "Chunk rewrite failed: ${e.message}", e)
 - English is default — add Persian (`values-fa`) translations for every new string
 - Format: `snake_case` key names, e.g. `reader_start_button`, `reader_chunk_progress`
 - Never hardcode strings in Kotlin/Compose files
+- **Persian is written, not translated.** The Persian UI uses one register — the informal second
+  person (`انتخاب کن`, not `انتخاب کنید`). Mixing registers is the clearest "this was translated"
+  tell, so do not introduce formal-plural imperatives into a new string.
+- **Product and technical names stay Latin:** Gemini, Google, Google Cloud, Google AI Studio, API,
+  PDF, TXT, OCR, URL, Reader, Live Dub, Voxora. Transliterating Gemini to `جمینا` was a defect, not a
+  style choice.
+- **Terminology is context-dependent, and two levels never share a word.** In the Reader, `document`
+  is `فایل` (and `کتاب` when the source really is a book) — never `سند`, which in ordinary Persian
+  means a deed. `chunk` is `بخش` and a narration `segment` is `قطعه`. `narration` is `روایت`,
+  `usage` is `مصرف`, `quota` is `سهمیه`, `billing` is `صورت‌حساب`, `logs` is `لاگ‌ها`.
+- **Do not give two different states the same Persian label.** `NOT_OFFERED` is `API این را گزارش
+  نمی‌کند`, `UNSUPPORTED` is `پاسخ نامفهوم`, `UNKNOWN` is `نامشخص`.
+- Numbers stay Western Arabic digits, matching what `%d` renders everywhere else.
+- **RTL is a layout property, not a text hack.** Fix the real cause (a fixed width, a wrong
+  `TextAlign`, a forced LTR, bad spacing, an over-tight single-line constraint) and use
+  `LocalLayoutDirection` / auto-mirrored icons. Never insert invisible Unicode direction marks to
+  paper over a layout bug, and never concatenate a literal arrow glyph into a label.
+- Technical identifiers (project ids, emails, keys, log lines) stay selectable LTR runs; put a whole
+  technical region in an explicit LTR container only when the region itself is technical, as the log
+  list does.
 
 ---
 
@@ -535,7 +630,7 @@ A task is NOT done until:
 5. **applicationId stability**: Package name must never change — breaks existing installs.
 6. **Iran monetization**: No Stripe, no Google Pay integration yet. Deferred.
 7. **API key**: Owner rotates keys himself. Do not warn about leaked keys in code comments.
-8. **JVM unit tests and `org.json`**: Android unit tests run against the mockable `android.jar`, whose `org.json` methods throw "not mocked". Any `:core` test that touches `JSONObject`/`JSONArray` needs `testImplementation("org.json:json:…")`; the real implementation takes classpath precedence over the stub. Pure-JVM code (`GeminiReaderSession`, `ReaderLanguages`, `ReaderNarrationModes`, `ReaderLanguageFlags`, `ChunkQueue`, `ReaderSpool`, `PdfReadingOrder`, `ReaderDisplayText`, `ReaderGates`, `ReaderState`/`ReaderPhase`, `AppLocales`, `ReaderStatusVisual`, `ReaderPager`, `ReaderPageText`, `AuthUiState`, `UsageStatusVisual`, and the whole `core/.../usage/` package) must stay free of `android.*` APIs so it stays unit-testable without Robolectric. `PdfReadingOrder` deliberately takes plain geometry (`Fragment`) rather than `TextPosition` for exactly this reason — `TextExtractor` is the only place that bridges the two. `ReaderPhase`/`ReaderState` live in their own file precisely so `ReaderGates` can be tested on a plain JVM; do not move them back into `ReaderService.kt`.
+8. **JVM unit tests and `org.json`**: Android unit tests run against the mockable `android.jar`, whose `org.json` methods throw "not mocked". Any `:core` test that touches `JSONObject`/`JSONArray` needs `testImplementation("org.json:json:…")`; the real implementation takes classpath precedence over the stub. Pure-JVM code (`GeminiReaderSession`, `ReaderLanguages`, `ReaderNarrationModes`, `ReaderLanguageFlags`, `ChunkQueue`, `ReaderSpool`, `PdfReadingOrder`, `ReaderDisplayText`, `ReaderGates`, `ReaderState`/`ReaderPhase`, `AppLocales`, `ReaderStatusVisual`, `ReaderPager`, `ReaderPageText`, `CloudAuthState`, `CloudSelection`, `CloudUsage`, `CloudLoadState`, `CloudResult`, `CloudProject`, `CloudApiKey`, `CloudScopes`, `GoogleCloudDirectory`/`CloudParsers`, `CloudAuthFailureClassifier`, `UsageStatusVisual`, and the whole `core/.../usage/` package) must stay free of `android.*` APIs so it stays unit-testable without Robolectric. `PdfReadingOrder` deliberately takes plain geometry (`Fragment`) rather than `TextPosition` for exactly this reason — `TextExtractor` is the only place that bridges the two. `ReaderPhase`/`ReaderState` live in their own file precisely so `ReaderGates` can be tested on a plain JVM; do not move them back into `ReaderService.kt`.
 9. **Gradle enables JVM assertions**: the `Test` task runs its JVM with `-ea`, which turns on kotlinx-coroutines stack-trace recovery. Any exception crossing a `Deferred.await()` or `withTimeout` boundary comes back as a *copy* of the original object, so `assertSame` against an awaited cause passes under a plain `java -cp` run but fails under Gradle. When validating `:core` contract tests outside Gradle, always run with `-ea` to match CI, and never rely on awaited exception identity without preserving the original object first. The Reader sink path is guarded by `GeminiReaderSessionTest.sinkFailurePreservesOriginalExceptionAndSanitizesStatus`; keep it green.
 
 ---
@@ -558,6 +653,7 @@ A task is NOT done until:
   - `ReaderDisplayAudioContinuityTest` (app) — display updates never disturb audio, driven against the **real** `ReaderSpool`: the spool snapshot is unchanged by recording or switching language, consuming renders nothing, publishing between units does not change the bytes the consumer writes, units are still read once and in order, the promoted chunk is already rendered and already committed before the turn, the turn adds no work to the audio path, and display state is never written back into the document (see §5).
   - `ReaderStatusVisualTest` (app) — the status-tone contract: speaking/playing is active, only the active tone pulses, paused is ready and **not** green, stopped/error are stopped, connecting/extracting/preparing are neutral and never falsely green, every phase has a tone, and the tones stay distinct (see §3).
   - `ReaderPagerTest` (app) — the page model: single-step bounded navigation, nothing to turn without a document, exactly one chunk is ever the page, walking either direction visits every chunk once and stops, a short drag is not a turn, LTR and RTL gestures map to the same logical turn, a Persian reader never gets reversed chunk order, and the arriving page comes from the side it was turned towards (see §5).
+  - `ReaderSegmentNavigationTest` (app) — the swipe contract and its separation from chunk navigation: a swipe moves exactly one segment, reports the direction it moved, a short swipe is not a step, the first and last unit of a chunk do nothing, a swipe is bounded by the chunk and not the document, no gesture or repetition can produce an index outside the chunk, walking either direction visits every unit once and stops, LTR and RTL map to the same logical segment order, the leaving unit exits opposite the entering side, and an out-of-range segment position has no index (see §5).
   - `ApiKeyMaskTest` (core) — the mask reveals only the first and last four characters, never contains the key's body, does not vary in length with the key, fully hides a key too short to mask safely, and reports the shipped placeholder as not configured rather than masking it (see §5A).
   - `GeminiUsageMetadataTest` (core) — both output-count spellings, the snake_case variant, an absent `usageMetadata`, an unrecognised object, an absent field staying unknown rather than becoming 0, an explicit 0 being kept, an explicit JSON null treated as absent, numeric strings accepted, non-numeric values ignored, and the cached/thoughts fields (see §5A).
   - `GeminiKeyClassifierTest` (core) — every status code, the body reason winning over an ambiguous code, `200`-range success, server errors, network and timeout failures, an unreadable answer staying `UNKNOWN`, a malformed body falling back to the code, and the model count being read only from a single complete page (see §5A).
@@ -567,7 +663,13 @@ A task is NOT done until:
   - `ApiUsageSnapshotTest` (core) — a number is shown only when observed; unconfigured and unknown are distinct; tokens are "not offered" when the server never reported them; coverage is stated; project quota and billing are always auth-required and never invented; signing in never asserts the key/account link; a probe with no count stays unknown; the displayed key is always masked; and activity timestamps pass through (see §5A).
   - `UsageFailureCategoryTest` (core) — the timeout/quota/unauthorized/audio/session/network mapping, a real Reader audio message not being mistaken for a network problem, an unrecognised failure staying unknown, and the categories being unique, space-free identifiers (see §5A).
   - `UsageStatusVisualTest` (app) — only a healthy connection is active and only it pulses; refused or broken is an error; transient problems warn; an unconfigured build and an unchecked key are neutral; expected data gaps stay neutral while a refusal is an error and a network gap warns; every status and reason has a tone (see §5A).
-  - `AuthUiStateTest` (app) — `SignedIn` carries the identity with a name falling back to the email; signed-out and failed states carry none, so stale state cannot survive a sign-out; only in-flight operations are busy; and the classifier separates cancellation, no-credential, provider-unavailable, network, unsupported-credential and unknown, with configuration missing kept distinct from every other failure (see §5A).
+  - `CloudSelectionTest` (core) — the account → project → key model: switching account drops the previous projects, selection, keys and active key; account B can never see account A's project; re-authorizing the same account keeps the selection; sign-out clears everything; a project or key that disappeared from a refresh is dropped; a key that was never listed cannot be selected; manual mode is available and never claims a link; signing in alone does not link a manual key (see §5A).
+  - `CloudAuthStateTest` (core) — the token-expiry policy (no stated expiry, well in the future, expired, inside the skew window, overridden skew); only `Authorized` carries an account; only an in-flight authorization is busy; only a real grant counts as authorized; `Authorized` carries no token field; configuration missing is distinct from every other failure; and the scope set is read-only, unique and never contains a write scope (see §5A).
+  - `CloudParsersTest` (core) — project and key parsing (dropped when unaddressable, name falling back to the id), Monitoring request-count summation across points and both value spellings, a genuinely empty window being `0`, and a malformed body being `null` rather than `0`; quota limit selection and its absent cases (see §5A).
+  - `CloudUsageTest` (core) — every figure needs authorization before a grant; a refusal propagates to every figure; **an unavailable metric is never equal to a zero**; an observed count is reported while tokens, remaining quota and billing stay `NOT_OFFERED`; an explicit zero is a real zero; project usage is always sourced from Google, never from local observation (see §5A).
+  - `GoogleCloudHttpTest` (core) — the authorized reads against `MockWebServer`: the token in the `Authorization` header and **never in the URL**; `401` as re-authorization, `403` as no access; a `5xx` and an unparseable `200` as failures rather than empty lists; an unreachable host as a network problem; key metadata from the project keys endpoint; the two-call usage read; a quota refusal not discarding a real request count; and a refused monitoring read refusing the whole usage read (see §5A).
+  - `CloudLoadStateTest` (core) — the presentation mapping: empty ≠ loaded, and denied, unauthorized, network and failure each stay distinct (see §5A).
+  - `CloudAuthFailureClassifierTest` (app) — cancellation, network, no-account, provider-unavailable, permission-denied, unsupported and unknown classification by status code, type name and message (see §5A).
   - `ChunkQueueTest`, `ReaderSpoolTest` — chunking and spool contracts.
 - Do not weaken or delete these tests to make a change pass. If a contract genuinely changes, update the contract text in `AGENTS.md` and the test in the same commit.
 - A regression test is only worth having if it fails against the bug. The four header/footer/line-floor cases in `PdfReadingOrderTest` were verified to fail against the pre-fix implementation at `707cc3c` and pass against the fix; keep that property when editing them.
@@ -589,4 +691,5 @@ A task is NOT done until:
 
 ---
 
-*Last updated: auto-generated by Claude for Voxora project*
+*Last updated: auto-generated by Claude for Voxora project — Persian localization pass, Reader
+segment swipe, Logs modernization, and the authorized Google Cloud discovery layer.*
