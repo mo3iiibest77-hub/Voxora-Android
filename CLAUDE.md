@@ -145,7 +145,79 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
 > pair is `AGENTS.md` (project law / architecture record) and this `CLAUDE.md`
 > (handoff / cloud context). Update those two — do not add duplicate docs.
 
-### Last change (this session) — Persian localization, Reader segment swipe, Logs, Cloud authorization
+### Last change (this session) — the text card turns alone, the first frame waits for text, Logs reads its own severity
+
+Three code commits on `feat/reader-segmented-spooling`, then this documentation commit:
+
+- `d7ba68c fix(reader): move only the text card on a segment turn`
+- `ab726f7 fix(reader): gate the first audible frame on the selected-language text`
+- `f4ee4f1 fix(logs): read INFO as success and let one entry be selected`
+
+**DONE — only the text card moves on a segment turn.** The defect was that the gesture and its
+`graphicsLayer` sat on `ChunkPage`'s whole `Column`, so a swipe translated and faded the section
+header, the chunk identity card and the segment/chunk button rows along with the book text. The
+transform now belongs to `SegmentCard` alone, and `key(segmentIndex)` plus the enter animation wrap
+**only** the card; the surrounding rows are a fixed frame and `requestChunkTurn` fades only the card.
+Ownership was kept deliberate: `drag`, `presence`, `turning` and the settle job stay in `ChunkPage`
+because they drive the controller jump and must outlive the card being swapped — only the visual
+transform and the gesture moved. Nothing about the navigation rules changed (`ReaderPager` bounds,
+chunk/segment separation, RTL, threshold, return-to-rest, one-segment-at-a-time, synchronous jump),
+which is why `ReaderSegmentNavigationTest` was left as-is rather than duplicated.
+
+**DONE — a run's first audible frame waits for the selected-language text.** Starting a run on a
+Persian selection could speak while the page still showed the document's English, because the page's
+reading text falls back to the extracted source for a unit with no rendering yet. The reading text
+*is* the Gemini transcript, so "text before audio" means the producer must finish the one unit the
+run starts on before any PCM is written. `ReaderInitialPlayback.gate` (pure JVM) is the decision and
+`ReaderController.awaitInitialRendering` is the only place the narration path waits for text —
+exactly one unit, so nothing blocks on the whole document and nothing is translated up front. The
+gate reads `ReaderDisplayText.text` for the run's language and never the visible page, because the
+page is exactly the fallback that caused the bug. `output.start()` moved to *after* the gate: starting
+the track earlier held audio focus in silence for the whole synthesis of the first unit. Every gate
+read happens under the controller lock — the producer publishes the spool snapshot before it records
+the rendering, so observing the snapshot alone establishes no happens-before for the text, and reading
+the rendering map outside the lock would race it. A gate failure is terminal and drains nothing:
+playing a unit whose transcript never arrived is the "audio first, text later" sequence the gate
+exists to prevent, so the failure surfaces as `NarrationFailure` with a retry, never a silent
+source-language fallback. No second translation pipeline, no separate backend, no Android TTS, and
+Live Dub is untouched.
+
+**DONE — Logs severity is semantic and one entry can be selected.** `LogSeverity` maps a severity to
+a role (`INFO` → `VoxoraColors.success`, `WARN` → `warning`, `ERROR` → `danger`, `DEBUG` →
+`onSurfaceVariant`, unknown → neutral, never success) and `LogsScreen` only asks for the role, so no
+hex is hardcoded. Each entry is wrapped in its own `SelectionContainer`, so a long press selects
+inside that line and Copy takes exactly that entry; the header's Copy-all, Share and Clear remain.
+`LogLineFormat` is now the single rule behind every copy path (the `formatted()` output, the
+Copy-all payload and a single-entry copy cannot drift), and it takes primitives so it is JVM-testable.
+Log content, the monospace font and the explicit LTR list region are unchanged; only the surrounding
+chrome is RTL and localized.
+
+**Tests actually run (no Gradle).** `kotlinc 2.0.21` + JUnit with `-ea`, matching Gradle's test JVM:
+**404 tests OK across 36 classes** (up from 379/33), adding `ReaderInitialPlaybackTest`,
+`LogSeverityTest` and `LogLineFormatTest`. The load-bearing new case is
+`ReaderInitialPlaybackTest.theSourceFallbackIsNotMistakenForASelectedLanguageRendering`, which pairs
+`readingText` (non-blank, equals the source) with `text` (null) so a regression that gates on the
+visible page fails. Static checks: `checkimports.py` OK, `stringcheck.py` OK (values 262, values-fa
+261, parity intact, only `default_web_client_id` intentionally untranslated). The harness stub
+`VoxoraLog` gained the `Level` enum the two new Logs tests iterate.
+
+**Real-device verification was NOT performed.** The swipe feel, the card-only motion under RTL, the
+first-frame wait and the Logs selection are all device-verification items, and nothing in this cycle
+was tested on a physical device.
+
+**BLOCKED on external configuration (not on code):** unchanged from the Cloud cycle below —
+`default_web_client_id` is still a placeholder, and the Cloud APIs must be enabled on the queried
+project. Cloud authorization cannot run end to end until the owner supplies the OAuth client.
+
+**NEXT (the second half of this cycle, not yet started):** reframe the Settings/Cloud surface from
+"Cloud account → Cloud project → Cloud API keys" to "Sign in with Google → Google account → Gemini /
+AI Studio access → key → usage", keeping the same structure (order and copy, not a rewrite); add the
+Reader floating bubble as a new `reader/` service with full parity to the Live bubble, toggled from
+the Reader top bar, leaving `FloatingBubbleService`/`DubService` untouched; and upgrade the
+`ReaderService` notification to previous / pause / next / stop, segment-scoped and disabled at a chunk
+boundary, rebuilt on phase change with MediaSession/MediaStyle actions.
+
+### Last change (previous session) — Persian localization, Reader segment swipe, Logs, Cloud authorization
 
 Eleven commits on `feat/reader-segmented-spooling` this cycle:
 
@@ -277,8 +349,11 @@ confirm the previous account's project and key disappear immediately.
 ### Actual repository state (inspected, not assumed):
 - `main`: `1f0a719 fix(reader): fix suspend output language persistence`.
 - `feat/reader-segmented-spooling` (the implementation branch) HEAD is the documentation commit that
-  follows the last code change, `9dfc204 fix(auth): map the scope list to Play Services Scope objects`
-  — the head Android CI verified. Below it:
+  follows the last code change, `f4ee4f1 fix(logs): read INFO as success and let one entry be
+  selected`. This cycle's three code commits sit below it:
+  `ab726f7 fix(reader): gate the first audible frame on the selected-language text` and
+  `d7ba68c fix(reader): move only the text card on a segment turn`, on top of the previously
+  CI-verified head `9dfc204 fix(auth): map the scope list to Play Services Scope objects`, then
   `14e5403 fix(cloud): read the account email from userinfo, not the authorization result`,
   `089a71f docs: record the cloud authorization, segment swipe and Persian localization`,
   `316a6a4 feat(settings): connect the Google account, project and Gemini key`,
@@ -299,12 +374,13 @@ confirm the previous account's project and key disappear immediately.
   `a74db6c fix(reader): define fluent and faithful narration semantics` — plus the
   reading-order fix `6d826e0 fix(reader): de-interleave pdf columns when a page
   carries a running header` and the documentation commits. **Pushed to `origin`,
-  and not merged.** CI is green for the verified head: `Android CI` runs #90 (push)
-  and #91 (pull_request) both succeeded at `9dfc204` (debug APK + unit tests), and
-  runs #92/#93 are green for the documentation commit `a96d201`. The runs before
-  that failed on the three compile errors listed above (#86–#89 at
-  `089a71f`/`14e5403`), so the green result belongs to this head and not to an
-  earlier one. Older green points were `7f47805` (run `35294468431`, both jobs) and
+  and not merged.** The last CI-verified code head is `9dfc204`: `Android CI` runs #90 (push)
+  and #91 (pull_request) both succeeded there (debug APK + unit tests), and
+  runs #92/#93 are green for the documentation commit `a96d201`. The three commits of this cycle
+  (`d7ba68c`, `ab726f7`, `f4ee4f1`) are **not yet CI-verified** at the time this line was written —
+  check Actions for their push run before trusting the local suite as their compile check. The runs
+  before `9dfc204` failed on the three compile errors listed above (#86–#89 at
+  `089a71f`/`14e5403`). Older green points were `7f47805` (run `35294468431`, both jobs) and
   `707cc3c` (run #66).
 - `feat/ci-feature-branch` = `76f0c96` + `dcbf852 ci: run Android CI on feature
   branch`, with **PR #2 open to `main`** (still open; deliberately NOT merged).
