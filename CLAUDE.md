@@ -190,9 +190,16 @@ are independent). Static checks: `themecheck.py` OK, `checkimports.py` OK, `stri
 293, values-fa 292, parity intact; only `default_web_client_id` intentionally untranslated). The
 Compose, Play Services and Android layers are **not** compiled locally — CI is their only compile check.
 
-**CI (Actions) — not yet recorded for this commit.** The push triggers `Android CI` on
-`feat/reader-segmented-spooling`; the result must be read back from Actions and recorded in a
-follow-up docs commit. Do not treat the theme change as compile-verified until then.
+**CI (Actions) — green at `bff6ca9`.** Run
+[`35381294377`](https://github.com/mo3iiibest77-hub/Voxora-Android/actions/runs/35381294377)
+(event `push`, branch `feat/reader-segmented-spooling`, created 2026-09-18T18:37:47Z, completed
+18:40:18Z): **both jobs success** — `Unit tests` (job `105717811438`) including `Run unit tests`, and
+`Assemble debug APK` (job `105717811622`) including `Assemble debug` and `Upload debug APK`. The APK
+job is the only real compile check for the Compose layer this feature touches (`Theme.kt`,
+`SettingsScreen.kt`, `MainActivity.kt`), which the dev server cannot compile. The push run's
+`Unit tests` job is the CI counterpart of the local **478 tests OK across 43 classes**. **No
+real-device testing was performed** — the three themes' appearance, the selector under Persian/RTL,
+and each light palette's contrast remain device-verification items for the owner.
 
 **Real-device verification was NOT performed.** The three themes' actual appearance, the selector
 under Persian/RTL, and each light palette's contrast are device-verification items; the owner will
