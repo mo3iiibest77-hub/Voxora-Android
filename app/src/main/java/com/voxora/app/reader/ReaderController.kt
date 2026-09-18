@@ -10,6 +10,9 @@ import com.voxora.core.gemini.ReaderLanguages
 import com.voxora.core.gemini.ReaderNarrationModes
 import com.voxora.core.gemini.ReaderSessionStatus
 import com.voxora.core.prefs.UserPrefs
+import com.voxora.core.prefs.UsagePrefs
+import com.voxora.core.usage.UsageFailureCategory
+import com.voxora.core.usage.UsageRecorder
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -41,6 +44,15 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
     private val playbackMutex = Mutex()
     private val persistenceMutex = Mutex()
     private val prefs = UserPrefs(context)
+    /**
+     * Records what Voxora observed about its own Gemini requests, for the Settings usage
+     * dashboard. Purely observational: nothing in the narration path reads it back, so it can
+     * never influence audio, ordering or timing.
+     */
+    private val usageRecorder = UsageRecorder(
+        store = UsagePrefs(context),
+        onStoreFailure = { reason -> VoxoraLog.w("Reader", "Usage record dropped: $reason") },
+    )
     private val extractor = TextExtractor(context)
     private val mutableState = MutableStateFlow(ReaderState())
     internal val state = mutableState.asStateFlow()
@@ -317,6 +329,9 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
                 slots.forEach { it.producer?.cancel() }
                 slots.forEach { it.producer?.join() }
                 slots.forEach { it.spool.close() }
+                // A run boundary is the natural point to force the batched usage record to disk,
+                // so a finished narration is fully accounted for even if the process dies later.
+                usageRecorder.flush()
             }
         }
     }
@@ -341,6 +356,9 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
                             sessionStarted = System.nanoTime()
                             session = it
                             it.onLog = { line -> VoxoraLog.d("ReaderSession", line) }
+                            // The server only *may* report token usage, so this fires only when
+                            // it actually did. Nothing is synthesised when it stays silent.
+                            it.onUsage = { reported -> usageRecorder.noteReportedUsage(reported) }
                             it.connect(key, instructionFor(mode, language), "models/gemini-3.8-live")
                             when (it.status.first { status -> status is ReaderSessionStatus.Ready || status is ReaderSessionStatus.Error }) {
                                 ReaderSessionStatus.Ready -> Unit
@@ -354,6 +372,9 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
                                 slot.spool.append(pcm)
                             }
                         } ?: throw NarrationFailure(R.string.reader_no_audio)
+                        // One completed request. Recorded outside the lock because the recorder
+                        // suspends; it never participates in the narration ordering itself.
+                        usageRecorder.recordSuccess()
                         synchronized(lock) {
                             producerContext.ensureActive()
                             checkOwned(run, revision)
@@ -379,6 +400,9 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
                         session = null
                         currentCoroutineContext().ensureActive()
                         attempts++
+                        // Only the classified category is stored — never the exception message,
+                        // which an HTTP client could populate with the key-bearing request URL.
+                        usageRecorder.recordFailure(usageCategoryFor(e))
                         VoxoraLog.w("Reader", "Unit production failed chunk=${slot.index + 1} unit=${unit + 1} attempt=$attempts")
                         if (slot.spool.state.value.committed > before || attempts >= slot.attempts || e is ReaderSpool.CapacityException) {
                             slot.spool.fail(unit, e)
@@ -593,6 +617,25 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
 
     private fun instructionFor(mode: String, outputLang: String): String =
         ReaderNarrationModes.instruction(mode, ReaderLanguages.language(outputLang).englishName)
+
+    /**
+     * Maps a narration failure onto a short usage category.
+     *
+     * [NarrationFailure] carries a string resource rather than a message, so the resource is the
+     * honest source here; anything else falls back to classifying the exception. Only the category
+     * is stored — never the message, which can contain the key-bearing request URL.
+     */
+    private fun usageCategoryFor(error: Exception): String = when ((error as? NarrationFailure)?.resource) {
+        R.string.reader_no_audio,
+        R.string.reader_partial_audio,
+        R.string.reader_audio_unavailable,
+        -> UsageFailureCategory.AUDIO
+        R.string.error_no_api_key,
+        R.string.reader_mode_missing,
+        -> UsageFailureCategory.CONFIGURATION
+        R.string.reader_connect_timeout -> UsageFailureCategory.NETWORK
+        else -> UsageFailureCategory.classify(error.javaClass.name, error.message)
+    }
 
     private companion object {
         val activePhases = setOf(ReaderPhase.CONNECTING, ReaderPhase.REWRITING, ReaderPhase.SPEAKING, ReaderPhase.NEXT)

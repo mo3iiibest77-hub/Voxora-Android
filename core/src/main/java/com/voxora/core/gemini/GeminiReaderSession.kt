@@ -1,5 +1,6 @@
 package com.voxora.core.gemini
 
+import com.voxora.core.usage.GeminiUsageMetadata
 import java.util.Base64
 import java.util.Locale
 import java.util.concurrent.TimeUnit
@@ -56,6 +57,21 @@ class GeminiReaderSession internal constructor(
     @Volatile
     var onLog: ((String) -> Unit)? = null
 
+    /**
+     * Called whenever the server reports token usage for a turn.
+     *
+     * The Live API only *may* include a `usageMetadata` object, so this fires only when one is
+     * actually present and never with a synthesised value. A caller that wants local usage
+     * history can record it here without this session knowing anything about persistence.
+     */
+    @Volatile
+    var onUsage: ((GeminiUsageMetadata) -> Unit)? = null
+
+    private val _usage = MutableStateFlow<GeminiUsageMetadata?>(null)
+
+    /** Token usage the server last reported on the current connection, or null if none was sent. */
+    val usage: StateFlow<GeminiUsageMetadata?> = _usage.asStateFlow()
+
     private val lock = Any()
     private val sessionJob = SupervisorJob()
     private val scope = CoroutineScope(sessionJob + Dispatchers.IO)
@@ -76,6 +92,9 @@ class GeminiReaderSession internal constructor(
         var retireAfterTurn = false
         var terminalMessage: String? = null
         var turn: Turn? = null
+
+        /** Latest usageMetadata the server sent on this connection, if any. */
+        var usage: GeminiUsageMetadata? = null
         var queuedMessages = 0
         var queuedBytes = 0L
         var highWaterMessages = 0
@@ -110,6 +129,9 @@ class GeminiReaderSession internal constructor(
             Attempt(++generation, setupPayload(instruction, model, withSpeechConfig)).also {
                 attempt = it
                 _status.value = ReaderSessionStatus.Connecting
+                // Usage belongs to a connection, so a new connection starts from "not reported"
+                // rather than exposing the previous connection's numbers as if they were current.
+                _usage.value = null
                 it.worker = scope.launch(start = CoroutineStart.LAZY) { runWorker(it) }
                 it.connectDeadline = scope.launch(start = CoroutineStart.LAZY) {
                     delay(connectTimeoutMs)
@@ -320,6 +342,19 @@ class GeminiReaderSession internal constructor(
     private suspend fun handleMessage(target: Attempt, turn: Turn?, message: JSONObject) {
         if (message.has("error")) {
             throw ReaderSessionException(serverError(message.optJSONObject("error")?.optInt("code")))
+        }
+        // Usage metadata is a top-level field that the server may attach to any message, and
+        // it is often sent alongside the turn-complete message rather than inside serverContent.
+        // It is therefore read before the serverContent early-return below, otherwise a
+        // usage-only message would be dropped. Absence is normal and records nothing.
+        GeminiUsageMetadata.fromMessage(message)?.let { reported ->
+            synchronized(lock) {
+                if (isCurrent(target)) {
+                    target.usage = reported
+                    _usage.value = reported
+                }
+            }
+            onUsage?.invoke(reported)
         }
         if (message.has("setupComplete") || message.has("setup_complete")) {
             val ready = synchronized(lock) {
