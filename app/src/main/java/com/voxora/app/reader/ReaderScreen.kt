@@ -750,6 +750,12 @@ private fun ActiveHalo(
  * `jumpToSegment`, and brings the arriving unit in from the opposite side. The offset is
  * state rather than a one-shot effect, so no stale displacement can survive recomposition,
  * and the turn guard makes rapid repeated swipes resolve one at a time.
+ *
+ * **Only the text card moves.** The page itself is a fixed frame: the section header, the
+ * chunk identity card, the segment position row and the chunk buttons never translate or fade,
+ * so a turn reads as the page sliding away rather than the whole screen lurching. The gesture
+ * and the transform are therefore attached to [SegmentCard], while the turn state stays here —
+ * it is what drives the controller jump and has to outlive the card that is being swapped.
  */
 @Composable
 private fun ChunkPage(
@@ -914,43 +920,42 @@ private fun ChunkPage(
         }
     }
 
-    key(segmentIndex) {
-        // Fresh per unit: the arriving unit is composed at zero presence from its very first
-        // frame, so a turn never flashes the new text at full opacity first.
-        val enter = remember { Animatable(0f) }
-        LaunchedEffect(Unit) { enter.animateTo(1f, tween(durationMillis = PAGE_ENTER_MS)) }
+    // The page is a fixed frame. Only the text card below moves: the section header, the chunk
+    // identity card, the segment position row and the chunk buttons stay exactly at rest while a
+    // turn plays, so a swipe reads as "the page I am reading slid away", not "the screen moved".
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        SectionHeader(
+            title = stringResource(R.string.reader_page_section),
+            hint = stringResource(R.string.reader_page_hint),
+        )
+        ChunkHeader(
+            chunk = state.chunk,
+            total = chunkTotal,
+            segment = state.segment,
+            segmentTotal = state.segmentTotal,
+            languageFlag = languageFlag,
+            languageLabel = languageLabel,
+            preparing = ReaderPageText.isPreparingWholePage(
+                phase = state.phase,
+                pending = state.pendingSegments,
+                unitCount = state.segmentTotal,
+            ),
+        )
+        if (segmentIndex != null && segmentText != null) {
+            // Keyed on the unit so the arriving card is composed at zero presence and slides in
+            // from the side the turn came from. The turn state itself (drag, presence, the guard)
+            // stays owned by the page, because it is what drives the controller jump; only the
+            // visual transform and the gesture live here, on the card.
+            key(segmentIndex) {
+                val enter = remember { Animatable(0f) }
+                LaunchedEffect(Unit) { enter.animateTo(1f, tween(durationMillis = PAGE_ENTER_MS)) }
 
-        val dragFade = 1f - (abs(drag) / maxDrag) * 0.5f
-        val direction = ReaderPager.enterOffset(forward, rtl)
+                val dragFade = 1f - (abs(drag) / maxDrag) * 0.5f
+                val direction = ReaderPager.enterOffset(forward, rtl)
 
-        Column(
-            modifier = modifier
-                .fillMaxWidth()
-                .graphicsLayer {
-                    translationX = drag + direction * travel * (1f - enter.value)
-                    alpha = (presence * enter.value * dragFade).coerceIn(0f, 1f)
-                }
-                .then(gesture),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            SectionHeader(
-                title = stringResource(R.string.reader_page_section),
-                hint = stringResource(R.string.reader_page_hint),
-            )
-            ChunkHeader(
-                chunk = state.chunk,
-                total = chunkTotal,
-                segment = state.segment,
-                segmentTotal = state.segmentTotal,
-                languageFlag = languageFlag,
-                languageLabel = languageLabel,
-                preparing = ReaderPageText.isPreparingWholePage(
-                    phase = state.phase,
-                    pending = state.pendingSegments,
-                    unitCount = state.segmentTotal,
-                ),
-            )
-            if (segmentIndex != null && segmentText != null) {
                 SegmentCard(
                     text = segmentText,
                     narrating = narrating,
@@ -959,41 +964,47 @@ private fun ChunkPage(
                         pending = state.pendingSegments,
                         index = segmentIndex,
                     ),
+                    modifier = Modifier
+                        .graphicsLayer {
+                            translationX = drag + direction * travel * (1f - enter.value)
+                            alpha = (presence * enter.value * dragFade).coerceIn(0f, 1f)
+                        }
+                        .then(gesture),
                 )
             }
-            SegmentTurnRow(
-                position = state.segment,
-                total = state.segmentTotal,
-                canPrevious = segmentIndex != null &&
-                    ReaderPager.target(segmentIndex, PageTurn.PREVIOUS, state.segmentTotal) != null,
-                canNext = segmentIndex != null &&
-                    ReaderPager.target(segmentIndex, PageTurn.NEXT, state.segmentTotal) != null,
-                enabled = canNavigate && !turning,
-                onPrevious = {
-                    val index = segmentIndex
-                    val target = index?.let { ReaderPager.target(it, PageTurn.PREVIOUS, state.segmentTotal) }
-                    if (target != null) requestSegmentTurn(SegmentStep(PageTurn.PREVIOUS, target))
-                },
-                onNext = {
-                    val index = segmentIndex
-                    val target = index?.let { ReaderPager.target(it, PageTurn.NEXT, state.segmentTotal) }
-                    if (target != null) requestSegmentTurn(SegmentStep(PageTurn.NEXT, target))
-                },
-            )
-            PageTurnRow(
-                canPrevious = ReaderPager.target(chunkIndex, PageTurn.PREVIOUS, chunkTotal) != null,
-                canNext = ReaderPager.target(chunkIndex, PageTurn.NEXT, chunkTotal) != null,
-                enabled = canNavigate && !turning,
-                onPrevious = {
-                    ReaderPager.target(chunkIndex, PageTurn.PREVIOUS, chunkTotal)
-                        ?.let { requestChunkTurn(it, next = false) }
-                },
-                onNext = {
-                    ReaderPager.target(chunkIndex, PageTurn.NEXT, chunkTotal)
-                        ?.let { requestChunkTurn(it, next = true) }
-                },
-            )
         }
+        SegmentTurnRow(
+            position = state.segment,
+            total = state.segmentTotal,
+            canPrevious = segmentIndex != null &&
+                ReaderPager.target(segmentIndex, PageTurn.PREVIOUS, state.segmentTotal) != null,
+            canNext = segmentIndex != null &&
+                ReaderPager.target(segmentIndex, PageTurn.NEXT, state.segmentTotal) != null,
+            enabled = canNavigate && !turning,
+            onPrevious = {
+                val index = segmentIndex
+                val target = index?.let { ReaderPager.target(it, PageTurn.PREVIOUS, state.segmentTotal) }
+                if (target != null) requestSegmentTurn(SegmentStep(PageTurn.PREVIOUS, target))
+            },
+            onNext = {
+                val index = segmentIndex
+                val target = index?.let { ReaderPager.target(it, PageTurn.NEXT, state.segmentTotal) }
+                if (target != null) requestSegmentTurn(SegmentStep(PageTurn.NEXT, target))
+            },
+        )
+        PageTurnRow(
+            canPrevious = ReaderPager.target(chunkIndex, PageTurn.PREVIOUS, chunkTotal) != null,
+            canNext = ReaderPager.target(chunkIndex, PageTurn.NEXT, chunkTotal) != null,
+            enabled = canNavigate && !turning,
+            onPrevious = {
+                ReaderPager.target(chunkIndex, PageTurn.PREVIOUS, chunkTotal)
+                    ?.let { requestChunkTurn(it, next = false) }
+            },
+            onNext = {
+                ReaderPager.target(chunkIndex, PageTurn.NEXT, chunkTotal)
+                    ?.let { requestChunkTurn(it, next = true) }
+            },
+        )
     }
 }
 
