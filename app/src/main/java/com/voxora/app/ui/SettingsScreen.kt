@@ -28,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.DataUsage
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Layers
@@ -36,6 +37,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
@@ -69,8 +71,11 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.os.LocaleListCompat
 import com.voxora.app.R
+import com.voxora.app.auth.AuthFailure
+import com.voxora.app.auth.AuthUiState
 import com.voxora.app.auth.GoogleAuthHelper
 import com.voxora.app.reader.languageOptions
+import com.voxora.app.ui.theme.VoxoraColors
 import com.voxora.app.ui.theme.VoxoraTheme
 import com.voxora.core.i18n.AppLocales
 import com.voxora.core.prefs.UserPrefs
@@ -113,6 +118,24 @@ private fun List<LanguageChoice>.labelOf(code: String): String =
     firstOrNull { it.code == code }?.label ?: code
 
 /**
+ * The user-facing explanation for a failed sign-in.
+ *
+ * Each reason gets its own sentence because the next action differs: a missing client ID is the
+ * build's problem and guest mode still works, a cancellation needs no action at all, and a network
+ * problem is worth retrying.
+ */
+@Composable
+private fun authFailureMessage(reason: AuthFailure): String = when (reason) {
+    AuthFailure.CONFIGURATION_MISSING -> stringResource(R.string.auth_failure_configuration)
+    AuthFailure.CANCELLED -> stringResource(R.string.auth_failure_cancelled)
+    AuthFailure.NO_CREDENTIAL -> stringResource(R.string.auth_failure_no_credential)
+    AuthFailure.PROVIDER_UNAVAILABLE -> stringResource(R.string.auth_failure_provider)
+    AuthFailure.NETWORK -> stringResource(R.string.auth_failure_network)
+    AuthFailure.UNSUPPORTED_CREDENTIAL -> stringResource(R.string.auth_failure_unsupported)
+    AuthFailure.UNKNOWN -> stringResource(R.string.auth_failure_unknown)
+}
+
+/**
  * Voxora Settings.
  *
  * Laid out with the same visual system as the Reader screen — one keyed
@@ -126,6 +149,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onRequestOverlayPermission: () -> Unit = {},
     onOpenLogs: () -> Unit = {},
+    onOpenUsage: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -137,17 +161,15 @@ fun SettingsScreen(
     var lang by remember { mutableStateOf("fa") }
     var appLang by remember { mutableStateOf("en") }
     var saved by remember { mutableStateOf(false) }
-    var signedIn by remember { mutableStateOf(false) }
-    var displayName by remember { mutableStateOf("") }
-    var email by remember { mutableStateOf("") }
+    // One typed state instead of separate flags: there is no way to hold a stale email while
+    // signed out, because only SignedIn carries an identity.
+    var authState by remember { mutableStateOf<AuthUiState>(AuthUiState.SignedOut) }
 
     LaunchedEffect(Unit) {
         apiKey = prefs.apiKey.first()
         lang = prefs.targetLanguage.first()
         appLang = prefs.appLanguage.first()
-        signedIn = prefs.signedIn.first()
-        displayName = prefs.displayName.first()
-        email = prefs.userEmail.first()
+        authState = auth.currentState()
     }
 
     fun applyAppLocale(code: String) {
@@ -164,9 +186,7 @@ fun SettingsScreen(
         onDubbingLanguageChange = { lang = it; saved = false },
         appLanguage = appLang,
         onAppLanguageChange = { appLang = it; applyAppLocale(it) },
-        signedIn = signedIn,
-        displayName = displayName,
-        email = email,
+        authState = authState,
         saved = saved,
         onBack = onBack,
         onSave = {
@@ -180,21 +200,23 @@ fun SettingsScreen(
         },
         onOpenAiStudio = { uriHandler.openUri(AI_STUDIO_URL) },
         onSignIn = {
-            scope.launch {
-                val result = auth.signIn()
-                if (result.ok) {
-                    signedIn = true
-                    displayName = result.name
-                    email = result.email
+            // Ignore a second tap while an operation is running: launching an overlapping
+            // credential request would race two results onto the same card.
+            if (!authState.isBusy) {
+                scope.launch {
+                    authState = AuthUiState.SigningIn
+                    authState = auth.signIn()
                 }
             }
         },
         onSignOut = {
-            scope.launch {
-                auth.signOut()
-                signedIn = false
-                displayName = ""
-                email = ""
+            if (!authState.isBusy) {
+                scope.launch {
+                    authState = AuthUiState.SigningOut
+                    // signOut always reports SignedOut, even when the provider call failed, so
+                    // the card can never be left showing an account the user removed.
+                    authState = auth.signOut()
+                }
             }
         },
         onOpenOverlay = {
@@ -207,6 +229,7 @@ fun SettingsScreen(
             )
         },
         onOpenLogs = onOpenLogs,
+        onOpenUsage = onOpenUsage,
         modifier = modifier,
     )
 }
@@ -219,9 +242,7 @@ private fun SettingsContent(
     onDubbingLanguageChange: (String) -> Unit,
     appLanguage: String,
     onAppLanguageChange: (String) -> Unit,
-    signedIn: Boolean,
-    displayName: String,
-    email: String,
+    authState: AuthUiState,
     saved: Boolean,
     onBack: () -> Unit,
     onSave: () -> Unit,
@@ -230,6 +251,7 @@ private fun SettingsContent(
     onSignOut: () -> Unit,
     onOpenOverlay: () -> Unit,
     onOpenLogs: () -> Unit,
+    onOpenUsage: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
@@ -314,6 +336,34 @@ private fun SettingsContent(
             }
         }
 
+        item(key = "usage-header") {
+            SettingsSectionHeader(stringResource(R.string.settings_section_usage))
+        }
+        item(key = "usage") {
+            SettingsCard {
+                SettingsRowHeader(
+                    icon = Icons.Filled.DataUsage,
+                    title = stringResource(R.string.settings_usage_open),
+                    subtitle = stringResource(R.string.settings_usage_help),
+                )
+                OutlinedButton(
+                    onClick = onOpenUsage,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(46.dp),
+                    shape = RoundedCornerShape(14.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.DataUsage,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.settings_usage_open))
+                }
+            }
+        }
+
         item(key = "dubbing-header") {
             SettingsSectionHeader(stringResource(R.string.settings_section_dubbing))
         }
@@ -368,26 +418,39 @@ private fun SettingsContent(
         }
         item(key = "account") {
             SettingsCard {
-                if (signedIn) {
+                if (authState.isSignedIn) {
                     SettingsRowHeader(
                         icon = Icons.Filled.Person,
-                        title = displayName.ifBlank { email },
-                        subtitle = email.takeIf { it.isNotBlank() && !it.equals(displayName, ignoreCase = true) },
+                        title = authState.nameOrEmpty,
+                        subtitle = authState.emailOrEmpty.takeIf {
+                            it.isNotBlank() && !it.equals(authState.nameOrEmpty, ignoreCase = true)
+                        },
                     )
                     OutlinedButton(
                         onClick = onSignOut,
+                        enabled = !authState.isBusy,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(46.dp),
                         shape = RoundedCornerShape(14.dp),
                     ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.Logout,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Spacer(Modifier.width(8.dp))
-                        Text(stringResource(R.string.action_sign_out))
+                        if (authState is AuthUiState.SigningOut) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = colors.primary,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.auth_signing_out))
+                        } else {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.Logout,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.action_sign_out))
+                        }
                     }
                 } else {
                     SettingsRowHeader(
@@ -397,6 +460,7 @@ private fun SettingsContent(
                     )
                     Button(
                         onClick = onSignIn,
+                        enabled = !authState.isBusy,
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(50.dp),
@@ -406,9 +470,36 @@ private fun SettingsContent(
                             contentColor = colors.onPrimary,
                         ),
                     ) {
+                        if (authState is AuthUiState.SigningIn) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp),
+                                strokeWidth = 2.dp,
+                                color = colors.onPrimary,
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = stringResource(R.string.auth_signing_in),
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        } else {
+                            Text(
+                                text = stringResource(R.string.settings_sign_in),
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                    }
+                    // The failure reason used to be discarded entirely, so a build with no Web
+                    // client ID looked as if the button did nothing at all.
+                    val failure = (authState as? AuthUiState.Failed)?.reason
+                    if (failure != null) {
                         Text(
-                            text = stringResource(R.string.settings_sign_in),
-                            fontWeight = FontWeight.SemiBold,
+                            text = authFailureMessage(failure),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (failure == AuthFailure.CONFIGURATION_MISSING) {
+                                colors.onSurfaceVariant
+                            } else {
+                                VoxoraColors.danger
+                            },
                         )
                     }
                 }
@@ -627,9 +718,7 @@ private fun SettingsContentPreview(modifier: Modifier = Modifier) {
                 onDubbingLanguageChange = {},
                 appLanguage = "en",
                 onAppLanguageChange = {},
-                signedIn = false,
-                displayName = "",
-                email = "",
+                authState = AuthUiState.SignedOut,
                 saved = false,
                 onBack = {},
                 onSave = {},
@@ -638,6 +727,7 @@ private fun SettingsContentPreview(modifier: Modifier = Modifier) {
                 onSignOut = {},
                 onOpenOverlay = {},
                 onOpenLogs = {},
+                onOpenUsage = {},
             )
         }
     }
@@ -655,9 +745,7 @@ private fun SettingsContentSignedInPreview(modifier: Modifier = Modifier) {
                 onDubbingLanguageChange = {},
                 appLanguage = "fa",
                 onAppLanguageChange = {},
-                signedIn = true,
-                displayName = "Mo3i",
-                email = "owner@voxora.app",
+                authState = AuthUiState.SignedIn("owner@voxora.app", "Mo3i"),
                 saved = true,
                 onBack = {},
                 onSave = {},
@@ -666,6 +754,7 @@ private fun SettingsContentSignedInPreview(modifier: Modifier = Modifier) {
                 onSignOut = {},
                 onOpenOverlay = {},
                 onOpenLogs = {},
+                onOpenUsage = {},
             )
         }
     }

@@ -24,7 +24,7 @@ import kotlinx.coroutines.launch
  * `ReaderService`, never by this navigation state, so leaving the Reader
  * destination never stops narration.
  */
-private enum class VoxoraScreen { ONBOARDING, HOME, DUB, READER, SETTINGS, LOGS }
+private enum class VoxoraScreen { ONBOARDING, HOME, DUB, READER, SETTINGS, USAGE, LOGS }
 
 @Composable
 fun VoxoraNav(
@@ -51,7 +51,10 @@ fun VoxoraNav(
     // System back returns to the product root. Screens that own their own
     // back behavior (Reader) register later and take priority.
     BackHandler(enabled = screen != VoxoraScreen.HOME && screen != VoxoraScreen.ONBOARDING) {
-        screen = if (screen == VoxoraScreen.LOGS) VoxoraScreen.SETTINGS else VoxoraScreen.HOME
+        screen = when (screen) {
+            VoxoraScreen.LOGS, VoxoraScreen.USAGE -> VoxoraScreen.SETTINGS
+            else -> VoxoraScreen.HOME
+        }
     }
 
     when (screen) {
@@ -73,6 +76,10 @@ fun VoxoraNav(
             onBack = { screen = VoxoraScreen.HOME },
             onRequestOverlayPermission = onRequestOverlayPermission,
             onOpenLogs = { screen = VoxoraScreen.LOGS },
+            onOpenUsage = { screen = VoxoraScreen.USAGE },
+        )
+        VoxoraScreen.USAGE -> ApiUsageScreen(
+            onBack = { screen = VoxoraScreen.SETTINGS },
         )
         VoxoraScreen.LOGS -> LogsScreen(
             onBack = { screen = VoxoraScreen.SETTINGS },

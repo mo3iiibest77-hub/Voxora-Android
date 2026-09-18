@@ -1,0 +1,525 @@
+package com.voxora.app.ui
+
+import android.content.res.Configuration.UI_MODE_NIGHT_YES
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.voxora.app.R
+import com.voxora.app.ui.theme.VoxoraColors
+import com.voxora.app.ui.theme.VoxoraTheme
+import com.voxora.core.prefs.UsagePrefs
+import com.voxora.core.prefs.UserPrefs
+import com.voxora.core.usage.ApiUsageSnapshot
+import com.voxora.core.usage.GeminiKeyProbe
+import com.voxora.core.usage.GeminiKeyProbeResult
+import com.voxora.core.usage.GeminiKeyStatus
+import com.voxora.core.usage.GeminiUsageLedger
+import com.voxora.core.usage.GeminiUsageMetadata
+import com.voxora.core.usage.UsageMetric
+import com.voxora.core.usage.UsageUnavailable
+import java.text.DateFormat
+import java.util.Date
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+
+/**
+ * What Voxora knows about the configured Gemini API key, and what it honestly cannot know.
+ *
+ * ## Why this screen is explicit about gaps
+ * Gemini quota, billing and project identity belong to the **Google Cloud project**, not to an API
+ * key. An API key cannot be used to read them. Rather than printing a reassuring `0`, this screen
+ * names each unavailable figure and says why, and it never implies that a signed-in Google account
+ * owns the configured key.
+ *
+ * Everything shown as a number was observed: either by Voxora itself (its own request counts and
+ * whatever token usage the server reported) or by the key check, which calls the documented
+ * `models.list` endpoint — a non-generative call that consumes no tokens.
+ */
+@Composable
+fun ApiUsageScreen(
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val prefs = remember { UserPrefs(context) }
+    val usagePrefs = remember { UsagePrefs(context) }
+    val probe = remember { GeminiKeyProbe() }
+    val scope = rememberCoroutineScope()
+
+    var apiKey by remember { mutableStateOf("") }
+    var accountEmail by remember { mutableStateOf("") }
+    var probeResult by remember { mutableStateOf<GeminiKeyProbeResult?>(null) }
+    var probing by remember { mutableStateOf(false) }
+    val ledger by usagePrefs.ledger.collectAsStateWithLifecycle(initialValue = GeminiUsageLedger())
+
+    LaunchedEffect(Unit) {
+        apiKey = prefs.apiKey.first()
+        // The email is only shown when the account is actually signed in, so a stale stored
+        // address cannot appear on the dashboard after a sign-out.
+        val signedIn = prefs.signedIn.first()
+        accountEmail = if (signedIn) prefs.userEmail.first() else ""
+    }
+
+    ApiUsageContent(
+        snapshot = ApiUsageSnapshot.assemble(
+            apiKey = apiKey,
+            accountEmail = accountEmail,
+            probe = probeResult,
+            ledger = ledger,
+            nowMillis = System.currentTimeMillis(),
+        ),
+        probing = probing,
+        onTest = {
+            // Ignore a second tap while a check is in flight, so overlapping probes cannot race
+            // each other's results onto the screen.
+            if (!probing) {
+                scope.launch {
+                    probing = true
+                    probeResult = try {
+                        probe.probe(apiKey)
+                    } finally {
+                        probing = false
+                    }
+                }
+            }
+        },
+        onBack = onBack,
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun ApiUsageContent(
+    snapshot: ApiUsageSnapshot,
+    probing: Boolean,
+    onTest: () -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+
+    LazyColumn(
+        modifier = modifier
+            .fillMaxSize()
+            .background(colors.background)
+            .safeDrawingPadding(),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        item(key = "top-bar") {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = stringResource(R.string.action_back),
+                        tint = colors.onSurface,
+                    )
+                }
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    text = stringResource(R.string.usage_title),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.onSurface,
+                )
+            }
+        }
+
+        item(key = "key-header") { UsageSectionHeader(stringResource(R.string.usage_section_key)) }
+        item(key = "key") {
+            UsageCard {
+                UsageRow(
+                    label = stringResource(R.string.usage_key_label),
+                    value = snapshot.maskedKey.ifBlank { stringResource(R.string.usage_key_missing) },
+                    emphasised = snapshot.keyConfigured,
+                )
+                UsageNote(stringResource(R.string.usage_key_help))
+            }
+        }
+
+        item(key = "connection-header") { UsageSectionHeader(stringResource(R.string.usage_section_connection)) }
+        item(key = "connection") {
+            UsageCard {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    UsageStatusDot(status = snapshot.connection)
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        text = connectionLabel(snapshot.connection),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.onSurface,
+                    )
+                }
+                UsageMetricRow(
+                    label = stringResource(R.string.usage_models_available),
+                    metric = snapshot.modelsAvailable,
+                )
+                OutlinedButton(
+                    onClick = onTest,
+                    enabled = !probing && snapshot.keyConfigured,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(46.dp),
+                    shape = RoundedCornerShape(14.dp),
+                ) {
+                    if (probing) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                            color = colors.primary,
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.usage_testing))
+                    } else {
+                        Icon(
+                            imageVector = Icons.Filled.Refresh,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.usage_test_connection))
+                    }
+                }
+            }
+        }
+
+        item(key = "observed-header") { UsageSectionHeader(stringResource(R.string.usage_section_observed)) }
+        item(key = "observed") {
+            UsageCard {
+                UsageMetricRow(stringResource(R.string.usage_requests_today), snapshot.requestsToday)
+                UsageMetricRow(stringResource(R.string.usage_requests_month), snapshot.requestsThisMonth)
+                UsageMetricRow(stringResource(R.string.usage_tokens_input), snapshot.inputTokens)
+                UsageMetricRow(stringResource(R.string.usage_tokens_output), snapshot.outputTokens)
+                UsageMetricRow(stringResource(R.string.usage_tokens_total), snapshot.totalTokens)
+                UsageMetricRow(
+                    label = stringResource(R.string.usage_token_coverage),
+                    metric = snapshot.tokenCoverage,
+                    knownText = { reported ->
+                        stringResource(
+                            R.string.usage_coverage_value,
+                            reported.toInt(),
+                            (snapshot.requestsThisMonth.knownValue ?: 0L).toInt(),
+                        )
+                    },
+                )
+                UsageNote(stringResource(R.string.usage_observed_help))
+            }
+        }
+
+        item(key = "activity-header") { UsageSectionHeader(stringResource(R.string.usage_section_activity)) }
+        item(key = "activity") {
+            UsageCard {
+                UsageRow(
+                    label = stringResource(R.string.usage_last_success),
+                    value = snapshot.lastSuccessAtMillis?.let(::formatTimestamp)
+                        ?: stringResource(R.string.usage_never),
+                )
+                UsageRow(
+                    label = stringResource(R.string.usage_last_failure),
+                    value = snapshot.lastFailureAtMillis?.let(::formatTimestamp)
+                        ?: stringResource(R.string.usage_never),
+                )
+                UsageRow(
+                    label = stringResource(R.string.usage_last_error),
+                    value = snapshot.lastErrorCategory ?: stringResource(R.string.usage_never),
+                )
+            }
+        }
+
+        item(key = "project-header") { UsageSectionHeader(stringResource(R.string.usage_section_project)) }
+        item(key = "project") {
+            UsageCard {
+                UsageRow(
+                    label = stringResource(R.string.usage_section_project),
+                    value = stringResource(R.string.usage_project_unknown),
+                )
+                UsageNote(stringResource(R.string.usage_project_help))
+                UsageMetricRow(
+                    label = stringResource(R.string.usage_project_quota),
+                    metric = snapshot.projectQuota,
+                )
+                UsageNote(stringResource(R.string.usage_project_quota_help))
+                UsageMetricRow(
+                    label = stringResource(R.string.usage_billing),
+                    metric = snapshot.billing,
+                )
+                UsageNote(stringResource(R.string.usage_billing_help))
+                if (snapshot.accountEmail != null) {
+                    UsageNote(stringResource(R.string.usage_account_not_linked))
+                }
+            }
+        }
+
+        item(key = "privacy") {
+            Text(
+                text = stringResource(R.string.usage_privacy),
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+// ---- building blocks ---------------------------------------------------------------
+
+@Composable
+private fun UsageSectionHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+@Composable
+private fun UsageCard(content: @Composable () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        color = colors.surfaceContainerHigh,
+        border = BorderStroke(1.dp, colors.outlineVariant),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            content()
+        }
+    }
+}
+
+@Composable
+private fun UsageRow(label: String, value: String, emphasised: Boolean = false) {
+    val colors = MaterialTheme.colorScheme
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = if (emphasised) FontWeight.SemiBold else FontWeight.Normal,
+            color = if (emphasised) colors.primary else colors.onSurface,
+        )
+    }
+}
+
+/**
+ * A figure that may be a real observation or an explicit reason it is missing.
+ *
+ * [knownText] lets a caller render a known value in a richer form than a bare number, which is how
+ * the token-coverage row shows "2 of 12".
+ */
+@Composable
+private fun UsageMetricRow(
+    label: String,
+    metric: UsageMetric,
+    knownText: (@Composable (Long) -> String)? = null,
+) {
+    val colors = MaterialTheme.colorScheme
+    val value = when (metric) {
+        is UsageMetric.Known -> knownText?.invoke(metric.value) ?: metric.value.toString()
+        is UsageMetric.Missing -> reasonLabel(metric.reason)
+    }
+    val color = when (metric) {
+        is UsageMetric.Known -> colors.onSurface
+        is UsageMetric.Missing -> toneColor(UsageStatusVisual.tone(metric.reason))
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.width(12.dp))
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = color,
+        )
+    }
+}
+
+@Composable
+private fun UsageNote(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
+/**
+ * Connection light.
+ *
+ * Reuses the product's semantic roles, so a healthy key is the same green as active narration and a
+ * refused one is the same red as a stopped Reader. The breath runs only while the connection is
+ * healthy — it is not composed for any other state.
+ */
+@Composable
+private fun UsageStatusDot(status: GeminiKeyStatus?) {
+    val color = toneColor(UsageStatusVisual.tone(status))
+    Box(
+        // Decorative: the connection label beside it already states the status, so a screen
+        // reader should announce the words rather than an empty indicator.
+        modifier = Modifier
+            .size(18.dp)
+            .clearAndSetSemantics {},
+        contentAlignment = Alignment.Center,
+    ) {
+        if (UsageStatusVisual.pulses(status)) {
+            Box(
+                modifier = Modifier
+                    .size(18.dp)
+                    .clip(CircleShape)
+                    .background(color.copy(alpha = 0.25f)),
+            )
+        }
+        Box(
+            modifier = Modifier
+                .size(10.dp)
+                .clip(CircleShape)
+                .background(color),
+        )
+    }
+}
+
+@Composable
+private fun toneColor(tone: UsageTone): Color = when (tone) {
+    UsageTone.OK -> VoxoraColors.success
+    UsageTone.WARNING -> VoxoraColors.warning
+    UsageTone.ERROR -> VoxoraColors.danger
+    UsageTone.NEUTRAL -> MaterialTheme.colorScheme.outline
+}
+
+@Composable
+private fun connectionLabel(status: GeminiKeyStatus?): String = when (status) {
+    null -> stringResource(R.string.usage_not_checked)
+    GeminiKeyStatus.CONNECTED -> stringResource(R.string.usage_status_connected)
+    GeminiKeyStatus.INVALID_KEY -> stringResource(R.string.usage_status_invalid_key)
+    GeminiKeyStatus.UNAUTHORIZED -> stringResource(R.string.usage_status_unauthorized)
+    GeminiKeyStatus.QUOTA_LIMITED -> stringResource(R.string.usage_status_quota_limited)
+    GeminiKeyStatus.NETWORK_UNAVAILABLE -> stringResource(R.string.usage_status_network)
+    GeminiKeyStatus.SERVICE_ERROR -> stringResource(R.string.usage_status_service_error)
+    GeminiKeyStatus.CONFIGURATION_INCOMPLETE -> stringResource(R.string.usage_status_not_configured)
+    GeminiKeyStatus.UNKNOWN -> stringResource(R.string.usage_status_unknown)
+}
+
+@Composable
+private fun reasonLabel(reason: UsageUnavailable): String = when (reason) {
+    UsageUnavailable.NOT_CONFIGURED -> stringResource(R.string.usage_unavailable_not_configured)
+    UsageUnavailable.AUTH_REQUIRED -> stringResource(R.string.usage_unavailable_auth_required)
+    UsageUnavailable.PERMISSION_DENIED -> stringResource(R.string.usage_unavailable_permission_denied)
+    UsageUnavailable.NETWORK_ERROR -> stringResource(R.string.usage_unavailable_network)
+    UsageUnavailable.NOT_OFFERED -> stringResource(R.string.usage_unavailable_not_offered)
+    UsageUnavailable.UNSUPPORTED -> stringResource(R.string.usage_unavailable_unsupported)
+    UsageUnavailable.UNKNOWN -> stringResource(R.string.usage_unavailable_unknown)
+}
+
+/** Locale-aware so the timestamp reads correctly in Persian and under RTL. */
+private fun formatTimestamp(millis: Long): String =
+    DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(millis))
+
+// ---- previews ----------------------------------------------------------------------
+
+@Preview(showBackground = true, uiMode = UI_MODE_NIGHT_YES)
+@Composable
+private fun ApiUsageScreenPreview(modifier: Modifier = Modifier) {
+    val now = 1_760_000_000_000L
+    VoxoraTheme {
+        Surface(modifier = modifier) {
+            ApiUsageContent(
+                snapshot = ApiUsageSnapshot.assemble(
+                    apiKey = "AIzaSyD1234567890ABCD",
+                    accountEmail = null,
+                    probe = GeminiKeyProbeResult(GeminiKeyStatus.CONNECTED, modelCount = 48),
+                    ledger = GeminiUsageLedger().apply {
+                        recordSuccess(now, GeminiUsageMetadata(120, 480, 600))
+                        recordSuccess(now, null)
+                        recordFailure(now - 60_000, "network")
+                    },
+                    nowMillis = now,
+                ),
+                probing = false,
+                onTest = {},
+                onBack = {},
+            )
+        }
+    }
+}
+
+@Preview(showBackground = true, uiMode = UI_MODE_NIGHT_YES)
+@Composable
+private fun ApiUsageScreenUnconfiguredPreview(modifier: Modifier = Modifier) {
+    VoxoraTheme {
+        Surface(modifier = modifier) {
+            ApiUsageContent(
+                snapshot = ApiUsageSnapshot.assemble(
+                    apiKey = null,
+                    accountEmail = "owner@example.com",
+                    probe = null,
+                    ledger = GeminiUsageLedger(),
+                    nowMillis = 1_760_000_000_000L,
+                ),
+                probing = false,
+                onTest = {},
+                onBack = {},
+            )
+        }
+    }
+}
