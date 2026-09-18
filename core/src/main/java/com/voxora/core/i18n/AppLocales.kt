@@ -2,6 +2,7 @@ package com.voxora.core.i18n
 
 import com.voxora.core.gemini.ReaderLanguage
 import com.voxora.core.gemini.ReaderLanguages
+import java.util.Locale
 
 /**
  * The languages the Voxora *interface* ships in.
@@ -38,4 +39,32 @@ object AppLocales {
 
     /** The UI locale to fall back to when a stored preference is missing or unknown. */
     const val DEFAULT: String = "en"
+
+    /**
+     * Maps any requested locale onto one Voxora actually renders in.
+     *
+     * Language names are produced by `Locale.getDisplayName(locale)`, which names a
+     * language *in* that locale. Passing a raw device locale therefore leaks a language
+     * the app never ships: a phone set to Chinese with the Voxora UI falling back to
+     * English would label every language in the pickers in Chinese while the rest of the
+     * screen stayed English. Voxora ships no Chinese translation, so it must never
+     * *describe* languages in Chinese either.
+     *
+     * The rule is therefore: name a language only in a locale whose UI Voxora can
+     * actually display. A requested locale resolves to its shipped equivalent, matched
+     * on the full tag first and then on the language subtag (`fa-IR` → `fa`,
+     * `es-MX` → `es`), and anything else falls back to [DEFAULT].
+     *
+     * Pure JVM, and the only place a display locale should be produced from outside input.
+     */
+    fun resolve(locale: Locale?): Locale {
+        val requested = locale ?: return Locale.forLanguageTag(DEFAULT)
+        val language = requested.language.lowercase(Locale.ROOT)
+        if (language.isEmpty() || language == "und") return Locale.forLanguageTag(DEFAULT)
+        val tag = requested.toLanguageTag()
+        val code = shipped.firstOrNull { it.equals(tag, ignoreCase = true) }
+            ?: shipped.firstOrNull { it.equals(language, ignoreCase = true) }
+            ?: DEFAULT
+        return Locale.forLanguageTag(code)
+    }
 }
