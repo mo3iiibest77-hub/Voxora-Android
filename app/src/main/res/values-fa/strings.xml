@@ -9,6 +9,7 @@
     <string name="action_settings">تنظیمات</string>
     <string name="action_back">بازگشت</string>
     <string name="action_save">ذخیره</string>
+    <string name="action_cancel">لغو</string>
     <string name="action_sign_out">خروج از حساب</string>
     <string name="action_retry">تلاش دوباره</string>
     <string name="action_view_logs">مشاهده لاگ‌ها</string>
@@ -82,6 +83,13 @@
     <string name="usage_privacy">تاریخچهٔ مصرف فقط روی همین دستگاه ذخیره می‌شود. نه کلیدی در آن است، نه متنی از فایل، نه صدایی.</string>
     <string name="settings_api_key">کلید API Gemini</string>
     <string name="settings_api_key_hint">کلید را از Google AI Studio وارد کن</string>
+    <string name="settings_api_configured">کلید API تنظیم شده است</string>
+    <string name="settings_api_configured_help">Voxora این کلید را روی دستگاهت ذخیره کرد و دیگر نشانش نمی‌دهد. هر وقت خواستی می‌توانی جایگزینش کنی یا حذفش کنی.</string>
+    <string name="settings_api_replace">جایگزینی کلید</string>
+    <string name="settings_api_remove">حذف کلید</string>
+    <string name="settings_api_save">ذخیرهٔ کلید</string>
+    <string name="settings_api_saved">کلید ذخیره شد</string>
+    <string name="settings_api_removed">کلید حذف شد</string>
     <string name="settings_target_language">زبان دوبله</string>
     <string name="settings_app_language">زبان برنامه</string>
     <string name="settings_theme_mode">پوسته</string>
@@ -128,8 +136,6 @@
     <string name="onboarding_page3_body">کلید، فایل‌ها و صدای تو فقط به Gemini API می‌رود — Voxora سرور مستقل ندارد. ضبط صفحه فقط مربوط به دوبله زنده است؛ Reader به آن نیازی ندارد. هر وقت بخواهی از اپ یا نوتیفیکیشن متوقفش کن.</string>
     <string name="onboarding_page4_title">کلید رایگان Gemini را اضافه کن</string>
     <string name="onboarding_page4_body">در Google AI Studio کلید بساز و در تنظیمات وارد کن. یک کلید هم دوبله زنده و هم Reader را راه می‌اندازد و روی همین دستگاه ذخیره می‌شود. ورود با حساب Google اختیاری است — Voxora بدون حساب هم کار می‌کند.</string>
-    <string name="action_show_key">نمایش کلید API</string>
-    <string name="action_hide_key">پنهان کردن کلید API</string>
     <string name="home_now_dubbing">در حال دوبله به %1$s</string>
     <string name="home_tagline">دوبله زنده و روایت فایل، با قدرت Gemini</string>
     <string name="dub_title">دوبله زنده</string>

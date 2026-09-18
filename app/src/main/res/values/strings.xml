@@ -16,10 +16,9 @@
     <string name="action_settings">Settings</string>
     <string name="action_back">Back</string>
     <string name="action_save">Save</string>
+    <string name="action_cancel">Cancel</string>
     <string name="action_sign_out">Sign out</string>
     <string name="action_retry">Retry</string>
-    <string name="action_show_key">Show API key</string>
-    <string name="action_hide_key">Hide API key</string>
     <string name="action_view_logs">View logs</string>
     <string name="logs_title">Logs</string>
     <string name="logs_copy">Copy</string>
@@ -91,6 +90,13 @@
     <string name="usage_privacy">Usage history is stored on this device only. It contains no key, no document text and no audio.</string>
     <string name="settings_api_key">Gemini API key</string>
     <string name="settings_api_key_hint">Paste key from Google AI Studio</string>
+    <string name="settings_api_configured">API key configured</string>
+    <string name="settings_api_configured_help">Voxora stored this key on your device and will not show it again. You can replace or remove it any time.</string>
+    <string name="settings_api_replace">Replace key</string>
+    <string name="settings_api_remove">Remove key</string>
+    <string name="settings_api_save">Save key</string>
+    <string name="settings_api_saved">Key saved</string>
+    <string name="settings_api_removed">Key removed</string>
     <string name="settings_target_language">Dubbing language</string>
     <string name="settings_app_language">App language</string>
     <string name="settings_app_language_help">Change the language of Voxora menus. This is separate from the dubbing language.</string>

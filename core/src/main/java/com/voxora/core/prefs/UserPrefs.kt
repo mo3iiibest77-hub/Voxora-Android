@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.voxora.core.gemini.ReaderLanguages
+import com.voxora.core.usage.ApiKeyMask
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -92,6 +93,19 @@ class UserPrefs(private val context: Context) {
     }
 
     val apiKey: Flow<String> = context.dataStore.data.map { it[keyApi].orEmpty() }
+
+    /**
+     * Whether a usable Gemini API key is stored, **without exposing the key**.
+     *
+     * This is what the Settings key card reads. It deliberately does not hand the secret to the UI,
+     * so the field cannot repopulate itself with the saved value — the same reason the access token
+     * is kept out of `CloudAuthState`. The rule is [ApiKeyMask.isConfigured], the one the usage
+     * screen and the key probe already use, so "configured" means the same thing everywhere and a
+     * placeholder value still counts as absent.
+     */
+    val apiKeyConfigured: Flow<Boolean> =
+        context.dataStore.data.map { ApiKeyMask.isConfigured(it[keyApi]) }
+
     val targetLanguage: Flow<String> = context.dataStore.data.map { it[keyLang] ?: "fa" }
     /** UI language — default English (international) */
     val appLanguage: Flow<String> = context.dataStore.data.map { it[keyAppLang] ?: "en" }
@@ -99,6 +113,16 @@ class UserPrefs(private val context: Context) {
 
     suspend fun setApiKey(value: String) {
         context.dataStore.edit { it[keyApi] = value.trim() }
+    }
+
+    /**
+     * Removes the stored key.
+     *
+     * An absent key is not the same as a stored empty string: `remove` is the honest "no key", so
+     * `apiKeyConfigured` reports false and every reader of [apiKey] behaves as on a fresh install.
+     */
+    suspend fun clearApiKey() {
+        context.dataStore.edit { it.remove(keyApi) }
     }
 
     suspend fun setTargetLanguage(code: String) {

@@ -34,8 +34,6 @@
     <string name="onboarding_page2_body">عندما يطلب أندرويد التقاط الشاشة، اسمح به. Voxora يستخدم الصوت فقط — ليس الكاميرا. يمكنك الإيقاف في أي وقت من التطبيق أو الإشعار.</string>
     <string name="onboarding_page3_title">أضف مفتاح Gemini المجاني</string>
     <string name="onboarding_page3_body">أنشئ مفتاحاً في Google AI Studio، الصقه في الإعدادات، اختر لغة الدبلجة، ثم اضغط ابدأ. اختياري: سجّل الدخول عبر Google.</string>
-    <string name="action_show_key">إظهار مفتاح API</string>
-    <string name="action_hide_key">إخفاء المفتاح</string>
     <string name="action_retry">إعادة المحاولة</string>
     <string name="home_now_dubbing">الدبلجة إلى %1$s</string>
     <string name="settings_app_language">لغة التطبيق</string>

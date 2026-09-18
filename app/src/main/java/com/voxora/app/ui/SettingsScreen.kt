@@ -24,14 +24,19 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DataUsage
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.Button
@@ -66,6 +71,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -142,7 +149,11 @@ fun SettingsScreen(
     val prefs = remember { UserPrefs(context) }
     val scope = rememberCoroutineScope()
     val uriHandler = LocalUriHandler.current
-    var apiKey by remember { mutableStateOf("") }
+    // The key field starts from *whether* a key is configured and holds only what the user is
+    // typing. The stored secret is never read here, so it cannot be shown again — see
+    // ApiKeyFieldState for why that is structural rather than a display rule.
+    var keyField by remember { mutableStateOf(ApiKeyFieldState.of(configured = false)) }
+    var keyNotice by remember { mutableStateOf<Int?>(null) }
     var lang by remember { mutableStateOf("fa") }
     var appLang by remember { mutableStateOf("en") }
     var saved by remember { mutableStateOf(false) }
@@ -151,7 +162,8 @@ fun SettingsScreen(
     val themeMode by prefs.themeMode.collectAsStateWithLifecycle(initialValue = ThemeMode.DEFAULT)
 
     LaunchedEffect(Unit) {
-        apiKey = prefs.apiKey.first()
+        // Only the fact of configuration crosses into UI state — never the key itself.
+        keyField = ApiKeyFieldState.of(configured = prefs.apiKeyConfigured.first())
         lang = prefs.targetLanguage.first()
         appLang = prefs.appLanguage.first()
     }
@@ -164,8 +176,30 @@ fun SettingsScreen(
     }
 
     SettingsContent(
-        apiKey = apiKey,
-        onApiKeyChange = { apiKey = it; saved = false },
+        keyField = keyField,
+        onKeyDraftChange = { keyField = ApiKeyFieldState.edit(keyField, it); keyNotice = null },
+        onKeyReplace = { keyField = ApiKeyFieldState.beginReplace(keyField); keyNotice = null },
+        onKeyCancel = { keyField = ApiKeyFieldState.cancel(keyField); keyNotice = null },
+        onKeySave = {
+            // The user's own draft is the only value that can be written; the stored key is never
+            // read back and re-saved.
+            val draft = keyField.draft.trim()
+            if (draft.isNotEmpty()) {
+                scope.launch {
+                    prefs.setApiKey(draft)
+                    keyField = ApiKeyFieldState.saved()
+                    keyNotice = R.string.settings_api_saved
+                }
+            }
+        },
+        onKeyRemove = {
+            scope.launch {
+                prefs.clearApiKey()
+                keyField = ApiKeyFieldState.removed()
+                keyNotice = R.string.settings_api_removed
+            }
+        },
+        keyNotice = keyNotice,
         dubbingLanguage = lang,
         onDubbingLanguageChange = { lang = it; saved = false },
         appLanguage = appLang,
@@ -175,8 +209,9 @@ fun SettingsScreen(
         saved = saved,
         onBack = onBack,
         onSave = {
+            // The key is deliberately not part of this save: it is a secret with its own explicit
+            // Save/Replace/Remove actions, so it is never rewritten as a side effect.
             scope.launch {
-                prefs.setApiKey(apiKey)
                 prefs.setTargetLanguage(lang)
                 prefs.setAppLanguage(appLang)
                 AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(appLang))
@@ -201,8 +236,13 @@ fun SettingsScreen(
 
 @Composable
 private fun SettingsContent(
-    apiKey: String,
-    onApiKeyChange: (String) -> Unit,
+    keyField: ApiKeyFieldState,
+    onKeyDraftChange: (String) -> Unit,
+    onKeyReplace: () -> Unit,
+    onKeyCancel: () -> Unit,
+    onKeySave: () -> Unit,
+    onKeyRemove: () -> Unit,
+    keyNotice: Int?,
     dubbingLanguage: String,
     onDubbingLanguageChange: (String) -> Unit,
     appLanguage: String,
@@ -285,21 +325,123 @@ private fun SettingsContent(
             // The manual key is a first-class fallback, not a lesser mode: it sits directly under
             // the account card, works with no Google sign-in at all, and is never silently bound
             // to the signed-in account.
+            //
+            // Once a key is saved the secret is gone from the UI for good: the card shows that a
+            // key is configured and offers Replace/Remove, and the field is only ever filled from
+            // what the user types now. The stored value is never read back.
             SettingsCard {
                 SettingsRowHeader(
                     icon = Icons.Filled.Key,
                     title = stringResource(R.string.settings_api_key),
                     subtitle = stringResource(R.string.settings_api_help),
                 )
-                OutlinedTextField(
-                    value = apiKey,
-                    onValueChange = onApiKeyChange,
-                    label = { Text(stringResource(R.string.settings_api_key_hint)) },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    colors = fieldColors,
-                    shape = RoundedCornerShape(14.dp),
-                )
+                if (keyField.showsConfigured) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Filled.Lock,
+                            contentDescription = null,
+                            tint = VoxoraColors.success,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = stringResource(R.string.settings_api_configured),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = VoxoraColors.success,
+                        )
+                    }
+                    Text(
+                        text = stringResource(R.string.settings_api_configured_help),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = VoxoraColors.explanation,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        OutlinedButton(
+                            onClick = onKeyReplace,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(14.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Edit,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.settings_api_replace))
+                        }
+                        OutlinedButton(
+                            onClick = onKeyRemove,
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(14.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.Delete,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp),
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(R.string.settings_api_remove))
+                        }
+                    }
+                } else {
+                    OutlinedTextField(
+                        value = keyField.draft,
+                        onValueChange = onKeyDraftChange,
+                        label = { Text(stringResource(R.string.settings_api_key_hint)) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        // The entry is masked, and the keyboard must not offer to learn it.
+                        visualTransformation = PasswordVisualTransformation(),
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                        colors = fieldColors,
+                        shape = RoundedCornerShape(14.dp),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Button(
+                            onClick = onKeySave,
+                            enabled = keyField.canSaveDraft,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = colors.primary,
+                                contentColor = colors.onPrimary,
+                            ),
+                        ) {
+                            Text(
+                                text = stringResource(R.string.settings_api_save),
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
+                        if (keyField.replacing) {
+                            OutlinedButton(
+                                onClick = onKeyCancel,
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(14.dp),
+                            ) {
+                                Text(stringResource(R.string.action_cancel))
+                            }
+                        }
+                    }
+                }
+                if (keyNotice != null) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Filled.Check,
+                            contentDescription = null,
+                            tint = VoxoraColors.success,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            text = stringResource(keyNotice),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = VoxoraColors.success,
+                        )
+                    }
+                }
                 OutlinedButton(
                     onClick = onOpenAiStudio,
                     modifier = Modifier
@@ -389,7 +531,7 @@ private fun SettingsContent(
                     Text(
                         text = stringResource(R.string.settings_saved),
                         style = MaterialTheme.typography.bodySmall,
-                        color = colors.primary,
+                        color = VoxoraColors.success,
                     )
                 }
             }
@@ -651,8 +793,13 @@ private fun SettingsContentPreview(modifier: Modifier = Modifier) {
     VoxoraTheme {
         Surface(modifier = modifier) {
             SettingsContent(
-                apiKey = "",
-                onApiKeyChange = {},
+                keyField = ApiKeyFieldState.of(configured = false),
+                onKeyDraftChange = {},
+                onKeyReplace = {},
+                onKeyCancel = {},
+                onKeySave = {},
+                onKeyRemove = {},
+                keyNotice = null,
                 dubbingLanguage = "fa",
                 onDubbingLanguageChange = {},
                 appLanguage = "en",
@@ -677,8 +824,15 @@ private fun SettingsContentSignedInPreview(modifier: Modifier = Modifier) {
     VoxoraTheme {
         Surface(modifier = modifier) {
             SettingsContent(
-                apiKey = "AIza…",
-                onApiKeyChange = {},
+                // The configured state carries no key text at all — not even a masked sample —
+                // so a screenshot of this preview can never leak a credential shape.
+                keyField = ApiKeyFieldState.of(configured = true),
+                onKeyDraftChange = {},
+                onKeyReplace = {},
+                onKeyCancel = {},
+                onKeySave = {},
+                onKeyRemove = {},
+                keyNotice = null,
                 dubbingLanguage = "en",
                 onDubbingLanguageChange = {},
                 appLanguage = "fa",
