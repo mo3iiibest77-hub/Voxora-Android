@@ -37,6 +37,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.BubbleChart
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ErrorOutline
@@ -126,6 +127,7 @@ fun ReaderScreen(
     val languageFlag by viewModel.languageFlag.collectAsStateWithLifecycle()
     val ready by viewModel.ready.collectAsStateWithLifecycle()
     val settingsError by viewModel.settingsError.collectAsStateWithLifecycle()
+    val readerBubble by viewModel.readerBubble.collectAsStateWithLifecycle()
     val languages by viewModel.languageOptions.collectAsStateWithLifecycle()
     var languageQuery by remember { mutableStateOf("") }
     var choosingLanguage by remember { mutableStateOf(false) }
@@ -147,6 +149,7 @@ fun ReaderScreen(
         languageFlag = languageFlag,
         ready = ready,
         settingsError = settingsError,
+        readerBubble = readerBubble,
         onBack = onBack,
         onModeChange = viewModel::setMode,
         onOpenLanguage = { languageQuery = ""; choosingLanguage = true },
@@ -156,6 +159,7 @@ fun ReaderScreen(
         onStop = viewModel::stop,
         onJumpToChunk = viewModel::jumpToChunk,
         onJumpToSegment = viewModel::jumpToSegment,
+        onToggleBubble = viewModel::setReaderBubble,
         modifier = modifier,
     )
     if (choosingLanguage) {
@@ -179,6 +183,7 @@ private fun ReaderContent(
     languageFlag: String,
     ready: Boolean,
     settingsError: String?,
+    readerBubble: Boolean,
     onBack: () -> Unit,
     onModeChange: (String) -> Unit,
     onOpenLanguage: () -> Unit,
@@ -188,6 +193,7 @@ private fun ReaderContent(
     onStop: () -> Unit,
     onJumpToChunk: (Int) -> Boolean,
     onJumpToSegment: (Int) -> Boolean,
+    onToggleBubble: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
@@ -208,7 +214,11 @@ private fun ReaderContent(
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         item(key = "top-bar") {
-            ReaderTopBar(onBack = onBack)
+            ReaderTopBar(
+                onBack = onBack,
+                bubbleEnabled = readerBubble,
+                onToggleBubble = { onToggleBubble(!readerBubble) },
+            )
         }
         item(key = "document") {
             DocumentCard(
@@ -279,6 +289,8 @@ private fun ReaderContent(
 @Composable
 private fun ReaderTopBar(
     onBack: () -> Unit,
+    bubbleEnabled: Boolean,
+    onToggleBubble: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -295,10 +307,26 @@ private fun ReaderTopBar(
         Spacer(Modifier.width(4.dp))
         Text(
             text = stringResource(R.string.reader_title),
+            modifier = Modifier.weight(1f),
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface,
         )
+        // The bubble is on by default, like the Live bubble. This toggle is the only place it is
+        // turned back on, so the content description names the action rather than the state.
+        IconButton(onClick = onToggleBubble) {
+            Icon(
+                imageVector = Icons.Filled.BubbleChart,
+                contentDescription = stringResource(
+                    if (bubbleEnabled) R.string.reader_bubble_hide else R.string.reader_bubble_show,
+                ),
+                tint = if (bubbleEnabled) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
     }
 }
 
@@ -1563,6 +1591,7 @@ private fun ReaderScreenPreview(modifier: Modifier = Modifier) {
                 languageFlag = "🇬🇧",
                 ready = true,
                 settingsError = null,
+                readerBubble = true,
                 onBack = {},
                 onModeChange = {},
                 onOpenLanguage = {},
@@ -1572,6 +1601,7 @@ private fun ReaderScreenPreview(modifier: Modifier = Modifier) {
                 onStop = {},
                 onJumpToChunk = { true },
                 onJumpToSegment = { true },
+                onToggleBubble = {},
             )
         }
     }
@@ -1604,6 +1634,7 @@ private fun ReaderScreenPreparingPreview(modifier: Modifier = Modifier) {
                 languageFlag = "🇬🇧",
                 ready = true,
                 settingsError = null,
+                readerBubble = true,
                 onBack = {},
                 onModeChange = {},
                 onOpenLanguage = {},
@@ -1613,6 +1644,7 @@ private fun ReaderScreenPreparingPreview(modifier: Modifier = Modifier) {
                 onStop = {},
                 onJumpToChunk = { true },
                 onJumpToSegment = { true },
+                onToggleBubble = {},
             )
         }
     }
@@ -1631,6 +1663,7 @@ private fun ReaderScreenEmptyPreview(modifier: Modifier = Modifier) {
                 languageFlag = "🇮🇷",
                 ready = true,
                 settingsError = null,
+                readerBubble = true,
                 onBack = {},
                 onModeChange = {},
                 onOpenLanguage = {},
@@ -1640,6 +1673,7 @@ private fun ReaderScreenEmptyPreview(modifier: Modifier = Modifier) {
                 onStop = {},
                 onJumpToChunk = { true },
                 onJumpToSegment = { true },
+                onToggleBubble = {},
             )
         }
     }

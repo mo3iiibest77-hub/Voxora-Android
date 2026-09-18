@@ -46,6 +46,8 @@ class ReaderViewModel @Inject constructor(
     val languageLabel = mutableLanguageLabel.asStateFlow()
     private val mutableLanguageFlag = MutableStateFlow(ReaderLanguages.language(ReaderLanguages.DEFAULT).flagEmoji)
     val languageFlag = mutableLanguageFlag.asStateFlow()
+    private val mutableReaderBubble = MutableStateFlow(true)
+    val readerBubble = mutableReaderBubble.asStateFlow()
     private var commandJob: Job? = null
     private var languageJob: Job? = null
     @Volatile private var languageLocale = Locale.ENGLISH
@@ -56,6 +58,7 @@ class ReaderViewModel @Inject constructor(
                 prefs.migrateReaderLanguage()
                 mutableMode.value = ReaderNarrationModes.normalize(prefs.readerMode.first())
                 mutableOutputLang.value = prefs.readerOutputLang.first()
+                mutableReaderBubble.value = prefs.readerBubble.first()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -119,6 +122,19 @@ class ReaderViewModel @Inject constructor(
     fun jumpToChunk(index: Int): Boolean = controller.jumpToChunk(index)
 
     fun jumpToSegment(index: Int): Boolean = controller.jumpToSegment(index)
+
+    /**
+     * Turns the floating bubble on or off.
+     *
+     * This is a preference rather than a gate, so it is writable at any time and the running
+     * service reacts to it immediately. A stop from the bubble itself clears the same preference,
+     * which is why the ViewModel reads it back rather than keeping a second copy.
+     */
+    fun setReaderBubble(enabled: Boolean) = runCommand {
+        if (enabled == readerBubble.value) return@runCommand
+        prefs.setReaderBubble(enabled)
+        mutableReaderBubble.value = enabled
+    }
 
     fun load(uri: Uri) = runCommand { controller.load(uri) }
 

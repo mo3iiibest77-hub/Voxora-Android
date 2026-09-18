@@ -20,6 +20,7 @@ class UserPrefs(private val context: Context) {
     private val keyReaderMode = stringPreferencesKey("reader_mode")
     private val keyReaderOutputLang = stringPreferencesKey("reader_output_lang")
     private val keyLastDocUri = stringPreferencesKey("last_doc_uri")
+    private val keyReaderBubble = booleanPreferencesKey("reader_bubble")
 
     val readerEndpoint: Flow<String> = context.dataStore.data.map { it[keyReaderEndpoint].orEmpty() }
     val readerMode: Flow<String> = context.dataStore.data.map { it[keyReaderMode] ?: "faithful" }
@@ -33,6 +34,20 @@ class UserPrefs(private val context: Context) {
     }
     val lastDocUri: Flow<String> =
         context.dataStore.data.map { it[keyLastDocUri].orEmpty() }
+
+    /**
+     * Whether the Reader's floating bubble may show while narration is active.
+     *
+     * Defaults to on, matching the Live bubble, which appears whenever dubbing is running. An
+     * absent value therefore means "on" rather than "off": the preference only ever records a
+     * deliberate choice to hide it.
+     */
+    val readerBubble: Flow<Boolean> =
+        context.dataStore.data.map { it[keyReaderBubble] != false }
+
+    suspend fun setReaderBubble(enabled: Boolean) {
+        context.dataStore.edit { it[keyReaderBubble] = enabled }
+    }
 
     suspend fun setReaderSettings(endpoint: String, mode: String) {
         context.dataStore.edit {

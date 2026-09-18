@@ -157,8 +157,14 @@
     <string name="reader_connecting">Connecting to Gemini…</string>
     <string name="reader_notif_channel_name">Voxora Reader</string>
     <string name="reader_notif_channel_description">Background document narration and playback controls</string>
-    <string name="reader_notif_body">Preparing or playing your document. Tap Stop Reader to end narration.</string>
+    <string name="reader_notif_body">Preparing your document.</string>
+    <string name="reader_notif_body_playing">Narrating your document.</string>
+    <string name="reader_notif_body_paused">Narration paused.</string>
     <string name="reader_notif_stop">Stop Reader</string>
+    <string name="reader_notif_prev">Previous segment</string>
+    <string name="reader_notif_pause">Pause</string>
+    <string name="reader_notif_resume">Resume</string>
+    <string name="reader_notif_next">Next segment</string>
     <string name="reader_settings_load_failed">Could not load Reader settings.</string>
     <string name="reader_settings_save_failed">Could not save Reader settings.</string>
     <string name="reader_service_start_failed">Could not start Reader playback. Keep the app open and try again.</string>
@@ -210,6 +216,8 @@
     <string name="reader_narration_section">Gemini narration</string>
     <string name="reader_narration_empty">Gemini\'s narration appears here while it speaks.</string>
     <string name="reader_back">Back to home</string>
+    <string name="reader_bubble_show">Show floating bubble</string>
+    <string name="reader_bubble_hide">Hide floating bubble</string>
     <string name="reader_choose_language">Narration language</string>
     <string name="reader_search_language">Search languages</string>
     <string name="reader_no_languages">No matching languages</string>

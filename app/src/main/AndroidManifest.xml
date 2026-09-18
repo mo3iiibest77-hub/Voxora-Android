@@ -48,5 +48,9 @@
             android:name=".reader.ReaderService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+
+        <service
+            android:name=".reader.ReaderBubbleService"
+            android:exported="false" />
     </application>
 </manifest>

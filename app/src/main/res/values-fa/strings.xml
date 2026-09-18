@@ -154,8 +154,14 @@
     <string name="reader_connecting">در حال اتصال به Gemini…</string>
     <string name="reader_notif_channel_name">Voxora Reader</string>
     <string name="reader_notif_channel_description">روایت فایل در پس‌زمینه و کنترل‌های پخش</string>
-    <string name="reader_notif_body">فایلت در حال آماده‌سازی یا پخش است. برای پایان روایت، توقف Reader را بزن.</string>
+    <string name="reader_notif_body">فایلت در حال آماده‌سازی است.</string>
+    <string name="reader_notif_body_playing">فایلت در حال روایت است.</string>
+    <string name="reader_notif_body_paused">روایت متوقف شده است.</string>
     <string name="reader_notif_stop">توقف Reader</string>
+    <string name="reader_notif_prev">قطعهٔ قبلی</string>
+    <string name="reader_notif_pause">توقف موقت</string>
+    <string name="reader_notif_resume">ادامه</string>
+    <string name="reader_notif_next">قطعهٔ بعدی</string>
     <string name="reader_settings_load_failed">بارگذاری تنظیمات Reader ممکن نشد.</string>
     <string name="reader_settings_save_failed">ذخیرهٔ تنظیمات Reader ممکن نشد.</string>
     <string name="reader_service_start_failed">شروع پخش Reader ممکن نشد. اپ را باز نگه دار و دوباره تلاش کن.</string>
@@ -209,6 +215,8 @@
     <string name="reader_narration_section">روایت Gemini</string>
     <string name="reader_narration_empty">روایت Gemini هنگام پخش اینجا نمایش داده می‌شود.</string>
     <string name="reader_back">بازگشت به خانه</string>
+    <string name="reader_bubble_show">نمایش حباب شناور</string>
+    <string name="reader_bubble_hide">پنهان کردن حباب شناور</string>
     <string name="reader_choose_language">زبان روایت</string>
     <string name="reader_search_language">جست‌وجوی زبان‌ها</string>
     <string name="reader_no_languages">زبانی پیدا نشد</string>
