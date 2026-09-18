@@ -148,23 +148,24 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
 ### Actual repository state (inspected, not assumed):
 - `main`: `1f0a719 fix(reader): fix suspend output language persistence`.
 - `feat/reader-segmented-spooling` (the implementation branch) HEAD is
-  `14bd894 docs: record the reader refresh, extraction gates and language catalog`,
-  on top of the three code commits `1504669 refactor(i18n): drive every language
-  picker from one catalog`, `882ab27 fix(reader): keep the reader usable while a
-  document is extracting` and `1c0df1e fix(reader): refresh reading text as soon as a
-  unit is narrated`, and the earlier `06a3bb3`/`7f47805`/`a9b9336`. It carries the
-  Reader quality pass —
+  `e88f85a fix(reader): switch the display language at the start of a chunk`,
+  on top of `7d9a51b style(reader): present the document as a page with semantic
+  status` and `1b9eb4f fix(i18n): never describe languages in a locale Voxora does
+  not ship`, which sit on `f66d0dd docs: point the handoff state at the current HEAD
+  and its CI run`, `14bd894 docs: record the reader refresh, extraction gates and
+  language catalog`, the three code commits `1504669`/`882ab27`/`1c0df1e`, and the
+  earlier `06a3bb3`/`7f47805`/`a9b9336`. It carries the Reader quality pass —
   `925ee1d feat(reader): redesign the reader screen`,
   `72527e7 feat(reader): expose the loaded document name`,
   `f644d2f feat(reader): map language catalog to deterministic flags`,
   `b0d556d fix(reader): preserve pdf reading order`,
   `a74db6c fix(reader): define fluent and faithful narration semantics` — plus the
   reading-order fix `6d826e0 fix(reader): de-interleave pdf columns when a page
-  carries a running header` and the documentation commits. **21 commits ahead of
+  carries a running header` and the documentation commits. **24 commits ahead of
   `main` (`1f0a719`)**, pushed to `origin`, and **not merged**. CI is green at
   `7f47805` (run `35294468431`, both jobs) and at `707cc3c` (run #66); the
-  reading-order fix, the settings/overlay pass and the three commits above land on
-  top of that and are CI-verified separately.
+  reading-order fix, the settings/overlay pass, the refresh/gates/catalog trio and
+  the page/language pass below are CI-verified separately.
 - `feat/ci-feature-branch` = `76f0c96` + `dcbf852 ci: run Android CI on feature
   branch`, with **PR #2 open to `main`** (still open; deliberately NOT merged).
 - IMPORTANT — how CI actually runs: the failing run `35279422099`
@@ -178,8 +179,216 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
   `ChunkQueue` (500-word chunks + 80-word narration units), per-chunk
   `GeminiReaderSession`, language catalog, document persistence, and a
   foreground `mediaPlayback` service. Live Dub is untouched.
+- **No Chinese text exists anywhere in the app.** An exhaustive CJK scan of
+  `app/src/main`, `core/src/main` and every `res/**/*.xml` returns zero hits. The
+  reported "Chinese labels" were a *locale* defect, not a string defect — see the
+  last change below.
 
-### Last change (this session) — Reader refresh, extraction gates, one language catalog
+### Last change (this session) — Reader as a page, semantic status, language at chunk start
+
+Three commits, all pushed to `feat/reader-segmented-spooling`:
+
+- `1b9eb4f fix(i18n): never describe languages in a locale Voxora does not ship`
+- `7d9a51b style(reader): present the document as a page with semantic status`
+- `e88f85a fix(reader): switch the display language at the start of a chunk`
+
+**The "Chinese text" report was a locale defect, not a string defect.** The brief
+said Chinese labels appeared in three language cards. An exhaustive CJK scan of
+`app/src/main`, `core/src/main` and every `res/**/*.xml` found **zero** Chinese
+characters — the only CJK in the repository is test data in `ChunkQueueTest.kt`.
+The real cause was `Locale.getDisplayName(locale)`, which names a language *in*
+that locale: the pickers passed the raw device locale, so a phone set to Chinese
+with the Voxora UI in English labelled every language in Chinese while the rest of
+the screen stayed English. Voxora ships no Chinese translation, so it must never
+*describe* languages in Chinese either.
+
+`AppLocales.resolve(locale)` is the fix and is now the only place a display locale
+is produced from outside input. It matches the full tag first, then the language
+subtag (`fa-IR` → `fa`, `es-MX` → `es`), and falls back to `DEFAULT`. It is applied
+at both display-name boundaries: `ReaderLanguages.languageOptions` (which the
+Reader narration sheet *and* the Settings dubbing dropdown both call) and
+`ReaderScreen`, which resolves `LocalConfiguration.current.locales[0]` once and
+passes the result to the ViewModel. `SettingsScreen.appLanguageChoices` was already
+safe because it names each entry in its own language (an endonym), which is a
+deliberate choice, not leakage — it was left alone.
+
+**DONE — the document is now a page, not a scroll.** The reading surface was one
+long `LazyColumn` of every chunk, so a 210-chunk PDF composed 210 cards and the
+reader had no sense of position. `ChunkPage` now composes **exactly one chunk** —
+the current one — with a compact header (`Chunk 12 of 210`, segment progress,
+narration language) and a page-turn row. Horizontal drags turn the page; the
+leaving page recedes and fades while the arriving page enters from the side it was
+turned towards. Turns go through the controller's existing `jumpToChunk`, so there
+is no second navigation state machine and no per-frame work proportional to the
+document. Prev/Next moved out of the playback card into the page.
+
+`ReaderPager` (`app/.../reader/ReaderPager.kt`) is the pure-JVM page model and the
+only place turn logic lives: `target` (bounded, single-step), `visible`, `turnFor`
+(gesture → **logical** turn) and `enterOffset`. "Next" and "previous" are logical,
+not physical — the same finger movement means opposite things in LTR and RTL, and
+`turnFor` maps each layout's gesture to the same logical turn, so a Persian reader
+cannot get reversed chunk order. The arrows use
+`Icons.AutoMirrored.Filled.KeyboardArrowLeft/Right`. No bare `12 / 210` indicator
+sits next to the arrows, because it reorders unpredictably under RTL bidi.
+
+A dedicated pager library was **not** added: `androidx.compose.foundation` is not a
+declared dependency (it arrives transitively via `material3`), so the drag is a
+`detectHorizontalDragGestures` on the page, keeping the dependency set unchanged.
+
+**DONE — status is semantic, and the active light is alive.** `ReaderStatusVisual`
+maps every `ReaderPhase` to a tone, and `Theme.kt` now exposes the
+success/warning/danger roles through `VoxoraSemanticColors` /
+`VoxoraColors` (a `staticCompositionLocalOf` read via `@Composable
+@ReadOnlyComposable`) instead of hex literals in composables. The values are the
+ones the product already used (`#3DDC84` matches `FloatingBubbleService`'s
+`BRAND_LIVE_GREEN`, `#E85D5D` matches `BRAND_ERROR`, `#E6B422` is the warm accent),
+so the brand palette now has one source. Speaking is green with a slow,
+low-amplitude halo (`rememberInfiniteTransition` + `animateFloat` + `RepeatMode.Reverse`,
+1500 ms) that modifies alpha and scale only — no neon colour. Paused and ready are
+gold and never green; stopped and failed are red; connecting, extracting and
+preparing stay neutral (`colorScheme.outline`) and cannot falsely show green. The
+halo is **not composed at all** when the phase is not active, so the animation stops
+with playback rather than freezing behind a paused reader. `Handler.postDelayed` is
+not used anywhere. The Live Dub status dot now reads the same tokens.
+
+**DONE — the display language switches when the chunk starts.** `publish()` derives
+the reading text *and* a new `pendingSegments` set for the chunk that is current at
+that moment, so arriving at Chunk N resolves N's selected-language renderings in the
+same synchronous step that makes N current. It does not wait for N to finish, and it
+does not keep showing N−1's language while N's transcript is produced. This is free
+because the producer already renders whole chunks ahead of playback: the chunk about
+to be narrated normally has its renderings cached, so the turn is a pure state read.
+
+`ReaderDisplayText.pending(language, chunk, unitCount)` is the new read of the cache
+and mutates nothing. It exists because `readingText` silently falls back to the
+extracted source for an unrendered unit, which is useful for browsing but must not be
+mistaken for a finished rendering — without it, "not rendered yet" is
+indistinguishable from "the selection happens to read like the source", and the
+source language gets presented as the selection. `ReaderPageText` (`isPreparing`,
+`isPreparingWholePage`, pure JVM) decides when that temporary treatment is shown:
+only while the chunk is actually being narrated, never while browsing, paused or
+stopped, because a reader who has not pressed Play still has to be able to read their
+document.
+
+**No artificial gap was introduced — and the change cannot introduce one.** The
+display layer is *derived*: `publish` only reads `ReaderDisplayText` and the
+canonical `ChunkQueue`; it never appends PCM, advances a consumer cursor or completes
+a spool unit. The producer and the consumer never read `ReaderState`. That one-way
+dependency is what guarantees a display-language change cannot insert silence
+between chunks, and it is why the fix needed no change to `ReaderSpool`'s
+architecture, the spool/consume ordering, or the prefetch pipeline. The
+serialize-finish-audio → request-translation → wait → update-text → start-next-audio
+ordering the brief forbids was never introduced.
+
+**Feature B (iconography) needed no work in Settings.** The Settings app-language
+card already used `Icons.Filled.Language` and the dubbing-language card already used
+`Icons.Filled.Translate` — both introduced by the previous cycle's catalog refactor,
+both meaningful Material icons, no emoji as a primary UI icon and no new image asset.
+The Reader's narration row was still the generic case, so its 44 dp badge is now
+`Icons.Filled.RecordVoiceOver` (narration), with the flag moved inline next to the
+label instead of standing alone as a large decorative element.
+
+**Live Dub is untouched.** No file under `app/.../dub/**`, `GeminiLiveSession.kt` or
+`GeminiLiveConfig.kt` was modified, and no PCM capture, Live session, playback
+routing, polling cadence, session lifecycle or drag/tap/double-tap behaviour changed.
+The only Live Dub file touched at all is `DubScreen.kt`, and only its **status dot**,
+which is explicitly in scope as status presentation: it now reads
+`VoxoraColors.success` / `.warning` / `colorScheme.error` / `colorScheme.outline`
+instead of the same values as literals. `LiveWaveform`'s decorative gold/green were
+deliberately left alone.
+
+**Two real defects were found and fixed while verifying, not just the requested work:**
+- `ReaderScreen` referenced `R.string.reader_page_chunk`, which **neither locale
+  declared** — that is a hard Gradle compile failure, caught by cross-checking every
+  `R.string.*` reference against both string files. Added as "Chunk %1$d of %2$d"
+  and "بخش %1$d از %2$d".
+- `AppLocales.resolve` did not compile as first written (`toLanguageTag()` on a
+  nullable receiver); caught by the local `kotlinc` pass before any push.
+
+**Tests added (40 new, 175 total).**
+`ReaderStatusVisualTest` (8) — speaking is active; only active pulses; paused is
+ready and not green; stopped/error are stopped; connecting/extracting/preparing are
+neutral and never green; every phase has a tone; the four tones stay distinct.
+`ReaderPagerTest` (11) — single-step bounded navigation, nothing to turn without a
+document, exactly one chunk is ever the page, walking either direction visits every
+chunk once and stops, a short drag is not a turn, LTR/RTL gestures map to the same
+logical turn, a Persian reader never gets reversed order, the arriving page comes
+from the side it was turned towards.
+`ReaderChunkStartLanguageTest` (13) — arriving at a chunk shows its cached
+selected-language text without waiting or re-rendering; a chunk with no rendering
+starts in the selected language and is reported as preparing rather than showing the
+previous chunk's language; the pending set shrinks unit by unit; a late transcript
+updates the current chunk; a transcript from an abandoned generation **or** revision
+cannot reach the page; prefetch never moves the page ahead of the narration;
+switching language never leaves the other language's text on screen; switching back
+restores the cached rendering immediately; the canonical chunk is untouched.
+`ReaderDisplayAudioContinuityTest` (8) — driven against the **real** `ReaderSpool`:
+recording display text does not change the spool snapshot, switching language leaves
+the spool and queue untouched, consuming a chunk renders nothing, publishing between
+units does not change the bytes the consumer writes, every unit is still read once
+and in order, the promoted chunk is already rendered and already committed before the
+turn, the turn adds no work to the audio path, display state is never written back
+into the document. These assert **ownership and ordering, not timing** — there are no
+sleeps, because a timing assertion would measure the machine rather than the contract.
+
+Each new contract was proven to catch its defect by mutation: making `pulses` return
+`false` fails 1 test; making `PAUSED` resolve to the active tone fails 4; removing the
+RTL gesture mirror fails 2; making `ReaderDisplayText.pending` always return an empty
+set fails 4; making `isPreparingWholePage` return `false` fails 1.
+
+**Validation actually performed (no Gradle was run).** Compiled the pure-JVM
+Reader/core sources with `kotlinc 2.0.21` against the pinned dependency jars and ran
+the JUnit classes directly with `-ea` (matching Gradle's test JVM): **175 tests, OK**
+across 16 classes. `SettingsScreen.kt`, `ReaderScreen.kt`, `DubScreen.kt`,
+`Theme.kt` and the other Android-dependent files cannot be compiled on the dev
+server, so the debug-APK job is their real check. Additional static checks run
+locally: a CJK scan of all main sources and resources (zero hits), a cross-check of
+every `R.string.*` reference against both `values/` and `values-fa/` (now complete,
+with matching format args), and an unused-import sweep of `ReaderScreen.kt`.
+
+**CI status: GREEN — VERIFIED.** Pushing `e88f85a` triggered `Android CI` run
+**`35301607886`** (run **#74**, event `push`, branch `feat/reader-segmented-spooling`,
+created 2026-09-18T03:01:25Z, completed 2026-09-18T03:03:21Z): **both jobs success.**
+`Unit tests` — 10/10 steps success, including the `Run unit tests` step that runs
+`gradle :core:testDebugUnitTest :app:testDebugUnitTest`. `Assemble debug APK` — 14/14
+steps success, including `Assemble debug` and `Upload debug APK`. The workflow has no
+`continue-on-error`, so a green `Run unit tests` step is a genuine pass and a green
+`Assemble debug` step is a genuine compile check of the Compose changes
+(`ReaderScreen.kt`, `Theme.kt`, `DubScreen.kt`) that the dev server cannot compile.
+**Real-device verification was NOT performed** — nothing in this change was tested on
+a physical device, and no device behaviour may be claimed.
+
+**IN PROGRESS:** nothing — all of the requested work is implemented, tested, pushed
+and CI-verified on this branch.
+
+**BLOCKED:** nothing.
+
+**NEXT (do not start before the above is read):**
+- **Real-device check — not performed, and must not be claimed.** The page turn,
+  the active halo, the RTL page-turn direction and the chunk-start language swap are
+  all UI behaviour. The following need a device: (1) a Persian PDF with English
+  narration, confirming each chunk's visible text is English from the moment the
+  chunk starts rather than from the moment it ends; (2) that narration flows into the
+  next chunk with no audible gap while the page turns; (3) that a horizontal swipe
+  advances in both an LTR and an RTL UI locale; (4) that the status light is green
+  only while speaking and gold while paused. If (2) fails on device, the likely cause
+  is the spool/consume path rather than the display layer, since the display layer is
+  provably one-way. This is the single highest-value outstanding step.
+- A very long chunk still composes every one of its own units inside the single page.
+  That is bounded by the 80-word narration-unit split rather than by the document, so
+  it is not the 210-card problem, but if a pathological chunk is ever observed to
+  jank, the fix belongs in `ChunkQueue.readableUnits`, not in the page.
+- `LogsScreen.kt` still uses its own hardcoded severity palette (error red, warn
+  orange, info green, debug grey). That is a debug surface with deliberately different
+  semantics from the status contract, so it was left alone rather than folded into
+  `VoxoraColors`. Fold it in only if the log-severity colours are meant to be the
+  product's status colours, which they are not.
+- The Reader still shows the extracted source for units not yet narrated in the
+  selected language, now marked as "preparing" while the chunk is being narrated.
+  That is the documented contract, not a bug — do not "fix" it by translating ahead,
+  and do not claim in UI copy that the document is translated up front.
+
+### Previous change — Reader refresh, extraction gates, one language catalog
 
 Three commits, all pushed to `feat/reader-segmented-spooling`:
 
