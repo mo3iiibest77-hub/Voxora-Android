@@ -128,38 +128,41 @@ Voxora-Android/
 
 ## 3. THEME — ALWAYS FOLLOW THIS
 
-There are **two** schemes. `app/src/main/java/com/voxora/app/ui/theme/Theme.kt` is authoritative and is the **only** file allowed to contain colour literals.
+There are **two** appearances and one role map. `app/src/main/java/com/voxora/app/ui/theme/VoxoraPalette.kt` holds the raw ARGB values (pure Kotlin, no Compose, so it is unit-tested); `app/src/main/java/com/voxora/app/ui/theme/Theme.kt` is the only place a value becomes a `Color`, and those two files are the **only** files allowed to contain colour literals. A static guard (`themecheck.py` in the local harness) fails the build if any other Kotlin file has one.
 
 ```kotlin
-// Dark (the original Voxora look, unchanged)
-Background: #0A0A0F   Surface: #12121A   SurfaceVariant: #1C1C28
-Gold: #FFD700         GoldDim: #F5A623  GoldSubtle: #B8860B
-OnBackground: #F0F0F5 OnSurface: #C8C8D4 Disabled: #4A4A5A
+// Accents — Google's familiar families used as SEMANTIC roles, never decoration.
+Blue   (light #1967D2 / dark #8AB4F8)  primary action, selected state
+Green  (light #137333 / dark #81C995)  success
+Yellow (light #8A5200 / dark #FDD663)  warning; the Reader's "paused" tone
+Red    (light #B3261E / dark #F28B82)  error / danger
+Gold   (light #8A6A16 / dark #E6B422)  `tertiary` only — the brand accent
 
-// Light (Material-inspired, not a Google clone)
-Background: #FAF9F6 (off-white)   Surface: #FDFCFA
-surfaceContainerHigh: #ECE9E2     outlineVariant: #D5D1C7
-Primary (gold that reads as ink): #8A6A16   onSurface: #1B1A17
+// Light neutrals: clean white page, cool grey ramp, no brown and no tan.
+background #FFFFFF  surface #FFFFFF  surfaceContainerHigh #F1F3F4 (cards)
+onSurface #1F1F1F   onSurfaceVariant #444746  outlineVariant #DADCE0
 
-// Status colors — semantic roles, not literals. Same roles in both schemes,
-// with scheme-appropriate values (dark #3DDC84/#E6B422/#E85D5D, light
-// #1B7F4B/#8A6100/#B3261E).
-Success:  active narration / live / speaking
-Warning:  paused, ready, preparing — the warm Voxora accent
-Error:    stopped or failed; also `colorScheme.error`
-Neutral:  colorScheme.outline  (idle, connecting, extracting)
-Explanation: help/subtitle text under a control (see below)
+// Dark neutrals: the original near-black direction, de-warmed.
+background #0A0A0B  surface #141416  surfaceContainerHigh #1C1C1F
+onSurface #E3E3E3   onSurfaceVariant #C4C7C5  outlineVariant #3C4043
+
+// Semantic roles Material 3 does not model (VoxoraColors.*)
+success / warning / danger / neutral / explanation / disabled
 ```
 
 **Theme selection:**
 - The user's choice is `core/.../prefs/ThemeMode.kt` — `SYSTEM` (default), `LIGHT`, `DARK` — persisted through `UserPrefs`/DataStore (`themeMode`). `MainActivity` collects it and passes it to `VoxoraTheme(mode = …)`; `SettingsScreen` exposes a `ThemeSelector` that writes it. Never hold the selection in a composable's own `remember`, and never read `isSystemInDarkTheme()` anywhere except inside `VoxoraTheme`'s `SYSTEM` branch.
-- A third mode must be added to the enum and the selector together; `ThemeMode.normalize` is total (unknown/blank → `DEFAULT`), so a corrupt preference can never leave the app themeless.
+- **`ThemeMode.DEFAULT` is `SYSTEM`, and that must not change.** An install that has never opened the control follows the device; dark stays the product's primary direction and light is opt-in. A third mode must be added to the enum and the selector together; `ThemeMode.normalize` is total (unknown/blank → `DEFAULT`), so a corrupt preference can never leave the app themeless. Pinned by `ThemeModeTest`.
+- **Light is a real appearance, not an inverted dark one.** Every role is a chosen value with deliberate contrast: near-black content on white, a mid-grey secondary, a lighter help grey, and the blue carrying action. Gold must never fill a card, a background or a large surface — it is `tertiary` and the Live waveform, nothing more.
 
 **Compose rules:**
 - Always use `MaterialTheme.colorScheme.*` tokens — never hardcode hex in composables. The only accepted literal in a composable is `Color.Transparent` (a framework constant, not a brand colour).
-- **Status is semantic.** Material 3 models no success or warning role, so `Theme.kt` exposes `VoxoraSemanticColors` through `VoxoraColors.success` / `.warning` / `.danger` / `.explanation` (a `staticCompositionLocalOf`, read via `@Composable @ReadOnlyComposable`). Ask for "the active colour", never a number. `ReaderStatusVisual` maps each `ReaderPhase` to a tone, and that mapping — not the composable — decides which role a phase gets: **speaking and playing are green, paused is gold and never green, stopped and failed are red, connecting and preparing stay neutral and must not falsely show green.**
-- **One explanation role.** Every help, hint, caption or "why this is unavailable" line uses `VoxoraColors.explanation`. Do not reach for `onSurfaceVariant` for one note and `outline` for the next; a single token is what makes the hierarchy consistent across Reader, Settings, usage and account surfaces.
+- **The semantic roles are the contract.** `Theme.kt` exposes `VoxoraSemanticColors` through `VoxoraColors.success` / `.warning` / `.danger` / `.neutral` / `.explanation` / `.disabled` (a `staticCompositionLocalOf`, read via `@Composable @ReadOnlyComposable`). Ask for the role, never a number. The hierarchy is **screen title → section title → primary content (`onSurface`) → secondary content (`onSurfaceVariant`) → explanation (`VoxoraColors.explanation`) → status / action**. A screen must not invent a role or pick an alpha on `onSurface` to mean "less important".
+- **`ReaderStatusVisual` decides which tone a phase gets**, and the composable only asks for it: **speaking and playing are green, paused is yellow and never green, stopped and failed are red, connecting and preparing are neutral and must not falsely show green.** The same pattern holds for `UsageStatusVisual` and `LogSeverity` — a pure-JVM mapper owns the decision so no composable picks a colour inline.
+- **One explanation role.** Every help, hint, caption or "why this is unavailable" line uses `VoxoraColors.explanation`. Do not reach for `onSurfaceVariant` for one note and `outline` for the next; a single token is what makes the hierarchy consistent across Reader, Settings, usage and account surfaces. This role is deliberately *less* prominent than secondary content in both appearances, and it is a neutral grey — never a warm gold or tan, which is what made explanatory text read as a brand accent.
+- **`neutral` is a status, not a failure.** Idle, connecting and an expected data gap are neutral; only a refusal or a network problem is `danger`. Never dress "we cannot show this" as an error.
 - `VoxoraBrand` (`waveGold`, `waveGreen`) is decorative only — the Live bubble waveform. It is **not** a text or surface colour and must never be used for status.
+- **Every text role clears WCAG AA on the surface it sits on.** `VoxoraPaletteTest` computes the contrast ratios and fails if a role drops below 4.5:1 on its card or page background (disabled content is exempt but must stay visible). Adding a colour means adding it to that test's reach.
 - An active-state pulse must modify alpha, glow or scale of the semantic colour. Never introduce a separate neon colour for animation, and never run an infinite animation for a phase that is not active.
 - Use `MaterialTheme.typography.*` — never hardcode `sp` sizes directly
 - Shapes: `RoundedCornerShape(12.dp)` for cards, `CircleShape` for FABs/bubbles
@@ -481,10 +484,22 @@ under it, because a manual key is a fallback for the same job, not a different f
   `CloudRepository` holds the token in memory only — never DataStore, never a log, never a saved-state
   bundle. It is dropped on sign-out, on account switch, and whenever Google answers `401`
   (`CloudAuthFailure.EXPIRED`).
-- **Configuration is not failure.** While `default_web_client_id` holds the shipped `REPLACE_…`
-  placeholder, `GoogleCloudAuthorizer.configured` is false and `requestAuthorization` reports
-  `CONFIGURATION_MISSING` **without touching the authorization provider**, so an unconfigured build
-  says the real thing and manual API-key use keeps working.
+- **Configuration is not failure, and it is not "unimplemented" either.** While
+  `default_web_client_id` holds the shipped `REPLACE_…` placeholder, `GoogleCloudAuthorizer.configured`
+  is false and `requestAuthorization` reports `CONFIGURATION_MISSING` **without touching the
+  authorization provider**, so an unconfigured build says the real thing and manual API-key use keeps
+  working. The rule itself is `core/.../cloud/CloudOAuthConfig.isConfigured` — pure JVM, pinned by
+  `CloudOAuthConfigTest`, checking presence rather than validity (only Google can judge a client ID).
+- **Four states, four different actions, and the card must render them distinctly:**
+  `NotConfigured` (the *build* has no Google client), `SignedOut` (configured, not connected),
+  `Authorizing` (consent open), `Authorized` (a grant is held). `CloudAuthStateTest` pins that they
+  are mutually exclusive. In `NotConfigured` the sign-in button stays **visible but disabled** and
+  the copy says Voxora supports sign-in but this build is not set up for it — hiding the button made
+  a supported feature read as "sign-in is not implemented". Never describe a missing client ID as a
+  user failure, and never call it a Cloud Console or OAuth concept in user-facing copy.
+- **The whole account card is the tap target** when a tap can do something (`SignedOut` or a retry
+  after `Failed`); it stays inert while a grant is held or the consent screen is open, so a stray
+  tap cannot launch a second request.
 - **`CloudSelection` owns the invalidation rules, and they are unit-tested.** `withAccount` drops the
   previous account's projects, selection, keys and active key, so account B seeing account A's project
   is unrepresentable rather than merely unlikely. `withProjects`/`withKeys` drop a selection that
@@ -501,6 +516,20 @@ under it, because a manual key is a fallback for the same job, not a different f
 - **Manual API-key mode remains a first-class fallback** and is unaffected by sign-out: the key is not
   a Google credential and stays where the user put it. The card labels the mode and says the key is
   not linked to the signed-in account.
+- **A saved API key is never shown again, and that is structural.** The Settings key card reads
+  `UserPrefs.apiKeyConfigured` — a boolean derived from `ApiKeyMask.isConfigured` — and never
+  `UserPrefs.apiKey`. `app/src/main/java/com/voxora/app/ui/ApiKeyFieldState.kt` is the field's whole
+  state, and the only string it can hold is the user's in-progress draft; there is no field for the
+  stored secret, so the screen cannot prefill the field even if a later edit forgets the rule. A
+  configured install shows "API key configured" with **Replace** and **Remove**; the entry field is
+  masked (`PasswordVisualTransformation`, password keyboard) and opens only when there is no key or
+  the user asked to replace one. Saving writes the user's own draft and clears it from UI state; the
+  global Save button deliberately does **not** touch the key. Pinned by `ApiKeyFieldStateTest`.
+- **The key is never displayed, logged, or put in a preview.** Do not reintroduce a "show key"
+  affordance — the `action_show_key`/`action_hide_key` strings were removed with it. Do not seed a
+  preview or a test fixture with a realistic key, and do not add the key to a log line, an analytics
+  event, a crash message or an accessibility description. `ApiUsageScreen` may show `ApiKeyMask.mask`
+  (first/last four characters only) because a masked value is not the secret.
 
 ### Google Cloud discovery — official APIs only
 
@@ -712,7 +741,10 @@ A task is NOT done until:
   - `UsageFailureCategoryTest` (core) — the timeout/quota/unauthorized/audio/session/network mapping, a real Reader audio message not being mistaken for a network problem, an unrecognised failure staying unknown, and the categories being unique, space-free identifiers (see §5A).
   - `UsageStatusVisualTest` (app) — only a healthy connection is active and only it pulses; refused or broken is an error; transient problems warn; an unconfigured build and an unchecked key are neutral; expected data gaps stay neutral while a refusal is an error and a network gap warns; every status and reason has a tone (see §5A).
   - `CloudSelectionTest` (core) — the account → project → key model: switching account drops the previous projects, selection, keys and active key; account B can never see account A's project; re-authorizing the same account keeps the selection; sign-out clears everything; a project or key that disappeared from a refresh is dropped; a key that was never listed cannot be selected; manual mode is available and never claims a link; signing in alone does not link a manual key (see §5A).
-  - `CloudAuthStateTest` (core) — the token-expiry policy (no stated expiry, well in the future, expired, inside the skew window, overridden skew); only `Authorized` carries an account; only an in-flight authorization is busy; only a real grant counts as authorized; `Authorized` carries no token field; configuration missing is distinct from every other failure; and the scope set is read-only, unique and never contains a write scope (see §5A).
+  - `CloudAuthStateTest` (core) — the token-expiry policy (no stated expiry, well in the future, expired, inside the skew window, overridden skew); only `Authorized` carries an account; only an in-flight authorization is busy; only a real grant counts as authorized; `Authorized` carries no token field; **the four user-facing states are mutually exclusive** (so a card branching on `isAuthorized`/`isBusy` can never light up two branches); configuration missing is distinct from every other failure; and the scope set is read-only, unique and never contains a write scope (see §5A).
+  - `CloudOAuthConfigTest` (core) — "is Google sign-in configured in this build?": the shipped `REPLACE_…` placeholder is not configured, the check is case-insensitive and trims, an absent/blank value is not configured, and any non-placeholder value counts as present because only Google can judge validity (see §5A).
+  - `ApiKeyFieldStateTest` (app) — the Settings key field never receives the stored secret: a configured install carries no key text and an empty field, the resting state never prefills, saving clears the draft and returns to the configured state, removing returns to an empty entry field, Replace opens an empty field and drops any abandoned draft, Cancel drops the draft, a blank draft is never saveable, and the only string the state can hold is what the user typed (see §5A).
+  - `VoxoraPaletteTest` (app) — the colour system: the four accent families are distinct and differ between appearances, blue is not a status colour, the brand gold is not a status colour, help text is never an action or a status colour, help text is less prominent than secondary content in both appearances, every role is fully opaque, a card is distinguishable from its page in both appearances, and **every text role clears WCAG AA (4.5:1) on the card and page it sits on** (see §3).
   - `CloudParsersTest` (core) — project and key parsing (dropped when unaddressable, name falling back to the id), the userinfo `email` claim (present, absent, blank and malformed all handled without producing a blank account), Monitoring request-count summation across points and both value spellings, a genuinely empty window being `0`, and a malformed body being `null` rather than `0`; quota limit selection and its absent cases (see §5A).
   - `CloudUsageTest` (core) — every figure needs authorization before a grant; a refusal propagates to every figure; **an unavailable metric is never equal to a zero**; an observed count is reported while tokens, remaining quota and billing stay `NOT_OFFERED`; an explicit zero is a real zero; project usage is always sourced from Google, never from local observation (see §5A).
   - `GoogleCloudHttpTest` (core) — the authorized reads against `MockWebServer`: the token in the `Authorization` header and **never in the URL**; `401` as re-authorization, `403` as no access; a `5xx` and an unparseable `200` as failures rather than empty lists; an unreachable host as a network problem; the userinfo read behind the account email; key metadata from the project keys endpoint; the two-call usage read; a quota refusal not discarding a real request count; and a refused monitoring read refusing the whole usage read (see §5A).
@@ -743,7 +775,7 @@ A task is NOT done until:
 - Local pre-CI validation without Gradle is allowed and encouraged: compile the changed pure-JVM/Android sources with `kotlinc` against the pinned dependency jars and run the JUnit classes directly with `-ea`. This never substitutes for CI — the branch must still go green in Actions. The `1504669` pass was validated locally this way: `kotlinc 2.0.21` plus JUnit `-ea` gave **134 tests OK** across `ReaderDisplayLanguageTest`, `ReaderDisplayRefreshTest`, `ReaderStartupGatesTest`, `LanguageCatalogTest`, `AppLocalesTest`, `ReaderPipelineOrderTest`, `ChunkQueueTest`, `PdfReadingOrderTest`, `ReaderSpoolTest`, `ReaderNarrationModesTest`, `ReaderLanguageFlagsTest` and `GeminiReaderSessionTest`. Two harness details matter and cost a round each when forgotten: `internal` declarations need `-Xfriend-paths=<main-out>` on the test compile, and `ReaderSpool`'s `VoxoraLog` dependency needs a plain-JVM stub because the real one touches `android.util.Log`.
 - Prefer pure-JVM, deterministic tests with `TemporaryFolder` for file-backed code; avoid Robolectric unless an Android API genuinely cannot be avoided.
 - **The local harness cannot compile Compose, so run an import guard before pushing.** A missing `import androidx.compose.runtime.LaunchedEffect` reached CI once and failed **both** jobs; because the dev server has no Compose artifacts, nothing local caught it. It also produced four errors for one mistake — the unresolved reference plus three cascading "suspend function should be called only from a coroutine", since without `LaunchedEffect` the lambda is not a suspend scope. Before pushing, check that no file uses a Compose or AndroidX symbol it has not imported. Read CI job logs with `GET /repos/…/actions/jobs/<job_id>/logs` (works, HTTP 200) rather than the run-level archive endpoint (403); the useful line is `e: file:///…/File.kt:97:5 Unresolved reference 'X'.`
-- **Two local checks worth running on every change, both cheap and both caught real bugs:** a `R.string.*` cross-check of every Kotlin reference against `values/` and `values-fa/` (it caught a `reader_page_chunk` key that no locale declared), and an unused-import sweep of changed files.
+- **Three local checks worth running on every change, all cheap and all caught real bugs:** a `R.string.*` cross-check of every Kotlin reference against `values/` and `values-fa/` (it caught a `reader_page_chunk` key that no locale declared); an unused-import sweep of changed files; and a **colour-literal guard** that fails if `Color(0x…)` or a named `Color.White`/`Color.Black`/… appears anywhere outside `ui/theme/Theme.kt` and `ui/theme/VoxoraPalette.kt` (`Color.Transparent` is allowed). The harness cannot compile Compose, so the guard is what stops a stray hex from reaching CI.
 
 ---
 

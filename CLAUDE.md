@@ -145,7 +145,91 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
 > pair is `AGENTS.md` (project law / architecture record) and this `CLAUDE.md`
 > (handoff / cloud context). Update those two — do not add duplicate docs.
 
-### Last change (this session) — language+style-correct Reader text, a real light/dark theme system, and the authoritative usage ring
+### Last change (this session) — honest Google sign-in states, a Google-inspired theme, and a key that is never shown again
+
+Three focused commits on `feat/reader-segmented-spooling` (SHAs recorded below), then the docs
+commit. Scope was deliberately limited to Google sign-in UX, the theme system, and the API-key field.
+
+**DONE — the Google account card is a real sign-in surface again.** The authorization architecture
+was already the official one (`Identity.getAuthorizationClient(activity).authorize(...)` via
+`play-services-auth`, read-only `CloudScopes.ALL`, access token in memory only) — it was the *card*
+that was wrong. In the not-configured state it showed a note and no action, which read as "sign-in
+is not implemented". Now:
+- the whole card is tappable when a tap can do something (`SignedOut`, or a retry after `Failed`),
+  and inert while a grant is held or consent is open, so a stray tap cannot start a second request;
+- the not-configured state keeps the sign-in button **visible but disabled**, with copy that says
+  Voxora supports Google sign-in and this *build* is not set up for it yet;
+- the four states are named distinctly — `NotConfigured` → "Sign-in needs setup", `SignedOut` →
+  "Not connected", `Authorizing` → "Waiting for Google…", `Authorized` → the account email.
+- "Is this build configured?" moved into `core/.../cloud/CloudOAuthConfig.isConfigured` — pure JVM,
+  presence-not-validity, pinned by `CloudOAuthConfigTest`. `CloudAuthStateTest` gained a test that
+  the four states are mutually exclusive.
+No fake login, no WebView, no scraping, no invented endpoint. The manual API key still works with no
+sign-in at all.
+
+**DONE — a Google-inspired colour system, and the brown/gold light theme is gone.** The previous
+light theme was built on warm off-whites and a deep gold `primary`, and — the real culprit — the
+`explanation` role itself was a warm tan (`#A79E8C` / `#6E685B`), so every help sentence read as
+gold. The palette now lives in `ui/theme/VoxoraPalette.kt` (pure Kotlin, no Compose, so it is
+unit-tested) and `Theme.kt` is the only place a value becomes a `Color`:
+- blue `#1967D2`/`#8AB4F8` = primary action and selection; green = success; yellow = warning; red =
+  error. Google's families used as **semantic roles**, not decoration;
+- light neutrals are a clean cool grey ramp on white (`background #FFFFFF`, cards `#F1F3F4`,
+  `onSurface #1F1F1F`), with no brown and no tan;
+- dark keeps the near-black direction (`#0A0A0B`, cards `#1C1C1F`) with the neutrals de-warmed;
+- gold survives as the brand accent only — `colorScheme.tertiary`, plus the Live waveform. It no
+  longer fills a card, a background or help text;
+- `VoxoraSemanticColors` gained **`neutral`** (idle/connecting/expected gaps — never a failure) and
+  **`disabled`**, alongside success/warning/danger/explanation. `UsageStatusVisual`'s NEUTRAL tone
+  and the account card's "waiting" line now use the role instead of `colorScheme.outline` /
+  `onSurfaceVariant`;
+- `ThemeMode.DEFAULT` is still `SYSTEM`, so dark remains the primary direction and light is opt-in.
+
+`VoxoraPaletteTest` pins the system: distinct accent families, blue and gold are not status colours,
+help text is never an action or a status colour and is less prominent than secondary content, and
+**every text role clears WCAG AA (4.5:1) on the card and page it sits on**. A new static guard
+(`themecheck.py`) fails if a colour literal appears outside the two theme files.
+
+**DONE — a saved Gemini API key is never displayed again.** The defect: `SettingsScreen` did
+`apiKey = prefs.apiKey.first()` on entry, so the real key was repopulated into the text field on
+every visit. The fix is structural rather than a display rule:
+- `UserPrefs.apiKeyConfigured: Flow<Boolean>` (derived from `ApiKeyMask.isConfigured`) is what the
+  card reads; the screen never reads `UserPrefs.apiKey`. `UserPrefs.clearApiKey()` was added. No
+  second storage system — the same DataStore, the same `api_key` key;
+- `ui/ApiKeyFieldState.kt` is the field's entire state and has **no field for the stored secret** —
+  the only string it can hold is the user's in-progress draft. Saving writes the user's own draft
+  and clears it; the global Save button no longer touches the key;
+- a configured install shows "API key configured" with **Replace** and **Remove**; the entry field
+  is masked (`PasswordVisualTransformation`, password keyboard) and opens only when there is no key
+  or the user asked to replace one;
+- the dead `action_show_key`/`action_hide_key` strings were deleted from every locale file, and the
+  previews no longer carry a sample key. Pinned by `ApiKeyFieldStateTest`.
+
+**Tests actually run (no Gradle).** `kotlinc 2.0.21` + JUnit 4.13.2 with `-ea`: **456 tests OK
+across 42 classes** (up from 426/39), adding `ApiKeyFieldStateTest`, `VoxoraPaletteTest`,
+`CloudOAuthConfigTest` and one `CloudAuthStateTest` case. Static checks: `checkimports.py` OK;
+`stringcheck.py` OK (values 293, values-fa 292, parity intact, only `default_web_client_id`
+intentionally untranslated); `themecheck.py` OK. The Compose, Play Services and Android layers are
+**not** compiled locally — CI is their only compile check.
+
+**BLOCKED on external configuration (not on code):** `default_web_client_id` is still
+`REPLACE_WITH_GOOGLE_WEB_CLIENT_ID`, so `CloudOAuthConfig.isConfigured` is false,
+`GoogleCloudAuthorizer.configured` is false, and authorization reports `CONFIGURATION_MISSING`
+without touching the provider. **Real Google sign-in cannot run end to end until the owner supplies
+the OAuth Web client ID**, and the Cloud APIs must be enabled on the queried project. The manual
+Gemini API key is fully functional without it. No client ID was fabricated and no credential was
+committed.
+
+**Real-device verification was NOT performed.** The account chooser, consent, account switching and
+sign-out; the light appearance's contrast and hierarchy and the theme-switch control; and the key
+card's Replace/Remove flow are all device-verification items.
+
+**NEXT:** supply the OAuth Web client ID for `default_web_client_id`, then install the CI-built
+debug APK and confirm the four sign-in states render as intended — in particular that the card now
+shows a disabled sign-in action with the "needs setup" copy instead of a bare note, and that after
+saving a key the field is empty on the next visit.
+
+### Last change (previous session) — language+style-correct Reader text, a real light/dark theme system, and the authoritative usage ring
 
 Four commits on `feat/reader-segmented-spooling`, then the documentation commit:
 
