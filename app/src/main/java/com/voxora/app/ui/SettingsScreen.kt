@@ -279,7 +279,7 @@ private fun SettingsContent(
             // the account, then the Gemini project, then the key. The account hierarchy is its own
             // composable so the three levels stay together and the invalidation rules live in one
             // tested model (CloudSelection).
-            CloudAccountCard()
+            CloudAccountCard(onOpenUsage = onOpenUsage)
         }
         item(key = "gemini") {
             // The manual key is a first-class fallback, not a lesser mode: it sits directly under

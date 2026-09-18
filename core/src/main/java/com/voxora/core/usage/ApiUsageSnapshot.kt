@@ -76,6 +76,10 @@ data class ApiUsageSnapshot(
     val requestsToday: UsageMetric,
     /** Observed requests Voxora made this UTC month. */
     val requestsThisMonth: UsageMetric,
+    /** Of [requestsThisMonth], the ones that completed successfully. */
+    val successesThisMonth: UsageMetric,
+    /** Of [requestsThisMonth], the ones that failed. */
+    val failuresThisMonth: UsageMetric,
     val inputTokens: UsageMetric,
     val outputTokens: UsageMetric,
     val totalTokens: UsageMetric,
@@ -89,6 +93,22 @@ data class ApiUsageSnapshot(
     /** Cloud billing spend — never readable from an API key, and never estimated. */
     val billing: UsageMetric,
 ) {
+    /**
+     * Share of this month's observed requests that succeeded, or `null` when it cannot be stated.
+     *
+     * This is the one ratio on the dashboard with a genuine denominator: both numbers are Voxora's
+     * own observations of requests it actually made, so the fraction is measured rather than
+     * assumed. It is deliberately **not** a quota percentage — nothing here is compared against a
+     * limit Google never reported — and it is `null` whenever either figure is missing or no
+     * request was recorded, so a ring can render an honest "no figure" instead of a fake `0%`.
+     */
+    fun successShare(): Float? {
+        val successes = successesThisMonth.knownValue ?: return null
+        val total = requestsThisMonth.knownValue ?: return null
+        if (total <= 0L) return null
+        return (successes.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+    }
+
     companion object {
         /**
          * Assembles the dashboard from local state plus the last probe result.
@@ -132,6 +152,8 @@ data class ApiUsageSnapshot(
                     !configured -> UsageMetric.missing(UsageUnavailable.NOT_CONFIGURED)
                     else -> UsageMetric.missing(UsageUnavailable.UNKNOWN)
                 },
+                successesThisMonth = observedMetric(month?.successes, observed, configured),
+                failuresThisMonth = observedMetric(month?.failures, observed, configured),
                 inputTokens = tokenMetric(month?.promptTokens, tokensReported, observed, configured),
                 outputTokens = tokenMetric(month?.responseTokens, tokensReported, observed, configured),
                 totalTokens = tokenMetric(month?.totalTokens, tokensReported, observed, configured),
@@ -149,6 +171,19 @@ data class ApiUsageSnapshot(
                 projectQuota = UsageMetric.missing(UsageUnavailable.AUTH_REQUIRED),
                 billing = UsageMetric.missing(UsageUnavailable.AUTH_REQUIRED),
             )
+        }
+
+        /**
+         * A per-month count of Voxora's own requests, shown only when the month had any.
+         *
+         * The ledger omits a day with no activity, so `null` means "nothing was recorded" rather
+         * than zero: rendering it as `0` would turn "we did not measure this" into a claim.
+         */
+        private fun observedMetric(value: Int?, observed: Boolean, configured: Boolean): UsageMetric = when {
+            !observed -> UsageMetric.missing(
+                if (configured) UsageUnavailable.UNKNOWN else UsageUnavailable.NOT_CONFIGURED,
+            )
+            else -> UsageMetric.known((value ?: 0).toLong())
         }
 
         /**

@@ -63,6 +63,8 @@
     <string name="usage_last_error">آخرین دستهٔ خطا</string>
     <string name="usage_never">هرگز</string>
     <string name="usage_observed_help">این‌ها شمارش خود Voxora از درخواست‌هایی است که روی همین دستگاه فرستاده — نه گزارش سهمیهٔ Google.</string>
+    <string name="usage_ring_success">از %2$d درخواست این ماه، %1$d درخواست موفق بود.</string>
+    <string name="usage_ring_empty">هنوز درخواستی برای این ماه ثبت نشده است.</string>
     <string name="usage_unavailable_not_configured">کلیدی تنظیم نشده</string>
     <string name="usage_unavailable_auth_required">نیازمند ورود به Google</string>
     <string name="usage_unavailable_permission_denied">دسترسی رد شد</string>
@@ -241,6 +243,7 @@
     <string name="settings_cloud_account">حساب Google</string>
     <string name="settings_cloud_not_configured">ورود با Google در این نسخه تنظیم نشده است. همچنان می‌توانی از کلید API خودت استفاده کنی.</string>
     <string name="settings_cloud_authorized">با حساب Google وارد شده‌ای</string>
+    <string name="settings_cloud_access">Voxora می‌تواند پروژه‌ها و کلیدهای Gemini این حساب را فقط-خواندنی ببیند.</string>
     <string name="settings_cloud_change_account">تغییر حساب</string>
     <string name="settings_cloud_authorizing">در انتظار Google…</string>
     <string name="settings_cloud_failure_expired">دسترسی Google منقضی شد. دوباره وارد شو.</string>

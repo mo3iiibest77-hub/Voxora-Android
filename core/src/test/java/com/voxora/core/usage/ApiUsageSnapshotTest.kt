@@ -170,4 +170,58 @@ class ApiUsageSnapshotTest {
     fun aBlankAccountEmailIsTreatedAsAbsent() {
         assertNull(ApiUsageSnapshot.assemble(key, "   ", null, GeminiUsageLedger(), now).accountEmail)
     }
+
+    @Test
+    fun theSuccessShareIsMeasuredFromObservedRequestsOnly() {
+        val ledger = GeminiUsageLedger()
+        repeat(3) { ledger.recordSuccess(now, null) }
+        ledger.recordFailure(now, UsageFailureCategory.TIMEOUT)
+
+        val snapshot = ApiUsageSnapshot.assemble(key, null, null, ledger, now)
+
+        assertEquals(4L, snapshot.requestsThisMonth.knownValue)
+        assertEquals(3L, snapshot.successesThisMonth.knownValue)
+        assertEquals(1L, snapshot.failuresThisMonth.knownValue)
+        assertEquals(0.75f, snapshot.successShare()!!, 0.0001f)
+    }
+
+    @Test
+    fun theSuccessShareIsNullRatherThanAFakePercentageWhenThereIsNothingToDivide() {
+        assertNull(
+            "no requests means no percentage",
+            ApiUsageSnapshot.assemble(key, null, null, GeminiUsageLedger(), now).successShare(),
+        )
+
+        val noKey = ApiUsageSnapshot.assemble(null, null, null, GeminiUsageLedger(), now)
+        assertNull(noKey.successShare())
+        assertEquals(UsageUnavailable.NOT_CONFIGURED, noKey.successesThisMonth.reasonOrNull)
+        assertEquals(UsageUnavailable.NOT_CONFIGURED, noKey.failuresThisMonth.reasonOrNull)
+    }
+
+    @Test
+    fun aFullySuccessfulMonthIsAFullShareAndAFullyFailedOneIsZero() {
+        assertEquals(1f, ApiUsageSnapshot.assemble(key, null, null, ledgerWith(2), now).successShare()!!, 0.0001f)
+
+        val failing = GeminiUsageLedger()
+        repeat(2) { failing.recordFailure(now, UsageFailureCategory.NETWORK) }
+        val snapshot = ApiUsageSnapshot.assemble(key, null, null, failing, now)
+
+        assertEquals(0f, snapshot.successShare()!!, 0.0001f)
+        assertEquals(2L, snapshot.failuresThisMonth.knownValue)
+        assertEquals(0L, snapshot.successesThisMonth.knownValue)
+    }
+
+    @Test
+    fun theShareNeverDependsOnQuotaOrBilling() {
+        val ledger = GeminiUsageLedger()
+        repeat(3) { ledger.recordSuccess(now, null) }
+
+        val snapshot = ApiUsageSnapshot.assemble(key, null, null, ledger, now)
+
+        // The one real ratio on the dashboard comes from observed requests; the figures Google
+        // does not expose stay unavailable and can never feed it.
+        assertEquals(1f, snapshot.successShare()!!, 0.0001f)
+        assertNull(snapshot.projectQuota.knownValue)
+        assertNull(snapshot.billing.knownValue)
+    }
 }

@@ -25,6 +25,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.DataUsage
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Refresh
@@ -83,7 +84,10 @@ import dagger.hilt.android.EntryPointAccessors
  * hierarchy visible, needs no extra surface, and lays out correctly under RTL.
  */
 @Composable
-fun CloudAccountCard(modifier: Modifier = Modifier) {
+fun CloudAccountCard(
+    onOpenUsage: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val context = LocalContext.current
     val repository = rememberCloudRepository(context)
     val auth by repository.auth.collectAsStateWithLifecycle()
@@ -139,6 +143,7 @@ fun CloudAccountCard(modifier: Modifier = Modifier) {
             repository.useManualKey()
             choosingKey = false
         },
+        onOpenUsage = onOpenUsage,
         modifier = modifier,
     )
 }
@@ -160,6 +165,7 @@ private fun CloudAccountContent(
     onRefreshKeys: () -> Unit,
     onSelectKey: (CloudApiKey) -> Unit,
     onUseManualKey: () -> Unit,
+    onOpenUsage: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -179,6 +185,27 @@ private fun CloudAccountContent(
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
+                    // What the grant actually buys, in the product's own words: read-only access to
+                    // this account's Gemini projects and keys. Never described as a Cloud Console
+                    // role, and never as an API-key quota.
+                    CloudNote(text = stringResource(R.string.settings_cloud_access))
+                    // The account is the top of the hierarchy, so the usage entry point belongs
+                    // here rather than being reachable only by scrolling to its own section.
+                    OutlinedButton(
+                        onClick = onOpenUsage,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(46.dp),
+                        shape = RoundedCornerShape(14.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.DataUsage,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.settings_usage_open))
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         OutlinedButton(
                             onClick = onAuthorize,
@@ -625,6 +652,7 @@ private fun CloudAccountSignedOutPreview(modifier: Modifier = Modifier) {
                 onRefreshKeys = {},
                 onSelectKey = {},
                 onUseManualKey = {},
+                onOpenUsage = {},
             )
         }
     }
@@ -676,6 +704,7 @@ private fun CloudAccountAuthorizedPreview(modifier: Modifier = Modifier) {
                 onRefreshKeys = {},
                 onSelectKey = {},
                 onUseManualKey = {},
+                onOpenUsage = {},
             )
         }
     }

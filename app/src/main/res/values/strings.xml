@@ -72,6 +72,8 @@
     <string name="usage_last_error">Last error category</string>
     <string name="usage_never">Never</string>
     <string name="usage_observed_help">These are Voxora\'s own counts of the requests it made on this device. They are not a Google quota reading.</string>
+    <string name="usage_ring_success">%1$d of %2$d requests succeeded this month.</string>
+    <string name="usage_ring_empty">No requests recorded this month yet.</string>
     <string name="usage_unavailable_not_configured">No key configured</string>
     <string name="usage_unavailable_auth_required">Needs Google sign-in</string>
     <string name="usage_unavailable_permission_denied">Permission denied</string>
@@ -242,6 +244,7 @@
     <string name="settings_cloud_account">Google account</string>
     <string name="settings_cloud_not_configured">Google sign-in is not configured in this build. You can still use your own Gemini API key.</string>
     <string name="settings_cloud_authorized">Signed in with Google</string>
+    <string name="settings_cloud_access">Voxora can read this account\'s Gemini projects and keys, read-only.</string>
     <string name="settings_cloud_change_account">Change account</string>
     <string name="settings_cloud_authorizing">Waiting for Google…</string>
     <string name="settings_cloud_failure_expired">Google\'s access expired. Sign in again.</string>

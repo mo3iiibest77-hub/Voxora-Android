@@ -2,6 +2,7 @@ package com.voxora.app.ui
 
 import android.content.res.Configuration.UI_MODE_NIGHT_YES
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -40,7 +41,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
@@ -257,6 +262,18 @@ private fun ApiUsageContent(
         }
 
         item(key = "observed-header") { UsageSectionHeader(stringResource(R.string.usage_section_observed)) }
+        item(key = "observed-ring") {
+            // The headline: the observed request count, with the one ratio the dashboard can
+            // actually measure drawn around it. Nothing here is compared against a Google quota,
+            // because Google does not report one for this figure.
+            UsageCard {
+                UsageRing(
+                    requests = snapshot.requestsThisMonth,
+                    successes = snapshot.successesThisMonth,
+                    share = snapshot.successShare(),
+                )
+            }
+        }
         item(key = "observed") {
             UsageCard {
                 UsageMetricRow(stringResource(R.string.usage_requests_today), snapshot.requestsToday)
@@ -515,6 +532,104 @@ private fun UsageNote(text: String) {
         style = MaterialTheme.typography.bodySmall,
         color = VoxoraColors.explanation,
     )
+}
+
+/** Diameter and stroke of the usage ring, in dp. */
+private const val RING_SIZE_DP = 148
+private const val RING_STROKE_DP = 12
+
+/** At or above this share the ring reads as healthy rather than as a warning. */
+private const val SUCCESS_RING_THRESHOLD = 0.99f
+
+/**
+ * The usage ring.
+ *
+ * A ring only means something when there is a real fraction to draw, so this one is fed the single
+ * ratio the dashboard can measure: how many of Voxora's **own observed requests** this month
+ * succeeded. The centre carries the observed request count — "current usage" — and the arc carries
+ * the share of those that succeeded.
+ *
+ * It is deliberately **not** a quota gauge. Google does not report a quota for this figure, so the
+ * ring never divides the count by a limit that was never read; when either figure is unknown the
+ * arc is not drawn at all and the caption says nothing was recorded, because an arc at zero (or at
+ * full) would be a percentage nobody measured.
+ */
+@Composable
+private fun UsageRing(
+    requests: UsageMetric,
+    successes: UsageMetric,
+    share: Float?,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    val track = colors.outlineVariant
+    val arc = when {
+        share == null -> track
+        share >= SUCCESS_RING_THRESHOLD -> VoxoraColors.success
+        share > 0f -> VoxoraColors.warning
+        else -> VoxoraColors.danger
+    }
+    val centre = requests.knownValue?.toString() ?: stringResource(R.string.usage_unavailable_unknown)
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Canvas(modifier = Modifier.size(RING_SIZE_DP.dp)) {
+                val stroke = RING_STROKE_DP.dp.toPx()
+                val inset = stroke / 2f
+                val diameter = size.minDimension - stroke
+                drawArc(
+                    color = track,
+                    startAngle = 0f,
+                    sweepAngle = 360f,
+                    useCenter = false,
+                    topLeft = Offset(inset, inset),
+                    size = Size(diameter, diameter),
+                    style = Stroke(width = stroke, cap = StrokeCap.Round),
+                )
+                if (share != null) {
+                    drawArc(
+                        color = arc,
+                        startAngle = -90f,
+                        sweepAngle = 360f * share,
+                        useCenter = false,
+                        topLeft = Offset(inset, inset),
+                        size = Size(diameter, diameter),
+                        style = Stroke(width = stroke, cap = StrokeCap.Round),
+                    )
+                }
+            }
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = centre,
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.onSurface,
+                )
+                Text(
+                    text = stringResource(R.string.usage_requests_month),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = VoxoraColors.explanation,
+                )
+            }
+        }
+        Text(
+            text = if (share == null) {
+                stringResource(R.string.usage_ring_empty)
+            } else {
+                stringResource(
+                    R.string.usage_ring_success,
+                    (successes.knownValue ?: 0L).toInt(),
+                    (requests.knownValue ?: 0L).toInt(),
+                )
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = VoxoraColors.explanation,
+        )
+    }
 }
 
 /**
