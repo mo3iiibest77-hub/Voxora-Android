@@ -11,7 +11,6 @@
     <string name="action_save">حفظ</string>
     <string name="action_sign_out">تسجيل الخروج</string>
     <string name="settings_title">الإعدادات</string>
-    <string name="settings_account">الحساب</string>
     <string name="settings_api_key">مفتاح API لـ Gemini</string>
     <string name="settings_api_key_hint">الصق المفتاح من Google AI Studio</string>
     <string name="settings_target_language">لغة الدبلجة</string>

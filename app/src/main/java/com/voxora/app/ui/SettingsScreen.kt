@@ -115,9 +115,14 @@ private fun List<LanguageChoice>.labelOf(code: String): String =
  *
  * Laid out with the same visual system as the Reader screen — one keyed
  * `LazyColumn`, a consistent top bar, grouped section headers and rounded,
- * outlined Material 3 cards — so both screens read as one product. Every control
- * that existed before is still here: app language, Gemini API key, dubbing
- * language, save, account sign-in, overlay permission and logs.
+ * outlined Material 3 cards — so both screens read as one product.
+ *
+ * The order follows the product's model of Google access: **sign in with Google → the account →
+ * the Gemini project → the key → usage**. The account card therefore sits above the manual key
+ * field rather than in a separate "Account" section, because a manual key is a fallback for the
+ * same job, not a different feature. Every control that existed before is still here: app
+ * language, the Google/Gemini hierarchy, the Gemini API key, dubbing language, save, overlay
+ * permission and logs.
  */
 @Composable
 fun SettingsScreen(
@@ -245,10 +250,20 @@ private fun SettingsContent(
             }
         }
 
-        item(key = "gemini-header") {
+        item(key = "google-header") {
             SettingsSectionHeader(stringResource(R.string.settings_section_gemini))
         }
+        item(key = "account") {
+            // Sign in with Google comes first, because that is the path the product leads with:
+            // the account, then the Gemini project, then the key. The account hierarchy is its own
+            // composable so the three levels stay together and the invalidation rules live in one
+            // tested model (CloudSelection).
+            CloudAccountCard()
+        }
         item(key = "gemini") {
+            // The manual key is a first-class fallback, not a lesser mode: it sits directly under
+            // the account card, works with no Google sign-in at all, and is never silently bound
+            // to the signed-in account.
             SettingsCard {
                 SettingsRowHeader(
                     icon = Icons.Filled.Key,
@@ -357,16 +372,6 @@ private fun SettingsContent(
                     )
                 }
             }
-        }
-
-        item(key = "account-header") {
-            SettingsSectionHeader(stringResource(R.string.settings_account))
-        }
-        item(key = "account") {
-            // The account hierarchy — Google account, then project, then key — is its own
-            // composable so the three levels stay together and the invalidation rules live
-            // in one tested model (CloudSelection).
-            CloudAccountCard()
         }
 
         item(key = "overlay-header") {

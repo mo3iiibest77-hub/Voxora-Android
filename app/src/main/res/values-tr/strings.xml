@@ -11,7 +11,6 @@
     <string name="action_save">Kaydet</string>
     <string name="action_sign_out">Çıkış yap</string>
     <string name="settings_title">Ayarlar</string>
-    <string name="settings_account">Hesap</string>
     <string name="settings_api_key">Gemini API anahtarı</string>
     <string name="settings_api_key_hint">Google AI Studio anahtarını yapıştır</string>
     <string name="settings_target_language">Dublaj dili</string>

@@ -66,11 +66,4 @@ class ApiKeyMaskTest {
         assertTrue(ApiKeyMask.isConfigured("AIzaSyD1234567890ABCD"))
         assertTrue(ApiKeyMask.isConfigured("  AIzaSyD1234567890ABCD  "))
     }
-
-    @Test
-    fun theShapeReportDistinguishesAnAiStudioKeyFromSomethingElse() {
-        assertEquals("ai-studio", ApiKeyMask.describeShape("AIzaSyD1234567890ABCD"))
-        assertEquals("unrecognised", ApiKeyMask.describeShape("ya29.a0AfH6SM"))
-        assertEquals(null, ApiKeyMask.describeShape(""))
-    }
 }

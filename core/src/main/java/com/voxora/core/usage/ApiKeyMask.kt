@@ -23,9 +23,6 @@ object ApiKeyMask {
      */
     private const val MIN_REVEALABLE = 12
 
-    /** Google AI Studio keys begin with this prefix; used only to recognise obvious junk. */
-    private const val EXPECTED_PREFIX = "AIza"
-
     /**
      * The placeholder shipped in `strings.xml` so the build works before the owner
      * configures Google Cloud. Treated as "not configured" rather than as a key.
@@ -58,18 +55,5 @@ object ApiKeyMask {
         if (trimmed.equals(PLACEHOLDER, ignoreCase = true)) return false
         if (trimmed.startsWith("REPLACE_", ignoreCase = true)) return false
         return true
-    }
-
-    /**
-     * A short, non-identifying description of the key's *shape*, for diagnostics.
-     *
-     * Returns nothing derived from the key's contents beyond whether it starts with the
-     * documented AI Studio prefix, because that is useful when a user has pasted an OAuth
-     * token or a service-account JSON fragment by mistake.
-     */
-    fun describeShape(key: String?): String? {
-        val trimmed = key?.trim().orEmpty()
-        if (trimmed.isEmpty()) return null
-        return if (trimmed.startsWith(EXPECTED_PREFIX)) "ai-studio" else "unrecognised"
     }
 }

@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -41,6 +42,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
@@ -67,6 +69,13 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
+ * Google's own rate-limit page. The documented rule is that limits apply **per project, not per
+ * API key**, so this is the only place a real limit can be read — an API key cannot read it and
+ * Voxora must never estimate it.
+ */
+private const val AI_STUDIO_RATE_LIMIT_URL = "https://aistudio.google.com/rate-limit?timeRange=last-28-days"
+
+/**
  * What Voxora knows about the configured Gemini API key, and what it honestly cannot know.
  *
  * ## Why this screen is explicit about gaps
@@ -74,6 +83,10 @@ import kotlinx.coroutines.launch
  * key. An API key cannot be used to read them. Rather than printing a reassuring `0`, this screen
  * names each unavailable figure and says why, and it never implies that a signed-in Google account
  * owns the configured key.
+ *
+ * Rate limits are the same story: the documented rule is that they apply **per project, not per
+ * API key**, so a real limit can only be read in AI Studio. The project card links there rather
+ * than estimating, and it states the rule so a second key is never mistaken for a second quota.
  *
  * Everything shown as a number was observed: either by Voxora itself (its own request counts and
  * whatever token usage the server reported) or by the key check, which calls the documented
@@ -156,6 +169,7 @@ private fun ApiUsageContent(
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
+    val uriHandler = LocalUriHandler.current
 
     LazyColumn(
         modifier = modifier
@@ -367,6 +381,26 @@ private fun ApiUsageContent(
                     if (snapshot.accountEmail != null) {
                         UsageNote(stringResource(R.string.usage_account_not_linked))
                     }
+                }
+                // The real rate limits live in AI Studio and are applied per project, not per key;
+                // an API key cannot read them. Link to the official page rather than invent a
+                // number, and say the rule plainly so "a second key" is never mistaken for a
+                // second quota.
+                UsageNote(stringResource(R.string.settings_key_rate_limit_note))
+                OutlinedButton(
+                    onClick = { uriHandler.openUri(AI_STUDIO_RATE_LIMIT_URL) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(46.dp),
+                    shape = RoundedCornerShape(14.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.OpenInNew,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.settings_ai_studio_usage))
                 }
             }
         }

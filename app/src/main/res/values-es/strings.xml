@@ -11,7 +11,6 @@
     <string name="action_save">Guardar</string>
     <string name="action_sign_out">Cerrar sesión</string>
     <string name="settings_title">Ajustes</string>
-    <string name="settings_account">Cuenta</string>
     <string name="settings_api_key">Clave API de Gemini</string>
     <string name="settings_api_key_hint">Pega la clave de Google AI Studio</string>
     <string name="settings_target_language">Idioma de doblaje</string>

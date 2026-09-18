@@ -11,7 +11,6 @@
     <string name="action_save">Speichern</string>
     <string name="action_sign_out">Abmelden</string>
     <string name="settings_title">Einstellungen</string>
-    <string name="settings_account">Konto</string>
     <string name="settings_api_key">Gemini-API-Schlüssel</string>
     <string name="settings_api_key_hint">Schlüssel aus Google AI Studio einfügen</string>
     <string name="settings_target_language">Synchron-Sprache</string>

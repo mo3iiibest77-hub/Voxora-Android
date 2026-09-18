@@ -66,12 +66,18 @@ import com.voxora.core.cloud.CloudSelection
 import dagger.hilt.android.EntryPointAccessors
 
 /**
- * The Google account → Cloud project → Gemini key hierarchy.
+ * The Google account → Gemini project → key hierarchy, in the product's own language.
  *
- * This is the account system, and it replaces the ID-token sign-in that used to sit here: an ID
- * token identifies the user but authorises no Cloud read, so it could never discover a project or
- * a key. Each level of the hierarchy is shown explicitly, and the active key states whether it came
- * from discovery or was pasted by hand — the app never implies a link it cannot verify.
+ * The model a reader sees is **sign in with Google → Google account → Gemini / Google AI Studio
+ * access → the key**. This is not a Cloud Console: the project level is named for what it actually
+ * is to the user — the project a Gemini key belongs to — and the screen links out to AI Studio for
+ * the two jobs it cannot do itself (creating a key and reading usage/limits), rather than
+ * pretending those live here.
+ *
+ * This replaced the ID-token sign-in that used to sit here: an ID token identifies the user but
+ * authorises no read, so it could never discover a project or a key. Each level of the hierarchy is
+ * shown explicitly, and the active key states whether it came from discovery or was pasted by hand —
+ * the app never implies a link it cannot verify.
  *
  * The pickers expand inline rather than opening a dialog: a nested list inside the card keeps the
  * hierarchy visible, needs no extra surface, and lays out correctly under RTL.
@@ -242,6 +248,7 @@ private fun CloudAccountContent(
                 selection.selectedProject?.projectNumber?.let { number ->
                     CloudNote(text = stringResource(R.string.settings_project_number, number))
                 }
+                CloudNote(text = stringResource(R.string.settings_project_help))
                 CloudStateNote(projectLoad)
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedButton(
@@ -280,6 +287,10 @@ private fun CloudAccountContent(
                 } else {
                     CloudNote(text = stringResource(R.string.settings_key_secret_note))
                 }
+                // The documented rule, stated where the key is chosen: limits belong to the
+                // project, so a second key cannot buy a second quota. Never call this a per-key
+                // limit — that is the exact misunderstanding this note exists to prevent.
+                CloudNote(text = stringResource(R.string.settings_key_rate_limit_note))
                 CloudStateNote(
                     state = keyLoad,
                     loading = R.string.settings_key_loading,
