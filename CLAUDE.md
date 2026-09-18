@@ -160,6 +160,7 @@ Eleven commits on `feat/reader-segmented-spooling` this cycle:
 - `089a71f docs: record the cloud authorization, segment swipe and Persian localization`
 - `14e5403 fix(cloud): read the account email from userinfo, not the authorization result`
 - `9dfc204 fix(auth): map the scope list to Play Services Scope objects`
+- plus the documentation commits that record the CI result and the corrected scope set.
 
 **DONE — the Reader swipe moves segments, not chunks.** The branch already carried this in
 `7c12b7d`, and it was verified rather than assumed: `ReaderPager.swipeStep` is the whole swipe rule
@@ -275,8 +276,9 @@ confirm the previous account's project and key disappear immediately.
 
 ### Actual repository state (inspected, not assumed):
 - `main`: `1f0a719 fix(reader): fix suspend output language persistence`.
-- `feat/reader-segmented-spooling` (the implementation branch) HEAD is
-  `9dfc204 fix(auth): map the scope list to Play Services Scope objects`, on top of
+- `feat/reader-segmented-spooling` (the implementation branch) HEAD is the documentation commit that
+  follows the last code change, `9dfc204 fix(auth): map the scope list to Play Services Scope objects`
+  — the head Android CI verified. Below it:
   `14e5403 fix(cloud): read the account email from userinfo, not the authorization result`,
   `089a71f docs: record the cloud authorization, segment swipe and Persian localization`,
   `316a6a4 feat(settings): connect the Google account, project and Gemini key`,
@@ -296,10 +298,11 @@ confirm the previous account's project and key disappear immediately.
   `b0d556d fix(reader): preserve pdf reading order`,
   `a74db6c fix(reader): define fluent and faithful narration semantics` — plus the
   reading-order fix `6d826e0 fix(reader): de-interleave pdf columns when a page
-  carries a running header` and the documentation commits. **Pushed to `origin`
-  at `9dfc204`, and not merged.** CI is green for the current head: `Android CI`
-  runs #90 and #91 both succeeded at `9dfc204` (debug APK + unit tests). The runs
-  before it failed on the three compile errors listed above (#86–#89 at
+  carries a running header` and the documentation commits. **Pushed to `origin`,
+  and not merged.** CI is green for the verified head: `Android CI` runs #90 (push)
+  and #91 (pull_request) both succeeded at `9dfc204` (debug APK + unit tests), and
+  runs #92/#93 are green for the documentation commit `a96d201`. The runs before
+  that failed on the three compile errors listed above (#86–#89 at
   `089a71f`/`14e5403`), so the green result belongs to this head and not to an
   earlier one. Older green points were `7f47805` (run `35294468431`, both jobs) and
   `707cc3c` (run #66).
