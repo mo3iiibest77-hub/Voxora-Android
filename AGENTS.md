@@ -49,12 +49,24 @@ Voxora-Android/
 │   └── src/main/java/com/voxora/app/
 │       ├── MainActivity.kt          ← AppCompatActivity (DO NOT change to ComponentActivity)
 │       ├── VoxoraApp.kt             ← Hilt Application
-│       ├── dub/                     ← Live Dub feature (DO NOT touch unless asked)
-│       │   ├── DubService.kt
-│       │   ├── DubPlayback.kt
+│       ├── dub/                     ← Live Dub feature (see §6 before changing anything)
+│       │   ├── DubService.kt         ← service wiring; feeds the synchronizer
+│       │   ├── DubPlayback.kt        ← output track, source ducking, volume-key session
 │       │   ├── FloatingBubbleService.kt
 │       │   ├── SystemAudioCapture.kt
-│       │   └── DelayedScreenOverlay.kt
+│       │   ├── DelayedScreenOverlay.kt    ← DISABLED stub; must stay unconstructed
+│       │   ├── SyncStatusVisual.kt        ← Pure-JVM sync tone mapping
+│       │   └── sync/                      ← the synchronization layer
+│       │       ├── MonotonicClock.kt      ← pure; the only clock sync may read
+│       │       ├── SyncConfig.kt          ← pure; every bound (no fixed latency)
+│       │       ├── SyncState.kt           ← pure; SyncState + SyncDecision
+│       │       ├── ExternalPlayer.kt      ← pure; the seam that makes sync testable
+│       │       ├── SourceVolumeDuck.kt    ← pure; duck/restore arithmetic
+│       │       ├── LatencyTimeline.kt     ← pure; monotonic stage instrumentation
+│       │       ├── DubSyncController.kt   ← pure; the adaptive state machine
+│       │       ├── MediaControlAccess.kt  ← Android; the permission question
+│       │       ├── MediaSessionExternalPlayer.kt ← Android; only MediaSessionManager user
+│       │       └── VoxoraNotificationListenerService.kt ← Android; empty opt-in listener
 │       ├── reader/                  ← Isolated background document narration
 │       │   ├── ReaderScreen.kt
 │       │   ├── ReaderViewModel.kt
@@ -181,7 +193,7 @@ success #BE185D  warning #2254E6  danger/error #0B6E8A
 - `VoxoraBrand` (`waveGold`, `waveGreen`) is decorative only — the Live bubble waveform. It is **not** a text or surface colour and must never be used for status.
 - **Every text role clears WCAG AA on the surface it sits on.** `OriginalDarkPaletteTest` and `LightTestPalettesTest` compute the contrast ratios and fail if a role drops below 4.5:1 on its card or page background (disabled content is exempt but must stay visible). Adding a colour means adding it to the reach of the test for its theme.
 - An active-state pulse must modify alpha, glow or scale of the semantic colour. Never introduce a separate neon colour for animation, and never run an infinite animation for a phase that is not active.
-- **Typography comes from the theme, and the theme ships the Persian font.** `Theme.kt` passes `typography = VoxoraTypography` from `ui/theme/Type.kt`, which overrides every one of the 15 Material 3 roles with the bundled **Vazirmatn UI, Non-Latin** family (`res/font/vazirmatn_ui_nl_*.ttf`, four weights, SIL OFL in `third_party/vazirmatn/`). Persian has no system font the product can rely on across devices, so the glyphs ship with the APK. The *Non-Latin* cut has the Persian glyphs and **no** Latin, which is deliberate: Persian shapes in Vazirmatn while Latin (product names, URLs, model names) falls through to the platform's Latin font. Use `MaterialTheme.typography.*` — never hardcode `sp` sizes and never set a `fontFamily` at a call site; the only sanctioned exception is the log list's monospace, because a timestamp and a bracketed tag are code, not prose. Changing a size or a weight means changing the type scale, not a screen. See `AgentMD.md` for the standing rule.
+- **Typography is the Material 3 default — do not bundle a font.** `Theme.kt` calls `MaterialTheme(colorScheme, content)` with **no** `typography` argument, so the app uses the stock Material 3 type scale and the **device's own font**, for Persian and every other language. Use `MaterialTheme.typography.*` — never hardcode `sp` sizes and never set a `fontFamily` at a call site; the only sanctioned exception is the log list's monospace, because a timestamp and a bracketed tag are code, not prose. There is deliberately **no** `ui/theme/Type.kt`, no `res/font/` directory and no bundled font: a bundled Persian-only cut was tried and rejected because it pushed every Latin product name through font fallback and changed the app's appearance on every device. Do not reintroduce one. See `AgentMD.md` for the standing rule.
 - Shapes: `RoundedCornerShape(12.dp)` for cards, `CircleShape` for FABs/bubbles
 - Elevation: use `tonalElevation`, not shadow tricks
 - Animations: use `animateFloatAsState`, `Animatable`, `rememberInfiniteTransition` / `AnimatedVisibility` — not `Handler.postDelayed`
@@ -581,9 +593,9 @@ under it, because a manual key is a fallback for the same job, not a different f
 
 ---
 
-## 6. LIVE DUB — DO NOT TOUCH (unless explicitly asked)
+## 6. LIVE DUB — THE PIPELINE AND ITS SYNCHRONIZATION CONTRACT
 
-These files are stable and in production. Do NOT refactor, rename, or restructure:
+These files are stable and in production. Do NOT refactor, rename or restructure them casually:
 - `DubService.kt`
 - `SystemAudioCapture.kt`
 - `DubPlayback.kt`
@@ -591,7 +603,79 @@ These files are stable and in production. Do NOT refactor, rename, or restructur
 - `GeminiLiveSession.kt`
 - `GeminiLiveConfig.kt`
 
-If a bug is found in these files, report it — do not silently fix.
+If you find a bug in them, report it — do not silently fix it. The synchronization layer added in
+this cycle is the one sanctioned change to them, and it is described here.
+
+### The problem, stated correctly
+
+The source (video, podcast, music) plays in real time. Voxora captures it, sends it to Gemini and
+plays the translation back, so the dubbed audio is always **behind the source by the model's
+latency `L`**. The audible defect is not `L`; it is **drift** — when the dub cannot keep up, the gap
+grows without bound. A constant offset is what the pipeline *is*.
+
+### The model
+
+Both sides have a **content clock** in nanoseconds of audio: how much source audio was captured, and
+how much dubbed audio was written to the output. Their difference is the offset. In a healthy
+pipeline both advance at real time, so the offset is constant and equal to `L`. `DubSyncController`
+**measures** that constant as a baseline — it is never assumed, and there is deliberately no
+"3 second" constant anywhere in `dub/` or in `GeminiLiveConfig`. Drift is `offset − baseline`; when
+the dub falls behind, the offset rises above the baseline and the controller pauses the source,
+letting the dub drain its backlog until the offset returns to the baseline, then resumes.
+
+- `SyncConfig` holds only bounds (stability window, tolerance, minimum correction, maximum pause,
+  cooldown, rate budget, stall timeout). It has no latency constant.
+- The baseline is learned by waiting for the offset to **hold still**; a jittery pipeline that never
+  settles is accepted after `maxWarmUpNanos` rather than waiting forever.
+- A constant latency of 200 ms, 3 s or 4.5 s all report `SYNCED` with **zero** corrections. That is
+  the contract, and `DubSyncControllerTest` pins each case.
+
+### Source control, and the honest limit
+
+`ExternalPlayer` is the seam; `MediaSessionExternalPlayer` is the only file that knows about
+`MediaSessionManager`. Android grants `getActiveSessions()` **only** to a `NotificationListenerService`
+(or a system app), so `VoxoraNotificationListenerService` exists as an empty listener and the user
+opts in through the system settings page from the Live Dub screen. Nothing is requested silently, and
+**without the grant Live Dub still works, as audio-only** (`SyncState.AUDIO_ONLY`).
+
+**External video frames cannot be delayed or frozen.** Pausing the source through its media session
+corrects *drift*; it does not make the translation land on the right lip movement. Do not claim
+otherwise in UI copy or documentation, and do not reintroduce `DelayedScreenOverlay` — a
+VirtualDisplay plus fullscreen overlay caused recursive frame-in-frame capture and froze the UI, and
+it cannot delay another app's video either.
+
+### Safety — every path must release the source
+
+The controller is the only thing that may pause the source, and it only ever pauses a source it has
+observed to be **playing**. It must never fight the user: a pause it did not cause is detected as a
+user action, the learned offset is discarded and re-measured, and the source is never resumed by
+Voxora. Every path that could leave the source paused — control lost, a stalled dub, a Gemini
+reconnect, `stop()`, service teardown — resumes it. `DubService.stopAll()` calls `sync.stop()` before
+`playback.stop()`, so the source is released before the volume is restored.
+
+### Latency instrumentation
+
+`LatencyTimeline` records monotonic timestamps (`SystemClock.elapsedRealtimeNanos()` through
+`MonotonicClock`) for capture, send, first model audio, dub chunk, audio write, and pause/resume. It
+is synchronized (marked from three threads) and its log line is rate-limited to one per two seconds,
+forced on a state change — Live Dub runs for hours and must not flood the Logs ring buffer. It
+answers "where is the delay": capture→send, send→first audio, send→dub, dub→write. Gemini's
+`DROP_OLDEST` buffer cannot report drops through `tryEmit`, so `GeminiLiveSession.emittedAudioChunks`
+is compared with what the consumer received and the difference is reported as `DROPPED n` instead of
+being silent.
+
+### Two pipeline bugs fixed with this work
+
+1. `DubService` launched a **new coroutine per audio emission** to write to the track, so chunks
+   could be written out of order under load. There is now one ordered consumer, and
+   `WRITE_BLOCKING` is the backpressure.
+2. `DubPlayback` sized the `AudioTrack` buffer at `minBuf * 8`, floored at a full second of audio —
+   a full second of added lip-sync delay before the first dubbed word. It is now `minBuf * 2` floored
+   at ~125 ms.
+
+The source ducking rule (~28 %, never silent) is `SourceVolumeDuck`, pure and unit-tested; the
+original level is saved and restored exactly. Volume keys still control the dub through the local
+`MediaSession`/`VolumeProvider` and are untouched.
 
 ---
 
@@ -609,6 +693,27 @@ If a bug is found in these files, report it — do not silently fix.
 ```
 
 **NEVER remove existing permissions or service declarations without being asked.**
+
+Live Dub's synchronization declares one extra service — the empty notification listener that makes
+`MediaSessionManager.getActiveSessions()` legal. It must stay `exported="true"` (required with an
+intent filter on API 31+) and must stay protected by
+`android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"`, so only the system can
+bind it:
+
+```xml
+<service
+    android:name=".dub.sync.VoxoraNotificationListenerService"
+    android:exported="true"
+    android:label="@string/sync_listener_label"
+    android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+    <intent-filter>
+        <action android:name="android.service.notification.NotificationListenerService" />
+    </intent-filter>
+</service>
+```
+
+It reads no notification: the class overrides nothing. Adding notification-reading behaviour to it
+would be a product and privacy change, not a refactor.
 
 ---
 
@@ -653,6 +758,7 @@ VoxoraLog.e("ReaderVM", "Chunk rewrite failed: ${e.message}", e)
 
 - Never log a credential: no API key, ID token, OAuth access token, `Authorization` header, or any URL that carries a key in its query string. `GoogleCloudAuthorizer` and `CloudRepository` log only a classification and an exception's class name — never a token, never a message verbatim, and never a Cloud request URL. `GoogleCloudHttpDirectory` does not log at all.
 - The remaining direct `android.util.Log` calls are inside `dub/**`, which is protected — do not "tidy" them without an explicit request.
+- **Live Dub's synchronization instrumentation uses `VoxoraLog` and is rate-limited.** `LatencyTimeline` emits at most one summary line every two seconds (forced on a sync-state change), tagged `DubSync`, and `DubSyncController` logs each measurement, correction and release as it happens. Do not add a per-chunk log line: Live Dub runs for hours and would push everything else out of the 800-entry ring buffer. The summary is the "where is the delay" answer — capture→send, send→first audio, send→dub, dub→write, plus an accounted `DROPPED n`.
 
 ### The Logs viewer
 - The viewer's chrome is product UI; the **log lines are not**. Keep the exact `formatted()` output, the monospace font and the explicit LTR list region — a timestamp and a bracketed tag are technical identifiers, not prose, and mirroring them under a Persian UI would make the list unreadable.
@@ -699,9 +805,9 @@ VoxoraLog.e("ReaderVM", "Chunk rewrite failed: ${e.message}", e)
 - Technical identifiers (project ids, emails, keys, log lines) stay selectable LTR runs; put a whole
   technical region in an explicit LTR container only when the region itself is technical, as the log
   list does.
-- **Persian typography is part of i18n, not an afterthought.** Every Persian string is rendered by
-  the bundled Vazirmatn type stack (see the Compose rules); never ship a Persian screen that relies
-  on whatever font the device happens to have.
+- **Persian typography is the platform's.** Persian strings are rendered by the device's system font
+  through the stock Material 3 type scale — the app bundles no font and overrides no `fontFamily`.
+  If a Persian screen looks wrong, fix the layout, the string or the type *role*; do not add a font.
 
 ---
 
@@ -741,6 +847,10 @@ A task is NOT done until:
 7. **API key**: Owner rotates keys himself. Do not warn about leaked keys in code comments.
 8. **JVM unit tests and `org.json`**: Android unit tests run against the mockable `android.jar`, whose `org.json` methods throw "not mocked". Any `:core` test that touches `JSONObject`/`JSONArray` needs `testImplementation("org.json:json:…")`; the real implementation takes classpath precedence over the stub. Pure-JVM code (`GeminiReaderSession`, `ReaderLanguages`, `ReaderNarrationModes`, `ReaderLanguageFlags`, `ChunkQueue`, `ReaderSpool`, `PdfReadingOrder`, `ReaderDisplayText`, `ReaderGates`, `ReaderState`/`ReaderPhase`, `AppLocales`, `ReaderStatusVisual`, `ReaderPager`, `ReaderPageText`, `CloudAuthState`, `CloudSelection`, `CloudUsage`, `CloudLoadState`, `CloudResult`, `CloudProject`, `CloudApiKey`, `CloudScopes`, `GoogleCloudDirectory`/`CloudParsers`, `CloudAuthFailureClassifier`, `UsageStatusVisual`, and the whole `core/.../usage/` package) must stay free of `android.*` APIs so it stays unit-testable without Robolectric. `PdfReadingOrder` deliberately takes plain geometry (`Fragment`) rather than `TextPosition` for exactly this reason — `TextExtractor` is the only place that bridges the two. `ReaderPhase`/`ReaderState` live in their own file precisely so `ReaderGates` can be tested on a plain JVM; do not move them back into `ReaderService.kt`.
 9. **Gradle enables JVM assertions**: the `Test` task runs its JVM with `-ea`, which turns on kotlinx-coroutines stack-trace recovery. Any exception crossing a `Deferred.await()` or `withTimeout` boundary comes back as a *copy* of the original object, so `assertSame` against an awaited cause passes under a plain `java -cp` run but fails under Gradle. When validating `:core` contract tests outside Gradle, always run with `-ea` to match CI, and never rely on awaited exception identity without preserving the original object first. The Reader sink path is guarded by `GeminiReaderSessionTest.sinkFailurePreservesOriginalExceptionAndSanitizesStatus`; keep it green.
+10. **A Service's field initialisers run before `attachBaseContext`.** `applicationContext` is not available yet, so anything context-bound (`MediaSessionExternalPlayer`, `DubPlayback`) must be constructed in `onCreate` and held in a `lateinit var`. Building it as a field initialiser compiles and then crashes on a null base context. `stopAll()` guards those `lateinit`s with `::x.isInitialized` because it also runs from `onDestroy` when `onCreate` failed early.
+11. **Synchronization reads a monotonic clock only.** `SystemClock.elapsedRealtimeNanos()` via `MonotonicClock`; `System.currentTimeMillis()` is forbidden in the synchronizer, because a user or network clock change would appear as a huge phantom drift and trigger a correction for nothing. `dubguard.py` enforces this.
+12. **A constant source/dub offset is not drift — do not "correct" it.** The dub is *supposed* to sit one model-latency behind. Pausing the source for a constant offset would make Live Dub pause the user's video on every run for no reason. Only a growing offset (the dub falling behind its own measured baseline) is drift.
+13. **`AudioTrack` buffer size is lip-sync latency.** Every byte buffered in `DubPlayback` delays the first dubbed word; the previous `minBuf * 8` (a full second at 24 kHz) was itself a latency bug. Keep it at `minBuf * 2` floored at ~125 ms unless a measured underrun says otherwise.
 
 ---
 
@@ -787,6 +897,10 @@ A task is NOT done until:
   - `LogSeverityTest` (app) — the severity → role mapping behind the Logs colours: INFO → success, WARN → warning, ERROR → danger, DEBUG → neutral, every severity the product emits has a role, DEBUG is the only neutral one, an unrecognised severity is neutral and **never** success, and the lookup is case-insensitive (see §9).
   - `LogLineFormatTest` (app) — the one line shape every copy path shares: timestamp then level then `[tag]` then message, millisecond precision, every level padded to the same width so the tag starts in one column, the message appended verbatim (a log line is evidence), and empty fields still producing the shape. Pins the default `TimeZone` to UTC and restores it, so the expected string does not depend on where the suite runs (see §9).
   - `ChunkQueueTest`, `ReaderSpoolTest` — chunking and spool contracts.
+  - `DubSyncControllerTest` (app) — the adaptive synchronizer, driven by a fake clock and a fake player through a small pipeline model, with **no Android and no coroutines**. Pins: zero, small, 3 s, 4.5 s and 700 ms latencies all become a measured baseline with **zero** corrections; a wobble inside the tolerance stays synced; a drift spike pauses the source once and resumes when caught up; a correction is bounded by `maxPauseNanos`; corrections are rate-limited and spaced by the cooldown; a controllable playing source may be corrected (the video fallback); a user pause is never fought and a user resume re-engages; an uncontrollable source is audio-only and never paused; losing the session releases the source; a stalled dub withdraws the claim and never leaves the source paused; stopping while synchronized leaves the source alone, stopping while correcting resumes it; and a Gemini reconnect releases the source, re-measures and settles (see §6).
+  - `SourceVolumeDuckTest` (app) — the source ducking contract: the source is reduced but never muted, a low level keeps one audible step, there is nothing to duck into at the bottom of the range, an unusable range is left alone, restoring returns exactly the saved level, and every duckable level produces a strictly lower positive level (see §6).
+  - `LatencyTimelineTest` (app) — the instrumentation contract: first and last occurrences tracked separately, a missing stage reported as absent rather than zero, a backwards timestamp reported as absent rather than negative, the summary naming every stage and its milliseconds, accounted drops, rate-limited logging with a forced override, the context appended verbatim, `reset`, and marking through the injected monotonic clock (see §6).
+  - `SyncStatusVisualTest` (app) — the Live Dub status-tone contract: only a synced pipeline is active, measuring and catching up are in-progress rather than success, and audio-only/unavailable are **neutral, never a failure**; the external-video note appears only once synced; the media-control opt-in is offered only while live and without the grant (see §6).
 - **The background-playback surfaces add no new pure-JVM rule, deliberately.** The notification's previous/next and the bubble's stop call the same `ReaderController.jumpToSegment` / `stop` the screen already uses, and their bounds are the ones `ReaderSegmentNavigationTest` pins; the bubble preference is a plain boolean with a DataStore default. Adding a second step rule (and a second test) would be duplication, so the honest statement is that these surfaces are compile-checked by CI and device-verification items, not that they carry a new unit contract.
 - Do not weaken or delete these tests to make a change pass. If a contract genuinely changes, update the contract text in `AGENTS.md` and the test in the same commit.
 - A regression test is only worth having if it fails against the bug. The four header/footer/line-floor cases in `PdfReadingOrderTest` were verified to fail against the pre-fix implementation at `707cc3c` and pass against the fix; keep that property when editing them.
@@ -810,12 +924,19 @@ A task is NOT done until:
 - Local pre-CI validation without Gradle is allowed and encouraged: compile the changed pure-JVM/Android sources with `kotlinc` against the pinned dependency jars and run the JUnit classes directly with `-ea`. This never substitutes for CI — the branch must still go green in Actions. The `1504669` pass was validated locally this way: `kotlinc 2.0.21` plus JUnit `-ea` gave **134 tests OK** across `ReaderDisplayLanguageTest`, `ReaderDisplayRefreshTest`, `ReaderStartupGatesTest`, `LanguageCatalogTest`, `AppLocalesTest`, `ReaderPipelineOrderTest`, `ChunkQueueTest`, `PdfReadingOrderTest`, `ReaderSpoolTest`, `ReaderNarrationModesTest`, `ReaderLanguageFlagsTest` and `GeminiReaderSessionTest`. Two harness details matter and cost a round each when forgotten: `internal` declarations need `-Xfriend-paths=<main-out>` on the test compile, and `ReaderSpool`'s `VoxoraLog` dependency needs a plain-JVM stub because the real one touches `android.util.Log`.
 - Prefer pure-JVM, deterministic tests with `TemporaryFolder` for file-backed code; avoid Robolectric unless an Android API genuinely cannot be avoided.
 - **The local harness cannot compile Compose, so run an import guard before pushing.** A missing `import androidx.compose.runtime.LaunchedEffect` reached CI once and failed **both** jobs; because the dev server has no Compose artifacts, nothing local caught it. It also produced four errors for one mistake — the unresolved reference plus three cascading "suspend function should be called only from a coroutine", since without `LaunchedEffect` the lambda is not a suspend scope. Before pushing, check that no file uses a Compose or AndroidX symbol it has not imported. Read CI job logs with `GET /repos/…/actions/jobs/<job_id>/logs` (works, HTTP 200) rather than the run-level archive endpoint (403); the useful line is `e: file:///…/File.kt:97:5 Unresolved reference 'X'.`
-- **Five local checks worth running on every change, all cheap and all caught real bugs:** a `R.string.*` cross-check of every Kotlin reference against `values/` and `values-fa/` (it caught a `reader_page_chunk` key that no locale declared); an unused-import sweep of changed files; a **colour-literal guard** that fails if `Color(0x…)` or a named `Color.White`/`Color.Black`/… appears anywhere outside `ui/theme/Theme.kt` and the three `ui/theme/*Palette.kt` files (`Color.Transparent` is allowed); a **theme guard** (`themeguard.py`) that fails on a `ThemeMode` with no branch in `Theme.kt`, on a palette that assigns another palette's value, on a leftover of a deleted palette, and on a `Type.kt` that names an `R.font.*` resource which is not bundled; and a **bidi guard** (`bidi_fa.py`) that isolates every Latin run embedded in a Persian string and verifies the format specifiers are untouched. The harness cannot compile Compose, so these guards are what stop a stray hex, a dead theme or a mangled Persian string from reaching CI.
+- **Six local checks worth running on every change, all cheap and all caught real bugs:** a `R.string.*` cross-check of every Kotlin reference against `values/` and `values-fa/` (it caught a `reader_page_chunk` key that no locale declared); an unused-import sweep of changed files; a **colour-literal guard** that fails if `Color(0x…)` or a named `Color.White`/`Color.Black`/… appears anywhere outside `ui/theme/Theme.kt` and the three `ui/theme/*Palette.kt` files (`Color.Transparent` is allowed); a **theme guard** (`themeguard.py`) that fails on a `ThemeMode` with no branch in `Theme.kt`, on a palette that assigns another palette's value, on a leftover of a deleted palette, and on a bundled font being reintroduced (`res/font/` or a `FontFamily` override in the theme layer); and a **bidi guard** (`bidi_fa.py`) that isolates every Latin run embedded in a Persian string and verifies the format specifiers are untouched; and a **dub guard** (`dubguard.py`) that fails if the disabled `DelayedScreenOverlay` is constructed, if a fixed-lag constant or a `Thread.sleep` returns to `dub/`, if the pure sync core imports `android.*`, if `MediaSessionManager` is used outside its adapter, or if the synchronizer reads wall-clock time. The harness cannot compile Compose, so these guards are what stop a stray hex, a dead theme, a mangled Persian string or a reintroduced fixed delay from reaching CI.
 
 ---
 
 *Last updated: auto-generated by Claude for Voxora project — Light Test 2 replaced by "Voxora Contrast
 Light" (the light-side contrast of the dark theme), the dark explanation/help role moved to the
-owner's icy/electric blue `#7DD3FC`, Vazirmatn bundled and wired through `VoxoraTypography` app-wide,
-and the Persian strings audited and bidi-isolated for mixed Persian/Latin text. The standing rules
-for future UI work live in `AgentMD.md`.*
+owner's icy/electric blue `#7DD3FC`, the bundled Vazirmatn type stack removed so the app renders with
+the platform font through the stock Material 3 type scale, the Persian strings audited and
+bidi-isolated for mixed Persian/Latin text, and Live Dub given an adaptive source/dub synchronization
+layer that measures the pipeline's own latency (no fixed delay), corrects drift through an opt-in
+media-session layer, accounts for dropped audio, and logs monotonic stage timings — together with two
+real latency fixes: the per-emission audio coroutine replaced by one ordered consumer, and the
+one-second `AudioTrack` buffer reduced to ~125 ms. The standing rules for future UI work live in
+`AgentMD.md`; the Live Dub contract is §6 here. **No real-device testing was performed for the Live
+Dub synchronization work** — the sync behaviour, the media-session pause/resume and the measured
+latency are device-verification items.*

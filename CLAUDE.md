@@ -52,7 +52,7 @@ https://github.com/mo3iiibest77-hub/ParsLiveDub
 
 Voxora is a global Android application with two main features:
 
-### A) LIVE DUB — PROTECTED, DO NOT TOUCH
+### A) LIVE DUB — PROTECTED; THE SYNC CONTRACT IS IN AGENTS.md §6
 Captures system audio from other Android apps and produces
 translated/dubbed audio via Gemini Live WebSocket.
 
@@ -64,6 +64,20 @@ Protected files (never modify without explicit owner request):
 - app/.../dub/**
 - core/.../gemini/GeminiLiveSession.kt
 - core/.../GeminiLiveConfig.kt
+
+Synchronization (added this cycle, documented in full in `AGENTS.md` §6):
+- `dub/sync/` — the adaptive layer. `DubSyncController` **measures** the pipeline's own latency as a
+  baseline and corrects only **drift** (the dub falling behind that baseline) by pausing the source
+  through its media session. There is no fixed delay anywhere: `DEFAULT_DELAY_MS` and `DEFAULT_LAG_MS`
+  are deleted and `dubguard.py` fails if one returns, or if a `Thread.sleep` enters `dub/`.
+- The pure files (`MonotonicClock`, `SyncConfig`, `SyncState`, `ExternalPlayer`, `SourceVolumeDuck`,
+  `LatencyTimeline`, `DubSyncController`) import no `android.*`; only `MediaSessionExternalPlayer`,
+  `MediaControlAccess` and the empty `VoxoraNotificationListenerService` touch the platform.
+- Media control is **opt-in** through the system notification-access page, explained in the Live Dub
+  UI. Without it Live Dub runs as audio-only and never pauses anything.
+- External video cannot be delayed or frozen — pausing corrects drift, it does not align lip
+  movement. Do not claim otherwise, and do not revive `DelayedScreenOverlay` (disabled stub; its
+  overlay caused recursive frame-in-frame and froze the UI).
 
 ### B) VOXORA READER — CURRENT DEVELOPMENT FOCUS
 User picks a PDF/TXT → text extracted → chunked → Gemini narrates
@@ -149,7 +163,99 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
 > must not expire with any single feature. Add a rule to `AgentMD.md` only when it
 > applies to every future UI change; everything else belongs in `AGENTS.md`.
 
-### Last change (this session) — Light Test 2 replaced by a contrast theme, the dark explanation role, and Persian typography/RTL restored
+### Last change (this session) — the Persian UI restored to the platform font, every Persian string audited, and Live Dub given an adaptive synchronization layer
+
+**DONE — two parts, requested together. No Reader code was touched.**
+
+**PART ONE — the Persian UI font and the Persian text.**
+
+1. **The bundled Vazirmatn typography added in the previous cycle was removed, exactly.** The owner
+   rejected it. Restoring the pre-`bff6ca9` behaviour meant `git rm` of `ui/theme/Type.kt`, the four
+   `res/font/vazirmatn_ui_nl_*.ttf` files and `third_party/vazirmatn/OFL.txt`, and dropping the
+   `typography = VoxoraTypography,` argument from `Theme.kt` — nothing else. The parent commit
+   (`2c4b18a`) was read with `git ls-tree`/`git show` to establish that it had no `Type.kt`, no
+   `res/font/` and no `typography` argument, and that the app's only `FontFamily` is the Logs list's
+   monospace. The theme, colour, layout and identity work from the latest commit is untouched; only
+   the font is gone, and `themeguard.py` now enforces the **opposite** rule — it fails if a bundled
+   font is reintroduced.
+2. **Every Persian string in the app was audited.** A mechanical scan of all 292 `values-fa` entries
+   for Arabic-form letters, harakat/tanween, LRM/RLM, NBSP, double spaces and space-before-punctuation
+   found none, so the audit became about naturalness and consistency. **14 strings** were corrected
+   without changing meaning and without adding verbosity: `home_subtitle` (بعد → سپس), `home_tagline`
+   ("با قدرت Gemini" → "به کمک Gemini"), `latency_hint`, `notif_channel_desc`, `onboarding_page3_body`
+   (verb agreement), `error_quota` ("کلید دیگری استفاده کن" → "از کلید دیگری استفاده کن"),
+   `usage_observed_help`, `usage_project_quota_help`, `usage_google_source`, `reader_notif_body_paused`
+   (توقف → موقتاً متوقف), `reader_mode_missing` (حالت → سبک روایت), `reader_mode_faithful_desc`,
+   `settings_cloud_access`, `settings_cloud_failure_cancelled`. `bidi_fa.py` re-run is idempotent
+   (`would change 0 strings`) and `stringcheck.py` parity holds (values 304 / values-fa 303, the only
+   untranslated key still `default_web_client_id`).
+3. **Persian hardcoded in Kotlin: none.** A repo-wide scan for Persian Unicode across `app/src` and
+   `core/src` found only test fixtures and two explanatory comments in `LogsScreen.kt` — no
+   user-facing Persian outside `strings.xml`.
+4. **RTL was already correct at the layout level, so nothing was changed for it.** There are no
+   `Alignment.Left/Right`, no `paddingLeft/Right`, no XML `gravity`/`textDirection`; `LayoutDirection`
+   is forced only for the Logs list (a genuine LTR technical region, `LogsScreen.kt:255`) and read once
+   for the Reader's RTL gesture mapping (`ReaderScreen.kt:890`); `TextAlign.Center` appears only inside
+   containers that really are centred. That finding is the honest answer, not an omission.
+5. English, German, French, Spanish, Turkish and Arabic were not modified.
+
+**PART TWO — Live Dub latency and lip-sync.** The full contract is `AGENTS.md` §6. In short:
+
+- **The architecture is adaptive drift correction, not a delay.** Both sides have a *content clock* in
+  nanoseconds of audio; the offset between them is the model's own latency. `DubSyncController`
+  **measures** that offset as a baseline (it waits for the offset to hold still) and corrects only the
+  **drift** — how far the dub has fallen behind its own baseline — by pausing the source through its
+  media session and resuming once the offset returns. **There is no three-second constant anywhere:**
+  `DEFAULT_DELAY_MS` and `DEFAULT_LAG_MS` are deleted, and `dubguard.py` fails if a fixed delay or a
+  `Thread.sleep` returns to `dub/`. A constant 200 ms, 3 s, 4.5 s or 700 ms latency all report
+  `SYNCED` with **zero** corrections — that is the property the tests pin.
+- **Media control is opt-in and never silent.** `MediaSessionManager.getActiveSessions()` is granted
+  only to a `NotificationListenerService`, so `VoxoraNotificationListenerService` is an empty listener
+  declared in the manifest and the Live Dub screen explains the grant and opens the system settings
+  page. It reads no notification. Without the grant Live Dub runs as **audio-only** and nothing is
+  paused.
+- **The platform limit is documented, not hidden.** External video frames cannot be delayed or frozen;
+  pausing the source corrects drift, it does not align lip movement. `DelayedScreenOverlay` stays a
+  disabled stub (its VirtualDisplay overlay caused recursive frame-in-frame and froze the UI) and
+  `dubguard.py` fails if anything constructs it.
+- **Two real latency bugs were fixed.** (1) `DubService` launched a new coroutine per audio emission
+  to write to the track, so chunks could be written out of order; there is now one ordered consumer,
+  with `WRITE_BLOCKING` as the backpressure. (2) `DubPlayback` sized the `AudioTrack` buffer at
+  `minBuf * 8` floored at a full second of audio — a second of added lip-sync delay; it is now
+  `minBuf * 2` floored at ~125 ms.
+- **Gemini's `DROP_OLDEST` is no longer silent.** `tryEmit` cannot report a drop, so
+  `GeminiLiveSession.emittedAudioChunks` is compared with what the consumer actually received and the
+  difference is reported as `DROPPED n` in the instrumentation line.
+- **Instrumentation is monotonic and rate-limited.** `LatencyTimeline` records
+  `SystemClock.elapsedRealtimeNanos()` for capture, send, first model audio, dub chunk, audio write and
+  pause/resume, and emits one summary per two seconds (forced on a state change) through `VoxoraLog` —
+  enough to attribute the delay to capture, transport, Gemini, the output buffer or the sync
+  algorithm, without flooding the ring buffer.
+- **Safety.** Every path that could leave the source paused — control lost, a stalled dub, a Gemini
+  reconnect, `stop()`, service teardown — resumes it; a user's own pause is detected and never fought;
+  the ducked source level is saved and restored exactly (`SourceVolumeDuck`, pure and tested); the
+  volume-key `MediaSession`/`VolumeProvider` is untouched.
+
+**Locally verified (no Gradle).** `kotlinc 2.0.21` + JUnit 4.13.2 with `-ea`: **41 new sync tests
+pass** — `DubSyncControllerTest` 19, `SourceVolumeDuckTest` 6, `LatencyTimelineTest` 10,
+`SyncStatusVisualTest` 6 — and the comprehensive harness is still green (**383 tests across 33
+classes**; the Cloud suite separately **485 tests across 43 classes**). The modified
+`GeminiLiveSession` was compiled on the JVM against an `android.util.Base64` stub, since no existing
+harness covered it. All six static guards pass: `themecheck.py`, `checkimports.py`, `stringcheck.py`,
+`themeguard.py`, `bidi_fa.py` and the new `dubguard.py` — the last verified to fail when a violation
+is injected. The Compose, Play Services and Android layers are **not** compiled locally; the CI
+`Assemble debug` job is their only compile check. **No real-device testing was performed**: the
+measured latency, whether drift correction engages, and the media-session pause/resume are all
+owner-verification items.
+
+**BLOCKED:** nothing in this change is blocked on code. The external item noted below (the Google
+OAuth Web client ID for `default_web_client_id`) is unchanged and unrelated.
+
+**NEXT:** install the CI-built debug APK and check on a device: the Persian UI on the platform font,
+the Live Dub sync status line, the media-control opt-in, and — with a real YouTube or podcast source —
+the `DubSync` lines in Logs (measured latency, state, and any `DROPPED n`).
+
+### Last change (previous session) — Light Test 2 replaced by a contrast theme, the dark explanation role, and Persian typography/RTL restored
 
 **DONE — four corrections, all in one cycle, with no Live Dub or Reader-audio change.**
 
@@ -194,15 +300,13 @@ explanatory/help text; the genuinely explanatory `onSurfaceVariant` and alpha-on
 it, while ordinary secondary labels, section headers and row labels deliberately stay on
 `onSurfaceVariant`.
 
-**4. Persian typography and mixed Persian/English bidi are fixed at the root.**
+**4. Persian bidi is fixed at the root; the bundled font from this cycle was later removed.**
 
-- **Vazirmatn is bundled and wired app-wide.** `ui/theme/Type.kt` defines `VoxoraTypography` — all 15
-  Material 3 roles, family changed and nothing else — and `Theme.kt` passes it to `MaterialTheme`. The
-  family is **Vazirmatn UI, Non-Latin** (four weights, `res/font/vazirmatn_ui_nl_*.ttf`), chosen
-  because it carries the Persian glyphs and **no** Latin ones, so Persian shapes in Vazirmatn while
-  Latin (product names, URLs, model names) falls through to the platform's Latin font. Verified with
-  `fontTools`: `ب`/`ک`/`ی`/`،` present, `A`/`a`/`0` absent in every bundled file. SIL OFL licence
-  committed at `third_party/vazirmatn/OFL.txt`.
+- **The bundled Vazirmatn type stack added in this cycle was REVERTED in the next cycle.** The owner
+  rejected it: the Persian UI must render with the platform's own font, exactly as it did before
+  `bff6ca9`. `ui/theme/Type.kt`, `res/font/vazirmatn_ui_nl_*.ttf` and `third_party/vazirmatn/OFL.txt`
+  are all deleted and `Theme.kt` passes no `typography` argument. Nothing in the app bundles a font or
+  overrides a `fontFamily` any more; see the section above and `AgentMD.md` §1.
 - **Embedded Latin is isolated, not reordered.** 87 Persian strings that contain a Latin run
   (`Gemini API`, `Google AI Studio`, `Live Dub`, `Reader`, …) now wrap it in **FSI (U+2068) … PDI
   (U+2069)** — the Unicode Bidirectional Algorithm's own mechanism. Format specifiers (`%1$d`,
@@ -215,9 +319,10 @@ it, while ordinary secondary labels, section headers and row labels deliberately
   `هر فایلی را با صدای بلند بخوان`, matching both the English ("Read any document aloud") and the
   project's `document` → `فایل` rule (never `سند`).
 
-**`AgentMD.md` is new** and holds the permanent, non-expiring rules for future UI work: typography
-comes from the theme (never a call site), Persian is written not translated, RTL is fixed in the
-layout with isolates for embedded Latin, and the explanation role is semantic with a per-theme value.
+**`AgentMD.md` is new** and holds the permanent, non-expiring rules for future UI work: typography is
+the stock Material 3 scale on the platform font (never a bundled font, never a call-site override),
+Persian is written not translated, RTL is fixed in the layout with isolates for embedded Latin, and the
+explanation role is semantic with a per-theme value.
 
 **Locally verified (no Gradle).** `kotlinc 2.0.21` + JUnit 4.13.2 with `-ea` over the pure-JVM
 harness: **485 tests OK across 43 classes** (up from 478 — `LightTestPalettesTest` now has 24 tests,
@@ -227,14 +332,13 @@ role clears AA on the card *and* the page, pin the dark explanation role to `#7D
 distinct from every content and status role, and prove `ThemeMode` still has exactly three selectable
 modes with Original Dark as the default and the legacy `system`/`dark`/`light` ids still migrating.
 Static guards all OK: `themecheck.py` (no colour literal outside the theme layer), `checkimports.py`
-(no Compose symbol used without its import — extended to cover `Typography`/`FontFamily`/`Font`),
-`stringcheck.py` (values 293 / values-fa 292, parity intact, only `default_web_client_id`
-intentionally untranslated), the new `themeguard.py` (three modes all handled, no palette inheriting
-another, no deleted-Light-Test-2 leftover, every `R.font.*` bundled and `typography =` wired), and
-`bidi_fa.py` (idempotent — a re-run would change 0 strings). The Compose, Play Services and Android
-layers are **not** compiled locally — the CI `Assemble debug` job is their only compile check. **No
-real-device testing was performed**: how the three themes actually look, the Vazirmatn rendering and
-the Persian bidi on a device are all owner-verification items.
+(no Compose symbol used without its import), `stringcheck.py` (values 293 / values-fa 292, parity
+intact, only `default_web_client_id` intentionally untranslated), `themeguard.py` (three modes all
+handled, no palette inheriting another, no deleted-Light-Test-2 leftover, no bundled font
+reintroduced), and `bidi_fa.py` (idempotent — a re-run would change 0 strings). The Compose, Play
+Services and Android layers are **not** compiled locally — the CI `Assemble debug` job is their only
+compile check. **No real-device testing was performed**: how the three themes actually look and the
+Persian bidi on a device are all owner-verification items.
 
 **BLOCKED:** nothing in this change is blocked on code. The external item noted below (the Google
 OAuth Web client ID for `default_web_client_id`) is unchanged and unrelated.

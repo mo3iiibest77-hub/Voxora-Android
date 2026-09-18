@@ -14,34 +14,32 @@ Read this before touching a composable, a string, or a theme.
 **The rule.** A screen uses `MaterialTheme.typography.*` and nothing else. No `sp` value, no
 `fontFamily`, no `fontWeight` override to fake a size, and no `TextStyle(...)` built inline.
 
-**Why.** Voxora ships to devices whose system fonts differ, and Persian has no system font the
-product can rely on. Typography therefore has to come from one place, so a Persian screen and an
-English screen of the same role render at the same scale.
+**Why.** Typography has to come from one place, so that a Persian screen and an English screen of the
+same role render at the same scale and a screen can never drift from the type scale.
 
 **How it is implemented.**
 
-- `app/src/main/java/com/voxora/app/ui/theme/Type.kt` defines `VoxoraTypography`: all **15**
-  Material 3 roles, each copied from the Material default so the scale is unchanged, with
-  `fontFamily = VazirmatnUiFamily`.
-- `VazirmatnUiFamily` loads four bundled weights from `app/src/main/res/font/`
-  (`vazirmatn_ui_nl_regular/medium/semibold/bold.ttf`). The font is **Vazirmatn UI, Non-Latin**
-  (v33.003), licensed SIL OFL — the licence text is committed at `third_party/vazirmatn/OFL.txt`.
-- `Theme.kt` passes `typography = VoxoraTypography` to `MaterialTheme`, so it applies app-wide.
-- The *Non-Latin* cut is the correct cut on purpose: it carries the Persian/Arabic glyphs and **no
-  Latin ones**, so Persian shapes in Vazirmatn while Latin falls through to the platform's Latin
-  font. Do not swap in a full-cut Vazirmatn "to be safe" — that would force product names, URLs and
-  model names into a Persian face.
+- `Theme.kt` calls `MaterialTheme(colorScheme = colorScheme, content = content)` and passes **no**
+  `typography` argument. The app therefore uses the stock **Material 3 `Typography`** — the platform's
+  own type scale and the platform's own font.
+- **Voxora does not bundle a font and does not override the font family.** There is no
+  `ui/theme/Type.kt`, no `res/font/` directory and no font dependency. The device's system font
+  renders the UI, including Persian, which is what the product shipped before and what the owner
+  requires.
+- Do not add a bundled font, a `FontFamily` override, or a `res/font/` directory "to guarantee
+  Persian". This was tried and explicitly rejected: shipping a Persian-only cut forced every Latin
+  product name through font fallback and changed the app's appearance on every device.
 
 **Applying it.**
 
 - Adding a new screen: use `MaterialTheme.typography.*`. Nothing else to wire.
-- Adding a new weight: add the `.ttf` to `res/font/`, add it to `VazirmatnUiFamily`, keep the SIL
-  OFL licence file in `third_party/vazirmatn/`.
+- Need a size or weight that the scale does not have? Change the screen's role, or raise it as a
+  deliberate design decision — do not reach for a literal `sp` or a `fontFamily`.
 - **The one sanctioned exception** is the Logs list, which sets `FontFamily.Monospace` because a
   timestamp and a bracketed tag are technical identifiers, not prose. Do not add a second exception
   without recording the reason here.
-- `checkimports.py` and the `Type.kt` checks in the local `themeguard.py` are the cheap guards; the
-  CI `Assemble debug` job is the real compile check for Compose, which the dev server cannot run.
+- `checkimports.py` is the cheap guard for Compose symbols used without an import; the CI
+  `Assemble debug` job is the real compile check for Compose, which the dev server cannot run.
 
 ---
 
@@ -111,11 +109,12 @@ point of the role.
 
 | Check | Where | What it proves |
 |---|---|---|
-| `themeguard.py` | local harness | three `ThemeMode`s all handled, no palette inheriting another, no deleted-Light-Test-2 leftover, `Type.kt` + every `R.font.*` + `typography =` wired |
+| `themeguard.py` | local harness | three `ThemeMode`s all handled, no palette inheriting another, no deleted-Light-Test-2 leftover, no bundled font reintroduced |
 | `checkimports.py` | local harness | no Compose/AndroidX symbol used without its import |
 | `stringcheck.py` | local harness | every `R.string.*` exists, and `values`/`values-fa` parity holds |
 | `bidi_fa.py` | local harness | every Latin run inside Persian is isolated, format specifiers untouched |
 | `themecheck.py` | local harness | no colour literal outside `Theme.kt` and the three palette files |
+| `dubguard.py` | local harness | the disabled overlay stays unconstructed, no fixed delay or `Thread.sleep` returns to `dub/`, the pure sync core imports no `android.*`, `MediaSessionManager` stays in its adapter, and the synchronizer reads only a monotonic clock |
 | `PaletteContrast` + the palette tests | `:app:testDebugUnitTest` | every text role clears WCAG AA on the surface it sits on |
 | `Android CI` | GitHub Actions | the only real compile check for Compose, which the dev server cannot run |
 
