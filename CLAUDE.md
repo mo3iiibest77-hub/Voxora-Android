@@ -147,7 +147,7 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
 
 ### Last change (this session) — Persian localization, Reader segment swipe, Logs, Cloud authorization
 
-Ten commits on `feat/reader-segmented-spooling` this cycle:
+Eleven commits on `feat/reader-segmented-spooling` this cycle:
 
 - `7c12b7d fix(reader): navigate segments independently from chunks` (already on the branch)
 - `2d953fa fix(ui): modernize logs screen` (already on the branch)
@@ -159,6 +159,7 @@ Ten commits on `feat/reader-segmented-spooling` this cycle:
 - `316a6a4 feat(settings): connect the Google account, project and Gemini key`
 - `089a71f docs: record the cloud authorization, segment swipe and Persian localization`
 - `14e5403 fix(cloud): read the account email from userinfo, not the authorization result`
+- `9dfc204 fix(auth): map the scope list to Play Services Scope objects`
 
 **DONE — the Reader swipe moves segments, not chunks.** The branch already carried this in
 `7c12b7d`, and it was verified rather than assumed: `ReaderPager.swipeStep` is the whole swipe rule
@@ -237,16 +238,21 @@ back to English for the new Cloud strings exactly as they do for the rest of the
 translation is the complete one, and no machine translation was produced for the others.
 
 **CI actually ran, and it earned its keep.** Pushing the branch triggered `Android CI`, and it caught
-two genuine compile errors that no local check could have found, because the dev server cannot compile
-Compose or the Play Services API: `AuthorizationResult` has no `account` field (the authorizer read
-`result.account?.name`, which does not exist — the only accessor is the deprecated
-`toGoogleSignInAccount()`), and `LogsScreen` used `LocalLayoutDirection` without importing it (the
-import guard had missed it because the symbol was followed by `,` rather than `;`). Both are fixed in
-`14e5403`, which also replaced the account lookup with the OpenID Connect userinfo call. **The result
-of the CI run for `14e5403` itself has not been read back** — `gh` is not authenticated and no GitHub
-token is present in this environment — so the current head must be confirmed on the repository rather
-than assumed green. The local pure-JVM suite above is the evidence that the test sources are sound;
-it does not compile the Compose or Play Services layers, which is exactly what CI is for.
+three genuine compile errors that no local check could have found, because the dev server cannot
+compile Compose or the Play Services API:
+
+1. `AuthorizationResult` has no `account` field — the authorizer read `result.account?.name`, which
+   does not exist; the only accessor is the deprecated `toGoogleSignInAccount()`.
+2. `LogsScreen` used `LocalLayoutDirection` without importing it (the import guard had missed it
+   because the symbol was followed by `,` rather than `;`).
+3. `AuthorizationRequest.setRequestedScopes` takes `List<Scope>`, not `List<String>`, so passing
+   `CloudScopes.ALL` directly could not compile.
+
+All three are fixed (`14e5403`, `9dfc204`), and the run for the resulting head **`9dfc204` passed
+both jobs — run #90 and #91, success**. The earlier failures were #86–#89 on `089a71f`/`14e5403`, so
+the failure history is real and the green result is for the current head, not for an older commit.
+The local pure-JVM suite above is still the only check that can run on this server; it does not
+compile the Compose or Play Services layers, which is exactly what CI is for.
 
 **Real-device verification was NOT performed.** Nothing in this cycle was tested on a physical
 device, and no device behaviour may be claimed.
@@ -270,7 +276,8 @@ confirm the previous account's project and key disappear immediately.
 ### Actual repository state (inspected, not assumed):
 - `main`: `1f0a719 fix(reader): fix suspend output language persistence`.
 - `feat/reader-segmented-spooling` (the implementation branch) HEAD is
-  `14e5403 fix(cloud): read the account email from userinfo, not the authorization result`, on top of
+  `9dfc204 fix(auth): map the scope list to Play Services Scope objects`, on top of
+  `14e5403 fix(cloud): read the account email from userinfo, not the authorization result`,
   `089a71f docs: record the cloud authorization, segment swipe and Persian localization`,
   `316a6a4 feat(settings): connect the Google account, project and Gemini key`,
   `a73a479 feat(auth): authorize Google Cloud access with an OAuth access token`,
@@ -290,10 +297,12 @@ confirm the previous account's project and key disappear immediately.
   `a74db6c fix(reader): define fluent and faithful narration semantics` — plus the
   reading-order fix `6d826e0 fix(reader): de-interleave pdf columns when a page
   carries a running header` and the documentation commits. **Pushed to `origin`
-  at `14e5403`, and not merged.** CI was green at `7f47805` (run `35294468431`, both
-  jobs) and at `707cc3c` (run #66); the run that covered the cloud commits caught the
-  two compile errors listed above, and the run for `14e5403` has **not been read
-  back**, so treat the current head as unconfirmed until checked on the repository.
+  at `9dfc204`, and not merged.** CI is green for the current head: `Android CI`
+  runs #90 and #91 both succeeded at `9dfc204` (debug APK + unit tests). The runs
+  before it failed on the three compile errors listed above (#86–#89 at
+  `089a71f`/`14e5403`), so the green result belongs to this head and not to an
+  earlier one. Older green points were `7f47805` (run `35294468431`, both jobs) and
+  `707cc3c` (run #66).
 - `feat/ci-feature-branch` = `76f0c96` + `dcbf852 ci: run Android CI on feature
   branch`, with **PR #2 open to `main`** (still open; deliberately NOT merged).
 - **PR #3 "Feat/reader segmented spooling"** (`feat/reader-segmented-spooling` →
