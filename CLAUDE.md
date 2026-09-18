@@ -215,6 +215,15 @@ values-fa 284, parity intact, only `default_web_client_id` intentionally untrans
 Play Services and Android service layers are **not** compiled locally — CI is their only compile
 check.
 
+**GitHub Actions (Android CI) — passed at `2595077`.** Two runs, both `success`, each with a
+`Unit tests` job and an `Assemble debug APK` job that completed successfully:
+[run 35361450988](https://github.com/mo3iiibest77-hub/Voxora-Android/actions/runs/35361450988)
+(`push`) and
+[run 35361454470](https://github.com/mo3iiibest77-hub/Voxora-Android/actions/runs/35361454470)
+(`pull_request`). The `Assemble debug APK` job is the only compile check for the Compose, Play
+Services and Android service layers — the local harness never compiles them. This is **build
+validation, not device verification**.
+
 **Real-device verification was NOT performed.** The light theme's contrast and hierarchy, the
 theme-switch control, the Reader's style/language switching, the between-unit look-ahead timing, the
 bubble explanation card and the usage ring are all device-verification items. Nothing in this cycle
