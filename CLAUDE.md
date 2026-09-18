@@ -93,7 +93,10 @@ Key policy:
 - Volume follows hardware media keys (USAGE_MEDIA)
 - Narration modes are a tested contract: Faithful preserves wording, Fluent
   rewrites for clarity — neither may summarize or invent. See AGENTS.md §5.
-- Source text and AI narration are separate UI surfaces and are never merged.
+- The reading text is rendered in the selected narration language (derived from the
+  Gemini transcript, keyed by language) and is a separate UI surface from the live
+  narration transcript; they are never merged. The canonical extracted document is
+  never rewritten. See the display-language change below.
 
 ---
 
@@ -144,16 +147,19 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
 
 ### Actual repository state (inspected, not assumed):
 - `main`: `1f0a719 fix(reader): fix suspend output language persistence`.
-- `feat/reader-segmented-spooling` (the implementation branch) carries the Reader
-  quality pass — `925ee1d feat(reader): redesign the reader screen`,
+- `feat/reader-segmented-spooling` (the implementation branch) HEAD is
+  `7f47805 feat(reader): synchronize display language with narration language`, on
+  top of `a9b9336 fix(settings): align settings and overlay UI with reader design`.
+  It carries the Reader quality pass — `925ee1d feat(reader): redesign the reader screen`,
   `72527e7 feat(reader): expose the loaded document name`,
   `f644d2f feat(reader): map language catalog to deterministic flags`,
   `b0d556d fix(reader): preserve pdf reading order`,
   `a74db6c fix(reader): define fluent and faithful narration semantics` — plus the
   reading-order fix `6d826e0 fix(reader): de-interleave pdf columns when a page
-  carries a running header` and the documentation commits. **15 commits ahead of
+  carries a running header` and the documentation commits. **17 commits ahead of
   `main` (`1f0a719`)**, pushed to `origin`, and **not merged**. CI is green at
-  `707cc3c` (run #66); the reading-order fix lands on top of that and is
+  `7f47805` (run `35294468431`, both jobs) and at `707cc3c` (run #66); the
+  reading-order fix and the two commits above land on top of that and are
   CI-verified separately.
 - `feat/ci-feature-branch` = `76f0c96` + `dcbf852 ci: run Android CI on feature
   branch`, with **PR #2 open to `main`** (still open; deliberately NOT merged).
@@ -169,7 +175,113 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
   `GeminiReaderSession`, language catalog, document persistence, and a
   foreground `mediaPlayback` service. Live Dub is untouched.
 
-### Last change (this session) — "chunk 1 is fine, every later chunk is scrambled"
+### Last change (this session) — Settings/overlay visual pass + display-language sync
+
+Two commits, both pushed to `feat/reader-segmented-spooling`:
+
+- `a9b9336 fix(settings): align settings and overlay UI with reader design`
+- `7f47805 feat(reader): synchronize display language with narration language`
+
+**A. Settings now belongs to the same product as the Reader.**
+`SettingsScreen` was a flat `verticalScroll` of ungrouped fields with hardcoded
+hex colours and raw `sp` sizes. It is rebuilt with the Reader visual system: one
+keyed `LazyColumn`, a matching back+title top bar, grouped section headers
+(Appearance / Gemini / Live Dub / Account / Overlay / Diagnostics) and rounded,
+outlined `surfaceContainerHigh` cards with 44 dp primary-tinted icon badges.
+Every control it had before is still present — app language, Gemini API key,
+Open AI Studio, dubbing language, Save, account sign-in/out, overlay permission
+and logs. The screen is split into a stateful `SettingsScreen` wrapper and a
+stateless `SettingsContent` with two `@Preview(uiMode = UI_MODE_NIGHT_YES)`
+configurations. The literal green used for "Saved" is gone in favour of the
+`primary` token; no hardcoded colour or `sp` size remains in the file.
+
+**B. The overlay UI.** The only overlay UI in the app is the floating Live
+bubble, `app/src/main/java/com/voxora/app/dub/FloatingBubbleService.kt`. It is a
+plain Android `View` hierarchy, so it cannot use `MaterialTheme`; it now mirrors
+the same brand palette instead (gold `#D4AF37`, live green `#3DDC84`, error
+`#E85D5D`, `surfaceContainerHigh` fill `#1C1C1F`), with a thinner outline and a
+gold→green waveform gradient matching the Live Dub waveform. **Behaviour is
+untouched** — drag, tap-to-toggle-Stop, tap-Stop-to-stop, double-tap-to-open,
+the 50 ms amplitude poll and the window params are byte-identical. The owner was
+asked before this file was edited, because the standing `dub/**` prohibition
+covers it; the change is visual-only and confined to paint/colour/geometry
+constants.
+
+**C. Reader reading text now follows the selected narration language.**
+The reported defect: narration was in the selected language but the reading text
+stayed in the document's own language, so a Persian run over an English PDF read
+Persian aloud while the on-screen text stayed English.
+
+The only translation mechanism in the product is the Reader Gemini path, and
+`GeminiReaderSession.narrate` already returns each unit's transcript in the
+selected language — so **no new backend, no external translation API, no device
+TTS, no new key destination and no new session type were added**. The fix is a
+display layer above extraction:
+
+- New `app/src/main/java/com/voxora/app/reader/ReaderDisplayText.kt` (pure JVM,
+  no `android.*`) holds each unit's selected-language rendering, **keyed by
+  language as well as chunk and segment**, so a language change can never
+  surface text produced for another language and two languages can never share
+  an entry. Blank transcripts are rejected rather than stored.
+- `ReaderController` records each unit's transcript under the language the run's
+  instruction was built with (so the instruction and the reading text can never
+  disagree), publishes `ReaderState.segments` through the cache, clears the cache
+  when a new document replaces the queue, and gains `setOutputLanguage`, which
+  republishes immediately.
+- `ReaderViewModel` calls `setOutputLanguage` on init (before
+  `restoreLastDocument`) and from `setOutputLang`.
+- The canonical extracted document in `ChunkQueue` is **never mutated**;
+  `ReaderState.text` still carries it verbatim. A unit not narrated in the
+  selected language yet falls back to the extracted source, so the published
+  list always keeps the canonical chunk's length, order and boundaries.
+- UI: the section header is now `Reading text · <language>` and the hint states
+  the fallback honestly. The reading-text card and the live narration transcript
+  remain separate surfaces.
+- **Unchanged:** audio semantics, the Faithful/Fluent contracts, the narration
+  instruction, and `PdfReadingOrder`. Nothing in the protected audio/session
+  pipeline was touched.
+
+**Limitation, stated honestly (not a bug).** Display text appears as Gemini
+narrates, because the Reader Gemini path is the only translation mechanism. A
+chunk that has not been narrated in the selected language still shows the
+document's original text for those units. The UI says so; do not claim the whole
+document is translated up front.
+
+**Tests added.** `app/src/test/java/com/voxora/app/reader/ReaderDisplayLanguageTest.kt`
+— 15 tests covering language/chunk/segment scoping, no cross-language reuse, no
+stale text after a language change, blank rejection, trimming,
+replace-not-duplicate, clear, and the pipeline contract above the real
+`ChunkQueue` (length/order/boundary preservation, every chunk obeying the same
+contract, no cross-language mixing, no inheritance across documents, unchanged
+canonical source). **Verified to reproduce the defect:** mutating the cache key
+to ignore the language makes 4 of the 15 fail.
+
+**Validation actually performed (no Gradle was run).** Compiled the changed
+pure-JVM Reader/core sources with `kotlinc 2.0.21` against the pinned dependency
+jars and ran the JUnit classes directly with `-ea` (matching Gradle's test JVM):
+**102 tests, OK** across `ReaderDisplayLanguageTest` (new), `ReaderPipelineOrderTest`,
+`ChunkQueueTest`, `PdfReadingOrderTest`, `ReaderSpoolTest`,
+`ReaderNarrationModesTest`, `ReaderLanguageFlagsTest` and
+`GeminiReaderSessionTest`. `SettingsScreen.kt`, `ReaderScreen.kt`,
+`FloatingBubbleService.kt` and the other Android-dependent files cannot be
+compiled on the dev server, so the debug-APK job is their real check.
+
+**CI status: GREEN — VERIFIED.** Pushing `7f47805` triggered `Android CI` run
+**`35294468431`** (event `push`, branch `feat/reader-segmented-spooling`, head
+`7f478057b412c0ec3c7e65b3ff99f25565b09a09`, created 2026-09-18T01:13:51Z,
+https://github.com/mo3iiibest77-hub/Voxora-Android/actions/runs/35294468431).
+Both jobs passed: **`Unit tests` = success**, including the `Run unit tests` step
+(`gradle :core:testDebugUnitTest :app:testDebugUnitTest`), and **`Assemble debug
+APK` = success**, including `Assemble debug` and `Upload debug APK`.
+`android-ci.yml` has no `continue-on-error`, so these are genuine passes. The
+APK job is the real compile check for the Compose changes.
+
+**Still requires real-device verification — NOT claimed fixed on-device.**
+Confirm on the owner's device: the new Settings layout and every control in it,
+the restyled bubble over another app, and that selecting Persian over an English
+PDF shows the reading text in Persian as narration proceeds.
+
+### Previous change — "chunk 1 is fine, every later chunk is scrambled"
 
 **Reported symptom.** On a large PDF (~210 chunks, ~9 segments each) chunk 1 was
 narrated correctly in Fluent, but from chunk 2 onward the **source text shown in
@@ -388,25 +500,35 @@ raw logs need admin rights, but a green `Run unit tests` step cannot hide a fail
   narration survives leaving the Reader destination.
 
 ### Next milestone (roadmap order):
-- **CI is green** (run #66, `35287232792`, at `707cc3c`): `Unit tests` and
-  `Assemble debug APK` both succeeded. The reading-order fix (`6d826e0`) lands on
-  top of that commit and is CI-verified separately. The remaining step is
-  owner-side real-device confirmation: the Home chooser, the back loop, Reader
-  narration surviving navigation, the redesigned Reader screen on a real device,
-  and — most importantly — whether the owner's large PDF now shows chunk 2 and
-  later in document order and narrates them correctly. **Nothing here is claimed
-  fixed on-device.**
+- **CI is green** at the current HEAD `7f47805` (run `35294468431`): `Unit tests`
+  and `Assemble debug APK` both succeeded, so the Settings/overlay redesign and
+  the display-language sync are compile-verified. The remaining step is owner-side
+  real-device confirmation: the Home chooser, the back loop, Reader narration
+  surviving navigation, the redesigned Reader screen, the new Settings layout,
+  the restyled bubble, whether the owner's large PDF now shows chunk 2 and later
+  in document order, and whether the reading text follows the selected narration
+  language as narration proceeds. **Nothing here is claimed fixed on-device.**
 - Roadmap/order mismatch persists: the repo is ahead on Reader (5–8) and behind on
   Home (1), Product Navigation (2) and the Design System (3). `Theme.kt` still uses
   gold `#D4AF37` and near-black `#0A0A0B`, not the `#FFD700` / `#0A0A0F` in
-  `AGENTS.md` §3 — the Reader redesign deliberately reused the existing brand
-  colours rather than silently changing the app palette.
+  `AGENTS.md` §3 — the Reader redesign, the Settings rebuild and the bubble
+  restyle all deliberately reused the existing brand colours rather than silently
+  changing the app palette. `AGENTS.md` §5A now records Reader as the visual
+  reference and the Settings/overlay rules that follow from it.
+- Google Sign-In was explicitly **out of scope** for this cycle. The existing
+  Settings sign-in control was preserved as-is, not reworked.
 
 ### Pending items (do NOT start before the above):
 1. PDF/chunk caching beyond the last-document URI
-2. ~~Reader UI redesign to match the Live Dub start screen style~~ — **done in this
-   pass**; it needs device confirmation, not more design work
+2. ~~Reader UI redesign to match the Live Dub start screen style~~ — **done**;
+   Settings and the overlay bubble were brought to the same visual language in
+   `a9b9336`; all of it needs device confirmation, not more design work
 3. PDF viewer alongside audio
+4. Pre-translating a whole document for the reading text — deliberately **not**
+   done: the Reader Gemini path only produces selected-language text as it
+   narrates, and adding an up-front translation pass would change cost and
+   latency and risk the audio semantics. Revisit only with an explicit owner
+   decision.
 
 "Reader/Dub entry chooser at app launch" and "Navigate back while audio plays" are
 implemented in code but still need real-device confirmation. DO NOT start the

@@ -61,6 +61,7 @@ Voxora-Android/
 │       │   ├── ReaderService.kt      ← Android mediaPlayback foreground service
 │       │   ├── ReaderController.kt   ← Hilt singleton; document and narration state
 │       │   ├── ReaderPlayback.kt     ← Local PCM playback and audio focus
+│       │   ├── ReaderDisplayText.kt  ← Selected-language reading text, keyed by language
 │       │   ├── ChunkQueue.kt
 │       │   └── TextExtractor.kt
 │       ├── ui/
@@ -197,8 +198,8 @@ IDLE → EXTRACTING → READY → CONNECTING → [REWRITING → SPEAKING → NEX
 
 - `TextExtractor` reads selectable-text PDF or UTF-8 TXT using the system document picker and returns `ExtractedDocument(name, chunks)`, where `name` is the provider display name. Scanned PDFs require OCR outside the app.
 - `ChunkQueue` owns extracted strings and the current index; its current splitter uses a 500-word target. Paragraph/sentence-aware splitting is a future improvement, not an existing guarantee.
-- `ReaderState` exposes `phase`, `chunk`, `total`, `segment`, `segmentTotal`, `text`, `segments`, `documentName`, and `error`; `ReaderPhase` includes connection, playback, pause, stop, completion, and failure states. `text` is the current chunk and `segments` its narration units.
-- `narrationText: StateFlow<String>` exposes the current narration preview separately. **Source text and AI narration are distinct surfaces and are never merged** — the UI shows the extracted source and Gemini's transcript in separate cards.
+- `ReaderState` exposes `phase`, `chunk`, `total`, `segment`, `segmentTotal`, `text`, `segments`, `documentName`, and `error`; `ReaderPhase` includes connection, playback, pause, stop, completion, and failure states. `text` is the canonical extracted chunk exactly as `ChunkQueue` holds it; `segments` is that chunk's reading text in the selected narration language (see "Display language" below).
+- `narrationText: StateFlow<String>` exposes the current narration preview separately. **The reading text and AI narration are distinct surfaces and are never merged** — the reading text is the chunk rendered in the selected language, the narration is the live transcript of the unit being spoken, and they are shown in separate cards.
 
 ### PDF reading order — fix, guarantees, and limits
 - The bug: text from some PDFs appeared visually scrambled. The responsible layer is `TextExtractor`, not the UI. PDFBox collects glyphs in **content-stream order** and only sorts them when `sortByPosition` is enabled, and the default is `false`.
@@ -236,6 +237,20 @@ The two modes are a **product contract**, not prompt decoration. They are define
 
 Both modes must speak in the document's language and preserve every fact. **Faithful is not a weaker Fluent and Fluent is not a license to summarize** — the difference is how much of the original wording survives, not how much of the content survives. Mode selection is disabled while narration is connecting or active (`CONNECTING` counts as active).
 
+### Display language — the reading text follows the selection
+The reading text shown for the current chunk must be in the selected narration language, not in the document's own language. The canonical extracted document is never destroyed or rewritten to achieve that.
+
+- `app/src/main/java/com/voxora/app/reader/ReaderDisplayText.kt` is the layer that holds the selected-language rendering of individual narration units. It is pure JVM (no `android.*`) so the language contract stays unit-testable.
+- **The Reader Gemini path is the only translation mechanism.** The Reader does not call a second backend, an external translation API, or device text-to-speech, and it never sends the API key anywhere new. `GeminiReaderSession.narrate` already returns each unit's transcript in the selected language, so no new session type or request shape is required.
+- **Every entry is keyed by language as well as chunk and segment.** A language change can therefore never surface a rendering produced for a different language, and two languages can never share an entry. This is the property that stops stale text from being shown after a language change.
+- A unit that has not been narrated in the selected language yet has no rendering, and `readingText` falls back to the extracted source for that unit. The published list therefore always keeps the canonical chunk's length, order and boundaries. This is an honest limitation, not a bug: display text appears as Gemini narrates, so an unplayed chunk still shows the document's original text. Do not claim in UI copy that the whole document is translated up front.
+- Blank transcripts are rejected rather than stored, so an empty rendering can never overwrite a usable one or hide the extracted source behind an empty string.
+- `ReaderController` records each unit's transcript under **the language the run's instruction was built with** (the same value passed to `ReaderNarrationModes.instruction`), so the instruction and the reading text can never disagree within a run. It clears the cache when a new document replaces the queue, because chunk indices then refer to different content.
+- `ReaderController.setOutputLanguage(language)` updates the display language and republishes immediately. `ReaderViewModel` calls it on init (before `restoreLastDocument`) and from `setOutputLang`, so the controller is always in step with the persisted selection. Never let the UI keep its own copy of the display language.
+- Changing the language must not leave narration from the previous language on screen: `publish` clears `narrationText` for every phase other than `SPEAKING`, and language selection is disabled while narration is active (`canConfigure()` in `ReaderViewModel`).
+- The instruction prompt is a pure function of `(mode, language)`. Never make the visible-text requirement change the audio semantics, the Faithful/Fluent contracts, or `PdfReadingOrder`.
+- Pinned by `app/src/test/java/com/voxora/app/reader/ReaderDisplayLanguageTest.kt`: language/chunk/segment scoping, that a language never sees another language's rendering, that a change does not surface the previous language's text, blank rejection, trimming, replace-not-duplicate, clear, and the pipeline contract above the real `ChunkQueue` — length/order/boundary preservation, every chunk obeying the same contract, no cross-language mixing, no inheritance across documents, and that the canonical source is unchanged. Four of these tests fail when the cache key is mutated to ignore the language, so they reproduce the defect rather than restating it.
+
 ### Ownership and background lifecycle
 - `ReaderController` is an injectable Hilt `@Singleton` owning document, queue, narration state, Gemini session, and local playback. It exposes `state`, `narrationText`, synchronous `load(Uri)`, `pause()`, `stop()`, and suspending `play(mode: String)`.
 - `play` must suspend until narration completes, cancels, or fails. It must not launch detached narration and return early. Commands must be safe across ViewModel and service IO callers; old cleanup must not stop a newer generation.
@@ -256,15 +271,15 @@ Both modes must speak in the document's language and preserve every fact. **Fait
 4. **narration language** — a tappable row showing flag + selected language, opening a searchable `ModalBottomSheet`
 5. **playback** — status dot + phase label, chunk/segment progress, progress bar, prominent Play/Pause, Stop/Prev/Next
 6. **error card** — only when `state.error` or a settings error is present
-7. **source segments** — section header plus one card per narration unit, with the audibly playing segment highlighted and tappable to start there
-8. **narration preview** — Gemini's transcript, visually separate from the source
+7. **reading text** — section header naming the selected language, plus one card per narration unit of the current chunk, with the audibly playing unit highlighted and tappable to start there. The text is the selected-language rendering (see "Display language"); a unit not yet narrated in that language shows the extracted source, and the hint says so.
+8. **narration preview** — Gemini's live transcript, visually separate from the reading text
 9. privacy note
 
 - Keep mode selection, PDF/TXT picker, progress/status, Play/Pause and Stop, error text, and the narration preview.
 - Treat `CONNECTING` as active playback so Pause remains available and mode changes are disabled while connecting.
 - Hoist previewable content (`ReaderContent` is stateless), use lifecycle-aware state collection and theme tokens, and provide a `Modifier` parameter. `ReaderScreen` is the only stateful wrapper.
 - Explain background playback in both English and Persian; do not claim that leaving Reader pauses playback.
-- The source card and the narration card are deliberately different surfaces. Never render Gemini's text where the source belongs, and never label the source as narration.
+- The reading-text card and the narration card are deliberately different surfaces. Never render Gemini's live transcript where the reading text belongs, and never label the reading text as narration. The section header must name the selected language.
 - Use `MaterialTheme.colorScheme` tokens only. `Theme.kt` must keep the container/outline roles (`primaryContainer`, `surfaceContainer*`, `outlineVariant`, `errorContainer`, …); without them Material 3 tints the grouped surfaces purple.
 
 ### Language flags — policy
@@ -292,7 +307,25 @@ App launch → Voxora Home → Live Dub | Voxora Reader   (Settings reachable fr
 - Navigation lives in `VoxoraNav` as a private `VoxoraScreen` enum (`ONBOARDING`, `HOME`, `DUB`, `READER`, `SETTINGS`, `LOGS`) held in local Compose state. Do not add Navigation Compose or any second navigation framework for the product shell.
 - Back behavior: Home is the root; system back from `DUB` / `READER` / `SETTINGS` returns to Home, and from `LOGS` returns to Settings. `VoxoraNav` registers a nav-level `BackHandler`; `ReaderScreen` registers its own later in composition and therefore wins for the Reader destination.
 - Reader playback is owned by `ReaderController` / `ReaderService`, never by navigation state. Leaving the Reader destination — back press, Home, or any other destination change — must not pause or stop narration. `ReaderViewModel` deliberately has no `onCleared` stop.
-- Settings is preserved unchanged and stays reachable from Home and from `DubScreen`.
+- Settings is reachable from Home and from `DubScreen`. Every control it had before is still present: app language, Gemini API key, Open AI Studio, dubbing language, save, account sign-in/out, overlay permission and logs.
+
+### Visual system — Reader is the reference
+`ReaderScreen` is the product's visual reference. Any screen that presents grouped content must reuse its design language rather than inventing a second one:
+
+- one keyed `LazyColumn`, `contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp)`, `verticalArrangement = spacedBy(18.dp)`, background + `safeDrawingPadding()`
+- a top bar that is a back `IconButton` plus a `titleLarge` `SemiBold` title
+- a section header (`titleMedium` `SemiBold`) above each group
+- rounded, outlined cards — `RoundedCornerShape(20.dp)`, `surfaceContainerHigh`, `BorderStroke(1.dp, outlineVariant)`, 18 dp inner padding
+- a 44 dp circular icon badge tinted `primary` at 15% alpha for card headers
+- `MaterialTheme.colorScheme` and `MaterialTheme.typography` only — never a hardcoded hex or `sp` size inside a composable
+- a stateless content composable with a `Modifier` parameter, plus `@Preview(showBackground = true, uiMode = UI_MODE_NIGHT_YES)`; the screen composable is the only stateful wrapper
+
+`SettingsScreen` follows this (stateful `SettingsScreen` → stateless `SettingsContent`, two previews). Do not let it drift back into a flat, ungrouped scroll.
+
+### Overlay UI — the Live bubble
+`app/src/main/java/com/voxora/app/dub/FloatingBubbleService.kt` is the only system overlay UI in the app. It is a plain Android `View` hierarchy, not Compose, so it cannot use `MaterialTheme`; it must instead mirror the same brand palette as `ui/theme/Theme.kt` (gold `#D4AF37`, live green `#3DDC84`, error `#E85D5D`, `surfaceContainerHigh` fill `#1C1C1F`, a thin outline, and a gold→green waveform gradient matching the Live Dub waveform).
+
+**Visual-only changes here.** The bubble's behaviour — drag, tap-to-toggle-Stop, tap-Stop-to-stop, double-tap-to-open, the 50 ms amplitude poll, and the window params — is production behaviour and must stay byte-identical. Never change the audio/session pipeline to restyle the bubble.
 
 ---
 
@@ -403,7 +436,7 @@ A task is NOT done until:
 5. **applicationId stability**: Package name must never change — breaks existing installs.
 6. **Iran monetization**: No Stripe, no Google Pay integration yet. Deferred.
 7. **API key**: Owner rotates keys himself. Do not warn about leaked keys in code comments.
-8. **JVM unit tests and `org.json`**: Android unit tests run against the mockable `android.jar`, whose `org.json` methods throw "not mocked". Any `:core` test that touches `JSONObject`/`JSONArray` needs `testImplementation("org.json:json:…")`; the real implementation takes classpath precedence over the stub. Pure-JVM code (`GeminiReaderSession`, `ReaderLanguages`, `ReaderNarrationModes`, `ReaderLanguageFlags`, `ChunkQueue`, `ReaderSpool`, `PdfReadingOrder`) must stay free of `android.*` APIs so it stays unit-testable without Robolectric. `PdfReadingOrder` deliberately takes plain geometry (`Fragment`) rather than `TextPosition` for exactly this reason — `TextExtractor` is the only place that bridges the two.
+8. **JVM unit tests and `org.json`**: Android unit tests run against the mockable `android.jar`, whose `org.json` methods throw "not mocked". Any `:core` test that touches `JSONObject`/`JSONArray` needs `testImplementation("org.json:json:…")`; the real implementation takes classpath precedence over the stub. Pure-JVM code (`GeminiReaderSession`, `ReaderLanguages`, `ReaderNarrationModes`, `ReaderLanguageFlags`, `ChunkQueue`, `ReaderSpool`, `PdfReadingOrder`, `ReaderDisplayText`) must stay free of `android.*` APIs so it stays unit-testable without Robolectric. `PdfReadingOrder` deliberately takes plain geometry (`Fragment`) rather than `TextPosition` for exactly this reason — `TextExtractor` is the only place that bridges the two.
 9. **Gradle enables JVM assertions**: the `Test` task runs its JVM with `-ea`, which turns on kotlinx-coroutines stack-trace recovery. Any exception crossing a `Deferred.await()` or `withTimeout` boundary comes back as a *copy* of the original object, so `assertSame` against an awaited cause passes under a plain `java -cp` run but fails under Gradle. When validating `:core` contract tests outside Gradle, always run with `-ea` to match CI, and never rely on awaited exception identity without preserving the original object first. The Reader sink path is guarded by `GeminiReaderSessionTest.sinkFailurePreservesOriginalExceptionAndSanitizesStatus`; keep it green.
 
 ---
@@ -417,6 +450,7 @@ A task is NOT done until:
   - `ReaderLanguageFlagsTest` — representative flags, `pt-BR`/`pt-PT` and `zh-Hans`/`zh-Hant` distinctness, the neutral set, regional-indicator validation, and that every catalog language is mapped deliberately.
   - `PdfReadingOrderTest` — reading-order repair, multi-column de-interleaving, and the running-header/footer regression that erased the page gutter (see §5).
   - `ReaderPipelineOrderTest` — the post-extraction ordering contract on the real `ChunkQueue`: chunk and segment reconstruction, cross-chunk bleed, cache isolation, chunk transition, and that the Faithful/Fluent instruction is identical for every chunk and segment (see §5).
+  - `ReaderDisplayLanguageTest` — the display-language contract on `ReaderDisplayText` and above the real `ChunkQueue`: language/chunk/segment scoping, no cross-language reuse, no stale text after a language change, blank rejection, trimming, replace-not-duplicate, clear, length/order/boundary preservation, every chunk obeying the same contract, no inheritance across documents, and an unchanged canonical source (see §5).
   - `ChunkQueueTest`, `ReaderSpoolTest` — chunking and spool contracts.
 - Do not weaken or delete these tests to make a change pass. If a contract genuinely changes, update the contract text in `AGENTS.md` and the test in the same commit.
 - A regression test is only worth having if it fails against the bug. The four header/footer/line-floor cases in `PdfReadingOrderTest` were verified to fail against the pre-fix implementation at `707cc3c` and pass against the fix; keep that property when editing them.
@@ -426,6 +460,7 @@ A task is NOT done until:
 - Gradle runs its test JVM with `-ea`. Reproduce that flag when running tests by hand outside Gradle (see §13.9), otherwise stack-trace-recovery differences will hide real failures.
 - The sink-failure exception contract is CI-verified: `GeminiReaderSessionTest.sinkFailurePreservesOriginalExceptionAndSanitizesStatus` passed on `feat/reader-segmented-spooling` at `4e4e17a` (Android CI run #63, `unit-tests` job success, 2026-09-17). The workflow has no `continue-on-error`, so a green `unit-tests` job is a genuine pass.
 - The Reader quality pass is CI-verified at `35120bf` (Android CI run #65, run id `35287036680`, 2026-09-17): `Unit tests` success (including the `Run unit tests` step) and `Assemble debug APK` success. The APK job is the only real compile check for the redesigned Compose UI, since the dev server has no Compose artifacts and must never run Gradle.
+- The Settings/overlay redesign (`a9b9336`) and the display-language sync (`7f47805`) are CI-verified at `7f478057b412c0ec3c7e65b3ff99f25565b09a09` (Android CI run `35294468431`, event `push`, branch `feat/reader-segmented-spooling`, created 2026-09-18T01:13:51Z): `Unit tests` success (including `Run unit tests`) and `Assemble debug APK` success (including `Assemble debug` and `Upload debug APK`). That APK job is the real compile check for `SettingsScreen.kt`, `ReaderScreen.kt` and `FloatingBubbleService.kt`, which the dev server cannot compile. The same pass was validated locally without Gradle: `kotlinc 2.0.21` against the pinned jars plus JUnit run directly with `-ea` gave **102 tests OK** across `ReaderDisplayLanguageTest`, `ReaderPipelineOrderTest`, `ChunkQueueTest`, `PdfReadingOrderTest`, `ReaderSpoolTest`, `ReaderNarrationModesTest`, `ReaderLanguageFlagsTest` and `GeminiReaderSessionTest`.
 - Local pre-CI validation without Gradle is allowed and encouraged: compile the changed pure-JVM/Android sources with `kotlinc` against the pinned dependency jars and run the JUnit classes directly with `-ea`. This never substitutes for CI — the branch must still go green in Actions.
 - Prefer pure-JVM, deterministic tests with `TemporaryFolder` for file-backed code; avoid Robolectric unless an Android API genuinely cannot be avoided.
 
