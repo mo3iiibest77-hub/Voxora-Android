@@ -21,6 +21,7 @@ class UserPrefs(private val context: Context) {
     private val keyReaderOutputLang = stringPreferencesKey("reader_output_lang")
     private val keyLastDocUri = stringPreferencesKey("last_doc_uri")
     private val keyReaderBubble = booleanPreferencesKey("reader_bubble")
+    private val keyThemeMode = stringPreferencesKey("theme_mode")
 
     val readerEndpoint: Flow<String> = context.dataStore.data.map { it[keyReaderEndpoint].orEmpty() }
     val readerMode: Flow<String> = context.dataStore.data.map { it[keyReaderMode] ?: "faithful" }
@@ -47,6 +48,20 @@ class UserPrefs(private val context: Context) {
 
     suspend fun setReaderBubble(enabled: Boolean) {
         context.dataStore.edit { it[keyReaderBubble] = enabled }
+    }
+
+    /**
+     * The user's chosen appearance.
+     *
+     * Defaults to [ThemeMode.SYSTEM], so an install that has never opened the control follows the
+     * device setting rather than being pinned to one appearance. An unrecognised stored value
+     * normalizes to the default instead of throwing.
+     */
+    val themeMode: Flow<ThemeMode> =
+        context.dataStore.data.map { ThemeMode.normalize(it[keyThemeMode]) }
+
+    suspend fun setThemeMode(mode: ThemeMode) {
+        context.dataStore.edit { it[keyThemeMode] = mode.id }
     }
 
     suspend fun setReaderSettings(endpoint: String, mode: String) {

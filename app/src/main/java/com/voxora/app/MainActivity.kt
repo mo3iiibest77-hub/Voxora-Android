@@ -14,6 +14,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
@@ -21,6 +23,7 @@ import com.voxora.app.dub.DubService
 import com.voxora.app.dub.FloatingBubbleService
 import com.voxora.app.ui.VoxoraNav
 import com.voxora.app.ui.theme.VoxoraTheme
+import com.voxora.core.prefs.ThemeMode
 import com.voxora.core.prefs.UserPrefs
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.first
@@ -59,7 +62,10 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            VoxoraTheme {
+            // The appearance is a persisted user choice, so the whole app re-composes when it
+            // changes; the default follows the device setting.
+            val themeMode by prefs.themeMode.collectAsState(initial = ThemeMode.DEFAULT)
+            VoxoraTheme(mode = themeMode) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     VoxoraNav(
                         onStartDub = { requestStart() },

@@ -287,7 +287,7 @@ private fun ReaderContent(
             Text(
                 text = stringResource(R.string.reader_privacy),
                 style = MaterialTheme.typography.bodySmall,
-                color = colors.onSurfaceVariant,
+                color = VoxoraColors.explanation,
             )
         }
     }
@@ -406,13 +406,13 @@ private fun DocumentCard(
                 Text(
                     text = stringResource(R.string.reader_document_loading_body),
                     style = MaterialTheme.typography.bodySmall,
-                    color = colors.onSurfaceVariant,
+                    color = VoxoraColors.explanation,
                 )
             } else if (!hasDocument) {
                 Text(
                     text = stringResource(R.string.reader_document_none_body),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = colors.onSurfaceVariant,
+                    color = VoxoraColors.explanation,
                 )
             }
             Button(
@@ -669,7 +669,7 @@ private fun PlaybackCard(
                     Text(
                         text = stringResource(R.string.reader_preparing_first),
                         style = MaterialTheme.typography.bodySmall,
-                        color = colors.onSurfaceVariant,
+                        color = VoxoraColors.explanation,
                     )
                 }
             }
@@ -715,7 +715,7 @@ private fun PlaybackCard(
             Text(
                 text = stringResource(R.string.reader_pause_hint),
                 style = MaterialTheme.typography.bodySmall,
-                color = colors.onSurfaceVariant,
+                color = VoxoraColors.explanation,
             )
         }
     }
@@ -771,7 +771,7 @@ private fun BubbleCard(
             Text(
                 text = stringResource(R.string.reader_bubble_explain),
                 style = MaterialTheme.typography.bodySmall,
-                color = colors.onSurfaceVariant,
+                color = VoxoraColors.explanation,
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1220,7 +1220,7 @@ private fun ChunkHeader(
                     Text(
                         text = stringResource(R.string.reader_page_preparing, languageLabel),
                         style = MaterialTheme.typography.bodySmall,
-                        color = colors.onSurfaceVariant,
+                        color = VoxoraColors.explanation,
                     )
                 }
             }
@@ -1396,7 +1396,7 @@ private fun SegmentCard(
                     Text(
                         text = stringResource(R.string.reader_segment_preparing),
                         style = MaterialTheme.typography.labelMedium,
-                        color = colors.onSurfaceVariant,
+                        color = VoxoraColors.explanation,
                     )
                 }
             }
@@ -1448,7 +1448,7 @@ private fun NarrationCard(
                     stringResource(R.string.reader_narration_empty)
                 },
                 style = MaterialTheme.typography.bodyMedium,
-                color = if (hasNarration) colors.onSurface else colors.onSurfaceVariant,
+                color = if (hasNarration) colors.onSurface else VoxoraColors.explanation,
             )
         }
     }
@@ -1475,7 +1475,7 @@ private fun SectionHeader(
             Text(
                 text = hint,
                 style = MaterialTheme.typography.bodySmall,
-                color = colors.onSurfaceVariant,
+                color = VoxoraColors.explanation,
             )
         }
     }

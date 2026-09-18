@@ -554,7 +554,7 @@ private fun CloudNote(text: String, tone: CloudNoteTone = CloudNoteTone.NEUTRAL)
         color = if (tone == CloudNoteTone.ERROR) {
             VoxoraColors.danger
         } else {
-            MaterialTheme.colorScheme.onSurfaceVariant
+            VoxoraColors.explanation
         },
     )
 }

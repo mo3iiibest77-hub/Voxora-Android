@@ -43,7 +43,6 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -53,6 +52,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.voxora.app.R
 import com.voxora.app.dub.DubService
 import com.voxora.app.dub.DubUiStatus
+import com.voxora.app.ui.theme.VoxoraBrand
 import com.voxora.app.ui.theme.VoxoraColors
 import com.voxora.app.ui.theme.VoxoraTheme
 import kotlin.math.sin
@@ -337,8 +337,8 @@ private fun LiveWaveform(
     active: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val gold = Color(0xFFE6B422)
-    val green = Color(0xFF3DDC97)
+    val gold = VoxoraBrand.waveGold
+    val green = VoxoraBrand.waveGreen
     val transition = rememberInfiniteTransition(label = "wave")
     val phase by transition.animateFloat(
         initialValue = 0f,

@@ -513,7 +513,7 @@ private fun UsageNote(text: String) {
     Text(
         text = text,
         style = MaterialTheme.typography.bodySmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        color = VoxoraColors.explanation,
     )
 }
 

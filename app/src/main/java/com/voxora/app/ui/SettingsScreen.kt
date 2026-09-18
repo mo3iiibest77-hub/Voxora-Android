@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DataUsage
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Language
@@ -62,15 +63,20 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.os.LocaleListCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.voxora.app.R
 import com.voxora.app.reader.languageOptions
+import com.voxora.app.ui.theme.VoxoraColors
 import com.voxora.app.ui.theme.VoxoraTheme
 import com.voxora.core.i18n.AppLocales
+import com.voxora.core.prefs.ThemeMode
 import com.voxora.core.prefs.UserPrefs
 import java.util.Locale
 import kotlinx.coroutines.flow.first
@@ -140,6 +146,9 @@ fun SettingsScreen(
     var lang by remember { mutableStateOf("fa") }
     var appLang by remember { mutableStateOf("en") }
     var saved by remember { mutableStateOf(false) }
+    // The appearance is a persisted preference, so the control reads the same flow the theme
+    // itself is driven by: there is no second copy to fall out of step with the applied theme.
+    val themeMode by prefs.themeMode.collectAsStateWithLifecycle(initialValue = ThemeMode.DEFAULT)
 
     LaunchedEffect(Unit) {
         apiKey = prefs.apiKey.first()
@@ -161,6 +170,8 @@ fun SettingsScreen(
         onDubbingLanguageChange = { lang = it; saved = false },
         appLanguage = appLang,
         onAppLanguageChange = { appLang = it; applyAppLocale(it) },
+        themeMode = themeMode,
+        onThemeModeChange = { mode -> scope.launch { prefs.setThemeMode(mode) } },
         saved = saved,
         onBack = onBack,
         onSave = {
@@ -196,6 +207,8 @@ private fun SettingsContent(
     onDubbingLanguageChange: (String) -> Unit,
     appLanguage: String,
     onAppLanguageChange: (String) -> Unit,
+    themeMode: ThemeMode,
+    onThemeModeChange: (ThemeMode) -> Unit,
     saved: Boolean,
     onBack: () -> Unit,
     onSave: () -> Unit,
@@ -235,6 +248,14 @@ private fun SettingsContent(
         }
         item(key = "appearance") {
             SettingsCard {
+                // The theme comes first: it is the appearance decision that changes the whole app,
+                // and it is persisted the moment it is chosen rather than on Save.
+                SettingsRowHeader(
+                    icon = Icons.Filled.DarkMode,
+                    title = stringResource(R.string.settings_theme_mode),
+                    subtitle = stringResource(R.string.settings_theme_help),
+                )
+                ThemeSelector(mode = themeMode, onSelect = onThemeModeChange)
                 SettingsRowHeader(
                     icon = Icons.Filled.Language,
                     title = stringResource(R.string.settings_app_language),
@@ -525,11 +546,61 @@ private fun SettingsRowHeader(
                 Text(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall,
-                    color = colors.onSurfaceVariant,
+                    color = VoxoraColors.explanation,
                 )
             }
         }
     }
+}
+
+/**
+ * The theme choice: System / Light / Dark.
+ *
+ * Three visible options rather than a dropdown, because the appearance is the one setting whose
+ * effect should be obvious from the Settings screen itself. Each option is a normal selectable
+ * surface laid out in a `Row`, so it mirrors correctly under RTL without any custom drawing, and
+ * the selected option carries the `selected` semantics a screen reader announces.
+ */
+@Composable
+private fun ThemeSelector(
+    mode: ThemeMode,
+    onSelect: (ThemeMode) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        ThemeMode.all.forEach { option ->
+            val selected = option == mode
+            Surface(
+                onClick = { onSelect(option) },
+                modifier = Modifier
+                    .weight(1f)
+                    .semantics { this.selected = selected },
+                shape = RoundedCornerShape(14.dp),
+                color = if (selected) colors.primaryContainer else colors.surfaceContainer,
+                border = BorderStroke(1.dp, if (selected) colors.primary else colors.outlineVariant),
+            ) {
+                Text(
+                    text = stringResource(themeLabelOf(option)),
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 12.dp),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (selected) colors.onPrimaryContainer else colors.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+private fun themeLabelOf(mode: ThemeMode): Int = when (mode) {
+    ThemeMode.SYSTEM -> R.string.settings_theme_system
+    ThemeMode.LIGHT -> R.string.settings_theme_light
+    ThemeMode.DARK -> R.string.settings_theme_dark
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -586,6 +657,8 @@ private fun SettingsContentPreview(modifier: Modifier = Modifier) {
                 onDubbingLanguageChange = {},
                 appLanguage = "en",
                 onAppLanguageChange = {},
+                themeMode = ThemeMode.DEFAULT,
+                onThemeModeChange = {},
                 saved = false,
                 onBack = {},
                 onSave = {},
@@ -610,6 +683,8 @@ private fun SettingsContentSignedInPreview(modifier: Modifier = Modifier) {
                 onDubbingLanguageChange = {},
                 appLanguage = "fa",
                 onAppLanguageChange = {},
+                themeMode = ThemeMode.LIGHT,
+                onThemeModeChange = {},
                 saved = true,
                 onBack = {},
                 onSave = {},
