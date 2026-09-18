@@ -8,7 +8,8 @@ package com.voxora.core.prefs
  * - [ORIGINAL_DARK] — the original Voxora dark gold theme. It is the product's primary identity and
  *   therefore the **default**; an install that has never opened the control starts here.
  * - [LIGHT_TEST_1] — Voxora Light, Nova-inspired.
- * - [LIGHT_TEST_2] — Nova-style Light.
+ * - [LIGHT_TEST_2] — Voxora Contrast Light: the light-side contrast of the dark theme, with cool
+ *   near-white surfaces and a refined indigo/blue accent in place of the gold.
  *
  * The two light themes exist so the owner can compare them on a device and later keep one. Because
  * they are separate, removing either later is a matter of deleting its palette and its entry here,
@@ -24,7 +25,7 @@ enum class ThemeMode(val id: String) {
     /** Voxora Light, Nova-inspired. A comparison candidate. */
     LIGHT_TEST_1("light_test_1"),
 
-    /** Nova-style Light. A comparison candidate. */
+    /** Voxora Contrast Light. The light-side contrast of the dark theme. A comparison candidate. */
     LIGHT_TEST_2("light_test_2");
 
     companion object {

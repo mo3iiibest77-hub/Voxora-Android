@@ -34,6 +34,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.voxora.app.R
+import com.voxora.app.ui.theme.VoxoraColors
 import com.voxora.app.ui.theme.VoxoraTheme
 import kotlinx.coroutines.launch
 
@@ -132,9 +133,11 @@ fun OnboardingScreen(
                     textAlign = TextAlign.Center,
                 )
                 Spacer(Modifier.height(16.dp))
+                // The onboarding copy explains what the product does and what it can access, so it
+                // is guidance: the explanation role, consistent with every other help sentence.
                 Text(
                     text = bodies[page],
-                    color = colors.onSurfaceVariant,
+                    color = VoxoraColors.explanation,
                     style = MaterialTheme.typography.bodyLarge,
                     textAlign = TextAlign.Center,
                 )

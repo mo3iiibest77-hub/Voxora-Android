@@ -11,7 +11,15 @@ package com.voxora.app.ui.theme
  *   `GoldDim #B8962E`, `NearBlack #0A0A0B`, `SurfaceDark #141416`, `Card #1C1C1F`, text `#F5F0E6`,
  *   secondary text `#C4BBA8`, error `#E85D5D`.
  * - `f25cc5b` — the same dark values extended with the container/outline ramp and the semantic
- *   status tones (`success #3DDC84`, `warning #E6B422`, `danger #E85D5D`, `explanation #A79E8C`).
+ *   status tones (`success #3DDC84`, `warning #E6B422`, `danger #E85D5D`).
+ *
+ * The one deliberate change from the historical palette is the **explanation/help** role: the
+ * historical warm tan `#A79E8C` read as a second gold accent rather than as guidance, so the owner
+ * replaced it with a dedicated icy/electric blue, `#7DD3FC`. It is a guidance-only role — never a
+ * heading, body, button or status colour — and it clears AA (11.9:1) on the near-black page and
+ * (10.2:1) on a card. Because the icy blue is brighter than the warm secondary text, the historical
+ * "explanation is dimmer than secondary content" ordering does not apply to this theme; the role is
+ * kept distinct by hue and by its dedicated use instead.
  *
  * A later pass (`660f6c9`) replaced the gold `primary` with a Google blue and de-warmed the text;
  * this object restores the verified original. The two roles the historical code did not name —
@@ -98,8 +106,14 @@ internal object OriginalDarkPalette {
      */
     const val Neutral: Long = 0xFF8E8A7E
 
-    /** Help and explanatory text: warm, but dimmer than secondary content. */
-    const val Explanation: Long = 0xFFA79E8C
+    /**
+     * Help and explanatory text: the owner's dedicated icy/electric blue.
+     *
+     * Used **only** for guidance — descriptions under a control, hints, privacy and limitation
+     * notes — never for headings, body content, buttons or status. See the class note for why it
+     * replaces the historical warm tan.
+     */
+    const val Explanation: Long = 0xFF7DD3FC
 
     /** Present but not actionable. Derived from the same warm ramp. */
     const val Disabled: Long = 0xFF6B6558

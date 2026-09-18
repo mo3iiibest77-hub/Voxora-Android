@@ -137,7 +137,7 @@ Gold      #D4AF37  primary, and the tint of every tonal surface
 GoldDim   #B8962E  secondary (the muted gold); `tertiary` is derived from the same family
 NearBlack #0A0A0B  background / surfaceContainerLowest
 SurfaceDark #141416 surface      Card #1C1C1F surfaceVariant / surfaceContainerHigh
-onSurface #F5F0E6  onSurfaceVariant #C4BBA8  explanation #A79E8C  neutral #8E8A7E
+onSurface #F5F0E6  onSurfaceVariant #C4BBA8  explanation #7DD3FC  neutral #8E8A7E
 success #3DDC84  warning #E6B422  danger/error #E85D5D
 
 // LIGHT TEST 1 — "Voxora Light — Nova inspired". Its own complete palette.
@@ -146,14 +146,20 @@ primary #4F46E5  secondary(cyan) #0891B2  tertiary(violet) #7C3AED  accent purpl
 onSurface #171923  onSurfaceVariant #596174  explanation #64748B
 gradient #22D3EE → #818CF8 → #A855F7
 
-// LIGHT TEST 2 — "Nova-style Light". Its own complete palette, NOT Light Test 1 + overrides.
-background #F8FAFC  surface #FFFFFF  surfaceVariant #F1F5F9  outlineVariant #E2E8F0
-primary(indigo) #6366F1  secondary(cyan dark) #0891B2  tertiary(violet) #8B5CF6  purple #A855F7
-onSurface #111827  onSurfaceVariant #475569  explanation #64748B
-gradient #22D3EE → #6366F1 → #A855F7
+// LIGHT TEST 2 — "Voxora Contrast Light". The light-side contrast of Original Dark:
+// near-black → cool near-white, gold → refined indigo/blue, warm beige text → cool slate.
+// Its own complete palette, NOT Light Test 1 + overrides.
+background #F5F7FB  surface #EDF1F7  surfaceVariant #E4E9F1  outlineVariant #D3D9E3
+primary #375CD4  secondary/tertiary(deeper blue) #2E50B8  primaryContainer #DDE5FF
+onSurface #101827  onSurfaceVariant #4B5870  explanation #5F6775  neutral #556687
+success #BE185D  warning #2254E6  danger/error #0B6E8A
+// Two supplied values were not legible as text on the card and were darkened in the same hue
+// family, as the owner's WCAG instruction required: error #5DE8E8 (1.22:1) → #0B6E8A (4.77:1),
+// success #DC3D95 (3.35:1) → #BE185D (4.95:1). Explanation #6B7384 (3.91:1) → #5F6775 (4.68:1).
+// Warning #2254E6 and primary #375CD4 already cleared AA and are kept exactly as supplied.
 
-// Status roles are declared per palette; the two light tests share the same semantics
-// (success #16A34A / warning #D97706 / error #DC2626) but state them in their own file.
+// Status roles are declared per palette. The two light themes do NOT share values: Light Test 1
+// uses success #16A34A / warning #D97706 / error #DC2626, Light Test 2 the values above.
 // Roles Material 3 does not model (VoxoraColors.*): success / warning / danger / neutral /
 // explanation / disabled.
 ```
@@ -162,19 +168,20 @@ gradient #22D3EE → #6366F1 → #A855F7
 - The user's choice is `core/.../prefs/ThemeMode.kt` — `ORIGINAL_DARK` (default), `LIGHT_TEST_1`, `LIGHT_TEST_2` — persisted through `UserPrefs`/DataStore (`themeMode`, stored as the enum's stable `id` so reordering the enum cannot change a choice). `MainActivity` collects it and passes it to `VoxoraTheme(mode = …)`; `SettingsScreen` exposes a `ThemeSelector` that writes it. Never hold the selection in a composable's own `remember`, and never read `isSystemInDarkTheme()` anywhere.
 - **`ThemeMode.DEFAULT` is `ORIGINAL_DARK`, and that must not change.** The original Voxora dark theme is the product's primary identity and the baseline appearance; neither light test may become the default, and the Google-style palette must not come back. `ThemeMode.normalize` is total (unknown/blank → `DEFAULT`) and migrates the previous `system`/`dark`/`light` ids (`system`/`dark` → dark, `light` → the first light test), so a corrupt or old preference can never leave the app themeless or silently drop a light user into dark. Pinned by `ThemeModeTest`.
 - **The three themes are independent by construction.** Each light test is a complete palette in its own file, not "the other light theme with overrides", and they share no constant or mutable state. Removing a light test later means deleting its palette file, its scheme + semantics block in `Theme.kt`, its `ThemeMode` entry and its string — the dark theme and the remaining light theme are untouched. Never introduce a shared mutable palette or a base-plus-overrides hierarchy between the light tests.
-- **Dark is the original Voxora gold identity — not a Google or Nova look.** Gold is `primary`, `secondary` and the tint of the tonal surfaces; the text is warm light; there is no cyan, indigo or purple. Cyan/indigo/violet belong to the two light tests only.
-- **Light is a real appearance, not an inverted dark one.** Every role is a chosen value with deliberate contrast: near-black content on white, a mid-grey secondary, a lighter help grey, and the indigo carrying action.
+- **Dark is the original Voxora gold identity — not a Google or Nova look.** Gold is `primary`, `secondary` and the tint of the tonal surfaces; the text is warm light; there is no cyan, indigo or purple. Cyan/indigo/violet belong to Light Test 1; the indigo/blue complement belongs to Light Test 2.
+- **Light is a real appearance, not an inverted dark one.** Every role is a chosen value with deliberate contrast: near-black content on white, a mid-grey secondary, a lighter help grey, and the indigo carrying action. Light Test 2 is the *contrast* light theme — its indigo/blue is the deliberate opposite of the dark theme's gold, not a copy of Light Test 1's accents.
+- **Contrast is verified, not assumed.** A palette value the owner supplies is measured against the surface it will sit on before it is accepted; a value below WCAG AA for text is adjusted to the nearest legible member of the same hue family and the adjustment is recorded in the palette's KDoc and in `LightTestPalettesTest`. Never ship a supplied colour that cannot be read.
 
 **Compose rules:**
 - Always use `MaterialTheme.colorScheme.*` tokens — never hardcode hex in composables. The only accepted literal in a composable is `Color.Transparent` (a framework constant, not a brand colour).
 - **The semantic roles are the contract.** `Theme.kt` exposes `VoxoraSemanticColors` through `VoxoraColors.success` / `.warning` / `.danger` / `.neutral` / `.explanation` / `.disabled` (a `staticCompositionLocalOf`, read via `@Composable @ReadOnlyComposable`). Ask for the role, never a number. The hierarchy is **screen title → section title → primary content (`onSurface`) → secondary content (`onSurfaceVariant`) → explanation (`VoxoraColors.explanation`) → status / action**. A screen must not invent a role or pick an alpha on `onSurface` to mean "less important".
 - **`ReaderStatusVisual` decides which tone a phase gets**, and the composable only asks for it: **speaking and playing are green, paused is yellow and never green, stopped and failed are red, connecting and preparing are neutral and must not falsely show green.** The same pattern holds for `UsageStatusVisual` and `LogSeverity` — a pure-JVM mapper owns the decision so no composable picks a colour inline.
-- **One explanation role.** Every help, hint, caption or "why this is unavailable" line uses `VoxoraColors.explanation`. Do not reach for `onSurfaceVariant` for one note and `outline` for the next; a single token is what makes the hierarchy consistent across Reader, Settings, usage and account surfaces. This role is deliberately *less* prominent than secondary content in every theme. In the restored dark theme it is the historical warm grey `#A79E8C`; in both light tests it is the neutral `#64748B`. Never make it a brand gold or an accent, and never make it an action or a status colour — that is what made explanatory text read as a brand accent.
+- **One explanation role.** Every help, hint, caption or "why this is unavailable" line uses `VoxoraColors.explanation`. Do not reach for `onSurfaceVariant` for one note and `outline` for the next; a single token is what makes the hierarchy consistent across Reader, Settings, usage and account surfaces. Secondary content (`onSurfaceVariant`) stays for supporting labels, values and subtitles — do not "unify" the two by repainting every secondary label, which would erase the distinction the role exists to make. **Each theme states its own explanation colour and the role is not defined by being dimmer:** in the restored dark theme it is the owner's dedicated icy/electric blue `#7DD3FC`, which is *brighter* than the warm secondary text and is kept distinct by hue and by dedicated use; in Light Test 1 it is the neutral `#64748B` and in Light Test 2 the cool slate `#5F6775`, where it is genuinely lighter than secondary content. Never make it a brand gold or an accent, and never make it an action or a status colour — that is what made explanatory text read as a brand accent.
 - **`neutral` is a status, not a failure.** Idle, connecting and an expected data gap are neutral; only a refusal or a network problem is `danger`. Never dress "we cannot show this" as an error.
 - `VoxoraBrand` (`waveGold`, `waveGreen`) is decorative only — the Live bubble waveform. It is **not** a text or surface colour and must never be used for status.
 - **Every text role clears WCAG AA on the surface it sits on.** `OriginalDarkPaletteTest` and `LightTestPalettesTest` compute the contrast ratios and fail if a role drops below 4.5:1 on its card or page background (disabled content is exempt but must stay visible). Adding a colour means adding it to the reach of the test for its theme.
 - An active-state pulse must modify alpha, glow or scale of the semantic colour. Never introduce a separate neon colour for animation, and never run an infinite animation for a phase that is not active.
-- Use `MaterialTheme.typography.*` — never hardcode `sp` sizes directly
+- **Typography comes from the theme, and the theme ships the Persian font.** `Theme.kt` passes `typography = VoxoraTypography` from `ui/theme/Type.kt`, which overrides every one of the 15 Material 3 roles with the bundled **Vazirmatn UI, Non-Latin** family (`res/font/vazirmatn_ui_nl_*.ttf`, four weights, SIL OFL in `third_party/vazirmatn/`). Persian has no system font the product can rely on across devices, so the glyphs ship with the APK. The *Non-Latin* cut has the Persian glyphs and **no** Latin, which is deliberate: Persian shapes in Vazirmatn while Latin (product names, URLs, model names) falls through to the platform's Latin font. Use `MaterialTheme.typography.*` — never hardcode `sp` sizes and never set a `fontFamily` at a call site; the only sanctioned exception is the log list's monospace, because a timestamp and a bracketed tag are code, not prose. Changing a size or a weight means changing the type scale, not a screen. See `AgentMD.md` for the standing rule.
 - Shapes: `RoundedCornerShape(12.dp)` for cards, `CircleShape` for FABs/bubbles
 - Elevation: use `tonalElevation`, not shadow tricks
 - Animations: use `animateFloatAsState`, `Animatable`, `rememberInfiniteTransition` / `AnimatedVisibility` — not `Handler.postDelayed`
@@ -675,11 +682,26 @@ VoxoraLog.e("ReaderVM", "Chunk rewrite failed: ${e.message}", e)
 - Numbers stay Western Arabic digits, matching what `%d` renders everywhere else.
 - **RTL is a layout property, not a text hack.** Fix the real cause (a fixed width, a wrong
   `TextAlign`, a forced LTR, bad spacing, an over-tight single-line constraint) and use
-  `LocalLayoutDirection` / auto-mirrored icons. Never insert invisible Unicode direction marks to
-  paper over a layout bug, and never concatenate a literal arrow glyph into a label.
+  `LocalLayoutDirection` / auto-mirrored icons. Never reverse a word by hand, never pad with
+  spaces to push a word to the other side, and never set `TextAlign.Center` on a whole screen just
+  to make a mixed string "look right" — `Center` belongs only where the surrounding layout really
+  is centred. Use auto-mirrored icons (`Icons.AutoMirrored.*`) for anything directional.
+- **Embedded Latin is isolated, not reordered.** A Persian sentence that contains a Latin run —
+  `Gemini API`, `Google AI Studio`, `Live Dub` — wraps that run in a Unicode isolate:
+  **FSI (U+2068) … PDI (U+2069)**. This is the Unicode Bidirectional Algorithm's own mechanism for
+  saying "this run is LTR"; the surrounding Persian then orders correctly and the Latin keeps its
+  internal order. It is *not* the same thing as the forbidden direction marks: never use LRM/RLM
+  (U+200E/U+200F), never hand-reverse a phrase, and never pad with spaces. A pure-Latin string
+  (`app_name`, `reader_title`) needs no isolate — the platform renders it LTR on its own — and a
+  bare `%1$d` / `%1$s` placeholder is left alone, because it is substituted at runtime and
+  isolating it makes the value detach from its sentence. `bidi_fa.py` in the local harness applies
+  and verifies the isolates.
 - Technical identifiers (project ids, emails, keys, log lines) stay selectable LTR runs; put a whole
   technical region in an explicit LTR container only when the region itself is technical, as the log
   list does.
+- **Persian typography is part of i18n, not an afterthought.** Every Persian string is rendered by
+  the bundled Vazirmatn type stack (see the Compose rules); never ship a Persian screen that relies
+  on whatever font the device happens to have.
 
 ---
 
@@ -701,6 +723,7 @@ A task is NOT done until:
 - [ ] No lint errors on new files (`./gradlew lintDebug`)
 - [ ] Unit tests for both modules compile and pass (`:core:testDebugUnitTest`, `:app:testDebugUnitTest`)
 - [ ] All new strings have Persian translations
+- [ ] New UI text uses `MaterialTheme.typography.*` (no `sp`/`fontFamily` at the call site), and any Latin run inside a Persian string is isolated (see `AgentMD.md`)
 - [ ] New composables have `@Preview` annotations
 - [ ] VoxoraLog calls replace any debug Log calls
 - [ ] README or inline docs updated if public API changed
@@ -787,11 +810,12 @@ A task is NOT done until:
 - Local pre-CI validation without Gradle is allowed and encouraged: compile the changed pure-JVM/Android sources with `kotlinc` against the pinned dependency jars and run the JUnit classes directly with `-ea`. This never substitutes for CI — the branch must still go green in Actions. The `1504669` pass was validated locally this way: `kotlinc 2.0.21` plus JUnit `-ea` gave **134 tests OK** across `ReaderDisplayLanguageTest`, `ReaderDisplayRefreshTest`, `ReaderStartupGatesTest`, `LanguageCatalogTest`, `AppLocalesTest`, `ReaderPipelineOrderTest`, `ChunkQueueTest`, `PdfReadingOrderTest`, `ReaderSpoolTest`, `ReaderNarrationModesTest`, `ReaderLanguageFlagsTest` and `GeminiReaderSessionTest`. Two harness details matter and cost a round each when forgotten: `internal` declarations need `-Xfriend-paths=<main-out>` on the test compile, and `ReaderSpool`'s `VoxoraLog` dependency needs a plain-JVM stub because the real one touches `android.util.Log`.
 - Prefer pure-JVM, deterministic tests with `TemporaryFolder` for file-backed code; avoid Robolectric unless an Android API genuinely cannot be avoided.
 - **The local harness cannot compile Compose, so run an import guard before pushing.** A missing `import androidx.compose.runtime.LaunchedEffect` reached CI once and failed **both** jobs; because the dev server has no Compose artifacts, nothing local caught it. It also produced four errors for one mistake — the unresolved reference plus three cascading "suspend function should be called only from a coroutine", since without `LaunchedEffect` the lambda is not a suspend scope. Before pushing, check that no file uses a Compose or AndroidX symbol it has not imported. Read CI job logs with `GET /repos/…/actions/jobs/<job_id>/logs` (works, HTTP 200) rather than the run-level archive endpoint (403); the useful line is `e: file:///…/File.kt:97:5 Unresolved reference 'X'.`
-- **Three local checks worth running on every change, all cheap and all caught real bugs:** a `R.string.*` cross-check of every Kotlin reference against `values/` and `values-fa/` (it caught a `reader_page_chunk` key that no locale declared); an unused-import sweep of changed files; and a **colour-literal guard** that fails if `Color(0x…)` or a named `Color.White`/`Color.Black`/… appears anywhere outside `ui/theme/Theme.kt` and the three `ui/theme/*Palette.kt` files (`Color.Transparent` is allowed). The harness cannot compile Compose, so the guard is what stops a stray hex from reaching CI.
+- **Five local checks worth running on every change, all cheap and all caught real bugs:** a `R.string.*` cross-check of every Kotlin reference against `values/` and `values-fa/` (it caught a `reader_page_chunk` key that no locale declared); an unused-import sweep of changed files; a **colour-literal guard** that fails if `Color(0x…)` or a named `Color.White`/`Color.Black`/… appears anywhere outside `ui/theme/Theme.kt` and the three `ui/theme/*Palette.kt` files (`Color.Transparent` is allowed); a **theme guard** (`themeguard.py`) that fails on a `ThemeMode` with no branch in `Theme.kt`, on a palette that assigns another palette's value, on a leftover of a deleted palette, and on a `Type.kt` that names an `R.font.*` resource which is not bundled; and a **bidi guard** (`bidi_fa.py`) that isolates every Latin run embedded in a Persian string and verifies the format specifiers are untouched. The harness cannot compile Compose, so these guards are what stop a stray hex, a dead theme or a mangled Persian string from reaching CI.
 
 ---
 
-*Last updated: auto-generated by Claude for Voxora project — the original Voxora dark gold theme
-restored from the verified historical baseline (`4228f1b` + `f25cc5b`), two independent light test
-themes added behind a persisted selector with dark as the default, and the Gemini product model in
-Settings, the Reader's floating bubble and its notification transport controls.*
+*Last updated: auto-generated by Claude for Voxora project — Light Test 2 replaced by "Voxora Contrast
+Light" (the light-side contrast of the dark theme), the dark explanation/help role moved to the
+owner's icy/electric blue `#7DD3FC`, Vazirmatn bundled and wired through `VoxoraTypography` app-wide,
+and the Persian strings audited and bidi-isolated for mixed Persian/Latin text. The standing rules
+for future UI work live in `AgentMD.md`.*

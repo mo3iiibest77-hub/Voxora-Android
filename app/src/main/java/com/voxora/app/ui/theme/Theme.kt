@@ -22,7 +22,7 @@ import com.voxora.core.prefs.ThemeMode
  * |--------------------|-------------------------|----------|
  * | [ThemeMode.ORIGINAL_DARK] | [OriginalDarkPalette] | the original Voxora dark gold theme — the product's primary identity and the default |
  * | [ThemeMode.LIGHT_TEST_1]  | [LightTest1Palette]   | Voxora Light, Nova-inspired |
- * | [ThemeMode.LIGHT_TEST_2]  | [LightTest2Palette]   | Nova-style Light |
+ * | [ThemeMode.LIGHT_TEST_2]  | [LightTest2Palette]   | Voxora Contrast Light — the light-side contrast of the dark theme |
  *
  * **The palettes are independent by construction.** Each lives in its own file, declares every
  * value it uses, and shares no constant or mutable state with the others. Removing a light test
@@ -36,10 +36,13 @@ import com.voxora.core.prefs.ThemeMode
  * palette files it is the only place in the app allowed to contain a colour literal.
  *
  * ## Text hierarchy
- * The roles are deliberately ordered: screen title → section title → primary content (`onSurface`)
- * → secondary content (`onSurfaceVariant`) → explanation (`VoxoraColors.explanation`) → status →
- * success/warning/error → disabled. No screen should invent a role or use an alpha on `onSurface`
- * to mean "less important".
+ * The roles are ordered by purpose, not by luminance: screen title → section title → primary
+ * content (`onSurface`) → secondary content (`onSurfaceVariant`) → explanation
+ * (`VoxoraColors.explanation`) → status → success/warning/error → disabled. The order is a
+ * hierarchy of intent, so it does not promise that each role is dimmer than the one before it —
+ * the dark explanation tone is a bright icy blue that is *lighter* than secondary content while
+ * still being unmistakably the "aside" voice. No screen should invent a role or use an alpha on
+ * `onSurface` to mean "less important".
  */
 
 /**
@@ -54,7 +57,10 @@ import com.voxora.core.prefs.ThemeMode
  *   nor bad, so it must never borrow success or danger;
  * - [explanation] is the one role for **explanatory and help text** — the sentence under a control,
  *   the note about why a figure is unavailable, the description of what a feature does. It is
- *   deliberately less prominent than primary and secondary content;
+ *   deliberately distinct from primary and secondary content, and each theme expresses that
+ *   distinction its own way: the dark theme by a cool icy hue (brighter than its secondary text,
+ *   never confused with it), the light themes by a quieter grey. It is never used for a heading,
+ *   a button label or a status;
  * - [disabled] is content that is present but explicitly not actionable.
  *
  * Exposed through a composition local rather than added to `colorScheme` so the roles stay explicit
@@ -229,7 +235,8 @@ private val LightTest1Colors = lightColorScheme(
 )
 
 /**
- * **Light Test 2 — Nova-style Light.** The cyan → indigo → purple ramp is the identity. Every role
+ * **Light Test 2 — Voxora Contrast Light.** The light-side contrast of the original dark theme:
+ * cool near-white surfaces and a refined indigo/blue complement in place of the gold. Every role
  * resolves to a value from [LightTest2Palette]; nothing is inherited from the other themes, and in
  * particular this is not an override of Light Test 1.
  */
@@ -295,6 +302,7 @@ fun VoxoraTheme(
     CompositionLocalProvider(LocalVoxoraSemanticColors provides semantics) {
         MaterialTheme(
             colorScheme = colorScheme,
+            typography = VoxoraTypography,
             content = content,
         )
     }

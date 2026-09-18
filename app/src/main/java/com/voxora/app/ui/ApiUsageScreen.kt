@@ -423,10 +423,12 @@ private fun ApiUsageContent(
         }
 
         item(key = "privacy") {
+            // A privacy explanation is guidance, so it is the explanation role rather than
+            // ordinary secondary content.
             Text(
                 text = stringResource(R.string.usage_privacy),
                 style = MaterialTheme.typography.bodySmall,
-                color = colors.onSurfaceVariant,
+                color = VoxoraColors.explanation,
             )
         }
     }

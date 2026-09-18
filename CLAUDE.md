@@ -141,11 +141,109 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
 
 ## CURRENT STATE (update this section after each major change)
 
-> Naming note: this repository has no `CloudMD`/`AgentMD` files. The canonical
-> pair is `AGENTS.md` (project law / architecture record) and this `CLAUDE.md`
-> (handoff / cloud context). Update those two — do not add duplicate docs.
+> Naming note: the repository has three Markdown records, with distinct jobs — do not
+> duplicate content between them.
+> `AGENTS.md` is the project law / architecture record. This `CLAUDE.md` is the
+> handoff / cloud context. `AgentMD.md` is the deliberately short **permanent contract
+> for future UI work** (typography, Persian/RTL and bidi, the explanation role) that
+> must not expire with any single feature. Add a rule to `AgentMD.md` only when it
+> applies to every future UI change; everything else belongs in `AGENTS.md`.
 
-### Last change (this session) — the original Voxora dark theme restored, two independent light tests, and a persisted selector
+### Last change (this session) — Light Test 2 replaced by a contrast theme, the dark explanation role, and Persian typography/RTL restored
+
+**DONE — four corrections, all in one cycle, with no Live Dub or Reader-audio change.**
+
+**1. The old "Light Test 2" is gone.** The Nova-style light palette that shipped in `bff6ca9` was
+deleted as an identity, not merely re-tuned: its palette file was rewritten, and every reference to
+it — the scheme and semantics blocks in `Theme.kt`, the `ThemeMode` KDoc, the selector, the tests and
+the docs — now describes the new theme. The deleted values (`#F8FAFC` page, `#6366F1` indigo,
+`#111827` text, `#475569` secondary, `#8B5CF6` violet, `#E2E8F0` border) survive nowhere in the
+repository; `themeguard.py` and `LightTestPalettesTest` both fail if one comes back.
+
+**2. Light Test 2 is now "Voxora Contrast Light" — the light-side contrast of Original Dark.**
+Near-black page → cool near-white; gold → refined indigo/blue; warm beige text → cool slate. It is a
+**complete, independent palette** stated in full in `LightTest2Palette.kt`; it inherits nothing from
+Light Test 1 and is not "Light Test 1 with different accents" (pinned by tests that assert the two
+disagree on every signature token).
+
+The owner supplied the target values with an explicit instruction to verify WCAG contrast and make
+the smallest adjustment needed for legibility. Three supplied values could not be read as text on
+the card, so each was darkened to the nearest legible member of its own hue family — **this is the
+only deviation from the supplied values, and it is recorded in the palette KDoc and in the tests**:
+
+| role | supplied | measured on the card | shipped | measured |
+|---|---|---|---|---|
+| error | `#5DE8E8` | 1.22:1 | `#0B6E8A` | 4.77:1 |
+| success | `#DC3D95` | 3.35:1 | `#BE185D` | 4.95:1 |
+| explanation | `#6B7384` | 3.91:1 | `#5F6775` | 4.68:1 |
+
+`warning #2254E6` (4.95:1), `primary #375CD4` (4.73:1) and every content role already cleared AA and
+are shipped exactly as supplied. `neutral` was not supplied; it is derived as `#556687` (4.74:1).
+Every text role clears AA on the card *and* the page; `outline` is a non-text border role and is not
+in the text contract.
+
+**3. The dark explanation/help colour is the owner's dedicated icy/electric blue `#7DD3FC`.** It
+replaces the historical warm tan `#A79E8C`, which read as a second gold accent rather than as
+guidance. This is the **only** change to the protected Original Dark palette; every other dark value
+is untouched, and the palette test still pins them all. Because the icy blue is *brighter* than the
+dark theme's warm secondary text, the old "explanation is dimmer than secondary content" ordering no
+longer holds for the dark theme — the role is kept distinct by hue and by dedicated use, and both
+`Theme.kt` and `AGENTS.md` now say so. `VoxoraColors.explanation` is the single semantic role for
+explanatory/help text; the genuinely explanatory `onSurfaceVariant` and alpha-on-`onSurface` sites
+(DubScreen's capture and latency hints, the usage privacy note, the onboarding page bodies) now use
+it, while ordinary secondary labels, section headers and row labels deliberately stay on
+`onSurfaceVariant`.
+
+**4. Persian typography and mixed Persian/English bidi are fixed at the root.**
+
+- **Vazirmatn is bundled and wired app-wide.** `ui/theme/Type.kt` defines `VoxoraTypography` — all 15
+  Material 3 roles, family changed and nothing else — and `Theme.kt` passes it to `MaterialTheme`. The
+  family is **Vazirmatn UI, Non-Latin** (four weights, `res/font/vazirmatn_ui_nl_*.ttf`), chosen
+  because it carries the Persian glyphs and **no** Latin ones, so Persian shapes in Vazirmatn while
+  Latin (product names, URLs, model names) falls through to the platform's Latin font. Verified with
+  `fontTools`: `ب`/`ک`/`ی`/`،` present, `A`/`a`/`0` absent in every bundled file. SIL OFL licence
+  committed at `third_party/vazirmatn/OFL.txt`.
+- **Embedded Latin is isolated, not reordered.** 87 Persian strings that contain a Latin run
+  (`Gemini API`, `Google AI Studio`, `Live Dub`, `Reader`, …) now wrap it in **FSI (U+2068) … PDI
+  (U+2069)** — the Unicode Bidirectional Algorithm's own mechanism. Format specifiers (`%1$d`,
+  `%1$s`) are deliberately left un-isolated because they are substituted at runtime, and pure-Latin
+  strings (`app_name`, `reader_title`) need none. No manual word reversal, no fake spaces, no LRM/RLM.
+- **Translations audited.** Register is uniform (informal second person throughout) and terminology
+  follows `AGENTS.md` §10. Four strings were improved: `usage_tokens_total` → `مجموع توکن‌ها`,
+  `settings_theme_help` restores the "test variants" sense, `latency_hint` names live dubbing, and
+  `onboarding_page2_title` was corrected from "Listen to any book" (`هر کتابی را گوش کن`) to
+  `هر فایلی را با صدای بلند بخوان`, matching both the English ("Read any document aloud") and the
+  project's `document` → `فایل` rule (never `سند`).
+
+**`AgentMD.md` is new** and holds the permanent, non-expiring rules for future UI work: typography
+comes from the theme (never a call site), Persian is written not translated, RTL is fixed in the
+layout with isolates for embedded Latin, and the explanation role is semantic with a per-theme value.
+
+**Locally verified (no Gradle).** `kotlinc 2.0.21` + JUnit 4.13.2 with `-ea` over the pure-JVM
+harness: **485 tests OK across 43 classes** (up from 478 — `LightTestPalettesTest` now has 24 tests,
+`OriginalDarkPaletteTest` 14 and `ThemeModeTest` 10). The new tests pin the contrast palette's values,
+prove Light Test 2 is independent of Light Test 1 and of the deleted Nova palette, prove every text
+role clears AA on the card *and* the page, pin the dark explanation role to `#7DD3FC` and prove it is
+distinct from every content and status role, and prove `ThemeMode` still has exactly three selectable
+modes with Original Dark as the default and the legacy `system`/`dark`/`light` ids still migrating.
+Static guards all OK: `themecheck.py` (no colour literal outside the theme layer), `checkimports.py`
+(no Compose symbol used without its import — extended to cover `Typography`/`FontFamily`/`Font`),
+`stringcheck.py` (values 293 / values-fa 292, parity intact, only `default_web_client_id`
+intentionally untranslated), the new `themeguard.py` (three modes all handled, no palette inheriting
+another, no deleted-Light-Test-2 leftover, every `R.font.*` bundled and `typography =` wired), and
+`bidi_fa.py` (idempotent — a re-run would change 0 strings). The Compose, Play Services and Android
+layers are **not** compiled locally — the CI `Assemble debug` job is their only compile check. **No
+real-device testing was performed**: how the three themes actually look, the Vazirmatn rendering and
+the Persian bidi on a device are all owner-verification items.
+
+**BLOCKED:** nothing in this change is blocked on code. The external item noted below (the Google
+OAuth Web client ID for `default_web_client_id`) is unchanged and unrelated.
+
+**NEXT:** install the CI-built debug APK, compare Original Dark / Light Test 1 / Voxora Contrast Light
+on a device in both English and Persian, and decide which light test survives. The losing one is then
+removed with the recipe below, without touching the dark theme or the winner.
+
+### Last change (previous session) — the original Voxora dark theme restored, two independent light tests, and a persisted selector
 
 **DONE — three selectable, independent themes; the original dark theme is the default and the identity.**
 The dark theme that shipped after `660f6c9` was a Google-inspired palette (blue primary, de-warmed
@@ -156,12 +254,14 @@ historical baseline, and two light candidates were added so the owner can compar
   `4228f1b` (*"feat: Voxora dark gold Material3 theme"*) plus the container/status ramp from `f25cc5b`:
   gold `#D4AF37` (`primary` and `secondary` identity), muted gold `#B8962E`, near-black page
   `#0A0A0B`, surface `#141416`, card `#1C1C1F`, warm text `#F5F0E6` / `#C4BBA8`, explanation
-  `#A79E8C`, status `#3DDC84` / `#E6B422` / `#E85D5D`. No Google and no Nova colour language.
+  `#A79E8C` (replaced by the icy blue `#7DD3FC` in the next cycle — see above), status `#3DDC84` /
+  `#E6B422` / `#E85D5D`. No Google and no Nova colour language.
 - **Light Test 1 — "Voxora Light — Nova inspired"** — page `#F8F9FC`, white cards, indigo `#4F46E5`
   primary, cyan `#0891B2`, violet `#7C3AED`, purple `#9333EA`, gradient `#22D3EE → #818CF8 → #A855F7`.
-- **Light Test 2 — "Nova-style Light"** — page `#F8FAFC`, indigo `#6366F1` primary, cyan `#22D3EE`
-  (`#0891B2` for the readable secondary), violet `#8B5CF6`, purple `#A855F7`, gradient
-  `#22D3EE → #6366F1 → #A855F7`.
+- **Light Test 2** — shipped in this cycle as a second Nova-style palette. **That palette was deleted
+  in the next cycle and replaced by "Voxora Contrast Light"** (see the section above); its values are
+  recoverable from Git history at `bff6ca9` if ever needed, and are deliberately not restated here so
+  no stale hex can be copied out of this document.
 
 Each theme is a **complete, independent palette** in its own file (`OriginalDarkPalette.kt`,
 `LightTest1Palette.kt`, `LightTest2Palette.kt`); they share no constant or mutable state and neither

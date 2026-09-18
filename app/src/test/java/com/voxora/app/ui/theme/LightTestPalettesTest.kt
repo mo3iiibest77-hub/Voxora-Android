@@ -8,12 +8,13 @@ import org.junit.Test
 /**
  * The two light candidates are complete, independent themes — not one palette with overrides.
  *
- * These tests do three things:
+ * These tests do four things:
  *  1. pin each theme's declared tokens to the exact values it was specified with, so a "tidy-up"
  *     cannot blur the difference the owner is being asked to compare;
  *  2. prove the two themes are genuinely separate systems (they disagree on their signature tokens,
  *     and neither inherits anything from the other);
- *  3. prove neither light theme is the dark theme or the previous Google-inspired palette.
+ *  3. prove neither light theme is the dark theme or the previous Google-inspired palette;
+ *  4. verify the WCAG contrast of the new contrast theme, including the two documented adjustments.
  */
 class LightTestPalettesTest {
 
@@ -52,41 +53,62 @@ class LightTestPalettesTest {
         assertEquals(0xFFA855F7, LightTest1Palette.GradientEnd)
     }
 
-    // ---- Light Test 2: declared tokens ---------------------------------------------------
+    // ---- Light Test 2 — Voxora Contrast Light --------------------------------------------
 
     @Test
     fun lightTest2DeclaresItsSpecifiedSurfacesAndBorders() {
-        assertEquals(0xFFF8FAFC, LightTest2Palette.Background)
-        assertEquals(0xFFFFFFFF, LightTest2Palette.Surface)
-        assertEquals(0xFFF1F5F9, LightTest2Palette.SurfaceVariant)
-        assertEquals(0xFFE2E8F0, LightTest2Palette.OutlineVariant)
+        assertEquals(0xFFF5F7FB, LightTest2Palette.Background)
+        assertEquals(0xFFEDF1F7, LightTest2Palette.Surface)
+        assertEquals(0xFFE4E9F1, LightTest2Palette.SurfaceVariant)
+        assertEquals(0xFFD3D9E3, LightTest2Palette.OutlineVariant)
     }
 
     @Test
-    fun lightTest2DeclaresItsSpecifiedAccents() {
-        assertEquals(0xFF22D3EE, LightTest2Palette.Cyan)
-        assertEquals(0xFF0891B2, LightTest2Palette.CyanDark)
-        assertEquals(0xFF6366F1, LightTest2Palette.Indigo)
-        assertEquals(0xFF4F46E5, LightTest2Palette.IndigoDark)
-        assertEquals(0xFF8B5CF6, LightTest2Palette.Violet)
-        assertEquals(0xFFA855F7, LightTest2Palette.Purple)
+    fun lightTest2DeclaresItsSpecifiedCoolIndigoIdentity() {
+        // "gold becomes a refined indigo/blue complement".
+        assertEquals(0xFF375CD4, LightTest2Palette.Primary)
+        assertEquals(0xFF2E50B8, LightTest2Palette.PrimaryDim)
+        assertEquals(0xFFDDE5FF, LightTest2Palette.PrimaryContainer)
+        assertEquals(0xFF1D2E6B, LightTest2Palette.OnPrimaryContainer)
+        assertEquals(0xFFE1E7F0, LightTest2Palette.SecondaryContainer)
+        assertEquals(0xFF2A3444, LightTest2Palette.OnSecondaryContainer)
     }
 
     @Test
-    fun lightTest2DeclaresItsSpecifiedTextAndStatusTokens() {
-        assertEquals(0xFF111827, LightTest2Palette.OnSurface)
-        assertEquals(0xFF475569, LightTest2Palette.OnSurfaceVariant)
-        assertEquals(0xFF64748B, LightTest2Palette.Explanation)
-        assertEquals(0xFF16A34A, LightTest2Palette.Success)
-        assertEquals(0xFFD97706, LightTest2Palette.Warning)
-        assertEquals(0xFFDC2626, LightTest2Palette.Error)
+    fun lightTest2DeclaresItsSpecifiedCoolSlateText() {
+        // "warm beige text becomes cool slate text".
+        assertEquals(0xFF101827, LightTest2Palette.OnSurface)
+        assertEquals(0xFF4B5870, LightTest2Palette.OnSurfaceVariant)
+        assertEquals(0xFF585E6B, LightTest2Palette.Disabled)
     }
 
     @Test
-    fun lightTest2DeclaresItsSpecifiedGradient() {
-        assertEquals(0xFF22D3EE, LightTest2Palette.GradientStart)
-        assertEquals(0xFF6366F1, LightTest2Palette.GradientMiddle)
-        assertEquals(0xFFA855F7, LightTest2Palette.GradientEnd)
+    fun lightTest2WarningKeepsTheSuppliedComplementaryBlue() {
+        // The supplied Warning was already legible on every surface, so it is kept exactly.
+        assertEquals(0xFF2254E6, LightTest2Palette.Warning)
+    }
+
+    @Test
+    fun lightTest2ErrorAndSuccessAreTheMinimalLegibleAdjustments() {
+        // The supplied vivid Error (#5DE8E8) measured 1.22:1 and Success (#DC3D95) 3.35:1 on the
+        // card — invisible and below AA. They keep their hue families but are darkened to the
+        // lightest members that clear 4.5:1, as required by the task's WCAG instruction.
+        assertEquals(0xFF0B6E8A, LightTest2Palette.Error)
+        assertEquals(0xFFBE185D, LightTest2Palette.Success)
+        assertFalse(LightTest2Palette.Error == 0xFF5DE8E8)
+        assertFalse(LightTest2Palette.Success == 0xFFDC3D95)
+    }
+
+    @Test
+    fun lightTest2ExplanationIsTheMinimalLegibleAdjustment() {
+        // Supplied #6B7384 measured 3.91:1 on the card; #5F6775 clears AA while staying lighter
+        // than secondary content, i.e. still the less prominent role.
+        assertEquals(0xFF5F6775, LightTest2Palette.Explanation)
+    }
+
+    @Test
+    fun lightTest2DangerMatchesErrorLikeTheDarkPalette() {
+        assertEquals(LightTest2Palette.Error, LightTest2Palette.Danger)
     }
 
     // ---- independence --------------------------------------------------------------------
@@ -99,7 +121,6 @@ class LightTestPalettesTest {
         assertFalse(LightTest1Palette.OnSurfaceVariant == LightTest2Palette.OnSurfaceVariant)
         assertFalse(LightTest1Palette.SurfaceVariant == LightTest2Palette.SurfaceVariant)
         assertFalse(LightTest1Palette.OutlineVariant == LightTest2Palette.OutlineVariant)
-        assertFalse(LightTest1Palette.GradientMiddle == LightTest2Palette.GradientMiddle)
     }
 
     @Test
@@ -108,7 +129,17 @@ class LightTestPalettesTest {
         assertFalse(LightTest2Palette.Background == LightTest1Palette.Background)
         assertFalse(LightTest2Palette.OnSurface == LightTest1Palette.OnSurface)
         assertFalse(LightTest2Palette.SurfaceVariant == LightTest1Palette.SurfaceVariant)
-        assertFalse(LightTest2Palette.GradientMiddle == LightTest1Palette.GradientMiddle)
+        assertFalse(LightTest2Palette.Explanation == LightTest1Palette.Explanation)
+    }
+
+    @Test
+    fun lightTest2IsNotTheOldNovaStylePalette() {
+        // The previous Light Test 2 (cyan -> indigo -> purple) is gone; nothing of it survives.
+        assertFalse(LightTest2Palette.Background == 0xFFF8FAFC)
+        assertFalse(LightTest2Palette.SurfaceVariant == 0xFFF1F5F9)
+        assertFalse(LightTest2Palette.Primary == 0xFF6366F1)
+        assertFalse(LightTest2Palette.OnSurface == 0xFF111827)
+        assertFalse(LightTest2Palette.Explanation == 0xFF64748B)
     }
 
     @Test
@@ -163,7 +194,7 @@ class LightTestPalettesTest {
             LightTest2Palette.Background, LightTest2Palette.Surface, LightTest2Palette.SurfaceVariant,
             LightTest2Palette.OnSurface, LightTest2Palette.OnSurfaceVariant, LightTest2Palette.Explanation,
             LightTest2Palette.Neutral, LightTest2Palette.Disabled, LightTest2Palette.Success,
-            LightTest2Palette.Warning, LightTest2Palette.Error, LightTest2Palette.GradientStart,
+            LightTest2Palette.Warning, LightTest2Palette.Error,
         )) {
             assertTrue("not opaque: $value", PaletteContrast.isOpaque(value))
         }
@@ -177,8 +208,7 @@ class LightTestPalettesTest {
             LightTest1Palette.OnSurfaceVariant,
             LightTest1Palette.Explanation,
             LightTest1Palette.Neutral,
-            LightTest1Palette.Surface,
-            LightTest1Palette.Background,
+            listOf(LightTest1Palette.Surface, LightTest1Palette.Background),
         )
     }
 
@@ -190,15 +220,46 @@ class LightTestPalettesTest {
             LightTest2Palette.OnSurfaceVariant,
             LightTest2Palette.Explanation,
             LightTest2Palette.Neutral,
-            LightTest2Palette.Surface,
-            LightTest2Palette.Background,
+            listOf(LightTest2Palette.Surface, LightTest2Palette.Background),
         )
+    }
+
+    @Test
+    fun lightTest2TextRolesClearAaOnTheCardToo() {
+        // The contrast theme was designed so that every text role also reads on its card
+        // (surfaceVariant), which is the darkest surface the UI puts text on.
+        assertContentClearsAa(
+            "LightTest2",
+            LightTest2Palette.OnSurface,
+            LightTest2Palette.OnSurfaceVariant,
+            LightTest2Palette.Explanation,
+            LightTest2Palette.Neutral,
+            listOf(LightTest2Palette.SurfaceVariant),
+        )
+    }
+
+    @Test
+    fun lightTest2StatusRolesClearAaOnTheCard() {
+        for ((role, value) in listOf(
+            "primary" to LightTest2Palette.Primary,
+            "error" to LightTest2Palette.Error,
+            "success" to LightTest2Palette.Success,
+            "warning" to LightTest2Palette.Warning,
+            "disabled" to LightTest2Palette.Disabled,
+        )) {
+            val ratio = PaletteContrast.ratio(value, LightTest2Palette.SurfaceVariant)
+            assertTrue(
+                "LightTest2 $role contrast $ratio on the card is below AA",
+                ratio >= PaletteContrast.AA,
+            )
+        }
     }
 
     @Test
     fun theLightCardsAreDistinguishableFromThePage() {
         assertFalse(LightTest1Palette.Surface == LightTest1Palette.Background)
         assertFalse(LightTest2Palette.Surface == LightTest2Palette.Background)
+        assertFalse(LightTest2Palette.SurfaceVariant == LightTest2Palette.Background)
     }
 
     @Test
@@ -218,10 +279,9 @@ class LightTestPalettesTest {
         onSurfaceVariant: Long,
         explanation: Long,
         neutral: Long,
-        surface: Long,
-        background: Long,
+        backgrounds: List<Long>,
     ) {
-        for (bg in listOf(surface, background)) {
+        for (bg in backgrounds) {
             for ((role, value) in listOf(
                 "onSurface" to onSurface,
                 "onSurfaceVariant" to onSurfaceVariant,

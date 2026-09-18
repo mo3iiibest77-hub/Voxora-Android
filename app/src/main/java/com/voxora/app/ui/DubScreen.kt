@@ -307,16 +307,18 @@ private fun DubContent(
                     }
                 }
                 Spacer(Modifier.height(12.dp))
+                // Guidance, not content: the capture hint and the latency note are the explanation
+                // role, so they read as the same kind of text as every other help sentence.
                 Text(
                     text = stringResource(R.string.phase1_hint),
-                    color = colors.onSurfaceVariant,
+                    color = VoxoraColors.explanation,
                     style = MaterialTheme.typography.bodySmall,
                     textAlign = TextAlign.Center,
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = stringResource(R.string.latency_hint),
-                    color = colors.onSurfaceVariant.copy(alpha = 0.85f),
+                    color = VoxoraColors.explanation,
                     style = MaterialTheme.typography.labelSmall,
                     textAlign = TextAlign.Center,
                 )

@@ -69,7 +69,13 @@ class OriginalDarkPaletteTest {
         assertEquals(0xFFE6B422, OriginalDarkPalette.Warning)
         assertEquals(0xFFE85D5D, OriginalDarkPalette.Danger)
         assertEquals(0xFFE85D5D, OriginalDarkPalette.Error)
-        assertEquals(0xFFA79E8C, OriginalDarkPalette.Explanation)
+    }
+
+    @Test
+    fun theExplanationRoleIsTheOwnersDedicatedIcyElectricBlue() {
+        // The one deliberate change from the historical palette: the warm tan help colour read as a
+        // second gold accent, so guidance text is now a dedicated icy/electric blue.
+        assertEquals(0xFF7DD3FC, OriginalDarkPalette.Explanation)
     }
 
     @Test
@@ -123,12 +129,25 @@ class OriginalDarkPaletteTest {
     }
 
     @Test
-    fun explanationIsLessProminentThanSecondaryContent() {
-        val explanation = PaletteContrast.luminance(OriginalDarkPalette.Explanation)
-        val secondary = PaletteContrast.luminance(OriginalDarkPalette.OnSurfaceVariant)
-        assertTrue(
-            "help text ($explanation) must be dimmer than secondary content ($secondary)",
-            explanation < secondary,
+    fun theExplanationRoleIsDistinctFromEveryContentAndStatusRole() {
+        // The historical "explanation is dimmer than secondary content" ordering does not hold for
+        // the icy blue, which is brighter than the warm secondary text. The contract that replaces
+        // it is distinctness plus dedicated use: guidance is the only role with this value, so a
+        // screen that asks for "help" never accidentally gets content or a status tone.
+        val others = listOf(
+            OriginalDarkPalette.OnSurface,
+            OriginalDarkPalette.OnSurfaceVariant,
+            OriginalDarkPalette.Gold,
+            OriginalDarkPalette.GoldDim,
+            OriginalDarkPalette.Success,
+            OriginalDarkPalette.Warning,
+            OriginalDarkPalette.Danger,
+            OriginalDarkPalette.Neutral,
+            OriginalDarkPalette.Disabled,
+        )
+        assertFalse(
+            "explanation shares a value with content or a status role",
+            OriginalDarkPalette.Explanation in others,
         )
     }
 
