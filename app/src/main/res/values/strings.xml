@@ -242,7 +242,9 @@
     <string name="reader_preview_source">This is the selected source segment. The highlight follows the audio actually played, not an estimated translation timeline.</string>
     <string name="reader_preview_next">The next segment remains visible and can be selected during playback.</string>
     <string name="settings_cloud_account">Google account</string>
-    <string name="settings_cloud_not_configured">Google sign-in is not configured in this build. You can still use your own Gemini API key.</string>
+    <string name="settings_cloud_needs_setup">Sign-in needs setup</string>
+    <string name="settings_cloud_not_configured">Voxora supports Google sign-in, but this build has not been set up for it yet, so the account chooser cannot open. Your Gemini API key below works without it.</string>
+    <string name="settings_cloud_not_connected">Not connected</string>
     <string name="settings_cloud_authorized">Signed in with Google</string>
     <string name="settings_cloud_access">Voxora can read this account\'s Gemini projects and keys, read-only.</string>
     <string name="settings_cloud_change_account">Change account</string>

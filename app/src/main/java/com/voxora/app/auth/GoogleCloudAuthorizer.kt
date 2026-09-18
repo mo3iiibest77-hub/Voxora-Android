@@ -11,6 +11,7 @@ import com.google.android.gms.common.api.Scope
 import com.voxora.app.R
 import com.voxora.app.util.VoxoraLog
 import com.voxora.core.cloud.CloudAuthFailure
+import com.voxora.core.cloud.CloudOAuthConfig
 import com.voxora.core.cloud.CloudScopes
 
 /**
@@ -55,12 +56,14 @@ sealed interface CloudAuthorizationOutcome {
  */
 class GoogleCloudAuthorizer(private val context: Context) {
 
-    /** Whether this build has a usable OAuth client ID. The shipped placeholder counts as absent. */
+    /**
+     * Whether this build has a usable OAuth client ID. The shipped placeholder counts as absent,
+     * so an unconfigured build reports [CloudAuthFailure.CONFIGURATION_MISSING] rather than a
+     * failure the user could not have caused. The rule itself is [CloudOAuthConfig], which is pure
+     * JVM and unit-tested; this is the only place that reads the string resource.
+     */
     val configured: Boolean
-        get() {
-            val value = context.getString(R.string.default_web_client_id).trim()
-            return value.isNotEmpty() && !value.startsWith(PLACEHOLDER_PREFIX)
-        }
+        get() = CloudOAuthConfig.isConfigured(context.getString(R.string.default_web_client_id))
 
     /**
      * Starts an authorization attempt.
@@ -117,6 +120,5 @@ class GoogleCloudAuthorizer(private val context: Context) {
 
     private companion object {
         const val TAG = "VoxoraCloud"
-        const val PLACEHOLDER_PREFIX = "REPLACE_"
     }
 }

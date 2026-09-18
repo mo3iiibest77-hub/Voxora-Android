@@ -168,11 +168,16 @@ private fun CloudAccountContent(
     onOpenUsage: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Tapping the card starts authorization whenever a tap could actually do something — signed
+    // out, or retrying after a failure. When a grant is held, or while the consent screen is open,
+    // the card stays inert so a stray tap cannot launch a second request.
+    val cardStartsAuthorization = auth is CloudAuthState.SignedOut || auth is CloudAuthState.Failed
+
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        CloudCard {
+        CloudCard(onClick = if (cardStartsAuthorization) onAuthorize else null) {
             CloudRowHeader(
                 icon = Icons.Filled.Person,
                 title = stringResource(R.string.settings_cloud_account),
@@ -236,10 +241,14 @@ private fun CloudAccountContent(
                     }
                 }
                 is CloudAuthState.NotConfigured -> {
+                    // Configuration is missing, not the feature. The copy says so, and the action
+                    // stays on screen but disabled — hiding it would read as "sign-in does not
+                    // exist", which is exactly the impression this state used to give.
                     CloudNote(
                         text = stringResource(R.string.settings_cloud_not_configured),
                         tone = CloudNoteTone.NEUTRAL,
                     )
+                    AuthorizeButton(onAuthorize = {}, enabled = false)
                 }
                 is CloudAuthState.Authorizing -> {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -252,7 +261,7 @@ private fun CloudAccountContent(
                         Text(
                             text = stringResource(R.string.settings_cloud_authorizing),
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = VoxoraColors.neutral,
                         )
                     }
                 }
@@ -360,10 +369,17 @@ private fun CloudAccountContent(
     }
 }
 
+/**
+ * The sign-in action.
+ *
+ * [enabled] exists for the not-configured state: the button stays visible so the feature is
+ * evidently present, but it cannot start a flow this build has no client for.
+ */
 @Composable
-private fun AuthorizeButton(onAuthorize: () -> Unit) {
+private fun AuthorizeButton(onAuthorize: () -> Unit, enabled: Boolean = true) {
     Button(
         onClick = onAuthorize,
+        enabled = enabled,
         modifier = Modifier
             .fillMaxWidth()
             .height(50.dp),
@@ -512,21 +528,42 @@ private fun KeyOption(
 
 // ---- shared card pieces ------------------------------------------------------------
 
+/**
+ * A card, optionally tappable.
+ *
+ * [onClick] is null for the states where a tap has nothing to do, so the account card is only
+ * clickable when it can actually start something.
+ */
 @Composable
-private fun CloudCard(content: @Composable () -> Unit) {
+private fun CloudCard(
+    onClick: (() -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
     val colors = MaterialTheme.colorScheme
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
-        color = colors.surfaceContainerHigh,
-        border = BorderStroke(1.dp, colors.outlineVariant),
-    ) {
+    val shape = RoundedCornerShape(20.dp)
+    val body: @Composable () -> Unit = {
         Column(
             modifier = Modifier.padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             content()
         }
+    }
+    if (onClick != null) {
+        Surface(
+            onClick = onClick,
+            modifier = Modifier.fillMaxWidth(),
+            shape = shape,
+            color = colors.surfaceContainerHigh,
+            border = BorderStroke(1.dp, colors.outlineVariant),
+        ) { body() }
+    } else {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = shape,
+            color = colors.surfaceContainerHigh,
+            border = BorderStroke(1.dp, colors.outlineVariant),
+        ) { body() }
     }
 }
 
@@ -590,9 +627,10 @@ private fun CloudNote(text: String, tone: CloudNoteTone = CloudNoteTone.NEUTRAL)
 private fun cloudAccountSubtitle(auth: CloudAuthState): String? = when (auth) {
     is CloudAuthState.Authorized -> auth.accountEmail ?: stringResource(R.string.settings_cloud_authorized)
     is CloudAuthState.Authorizing -> stringResource(R.string.settings_cloud_authorizing)
-    // The body below already explains the configuration gap; a subtitle would only repeat it.
-    is CloudAuthState.NotConfigured -> null
-    is CloudAuthState.SignedOut -> stringResource(R.string.settings_sign_in)
+    // The body below explains the configuration gap in full; the subtitle names the state.
+    is CloudAuthState.NotConfigured -> stringResource(R.string.settings_cloud_needs_setup)
+    // Signed out is a state, not an action: the button below carries the action.
+    is CloudAuthState.SignedOut -> stringResource(R.string.settings_cloud_not_connected)
     is CloudAuthState.Failed -> cloudFailureMessage(auth.reason)
 }
 

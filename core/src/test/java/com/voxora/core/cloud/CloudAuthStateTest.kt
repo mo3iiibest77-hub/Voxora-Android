@@ -98,6 +98,39 @@ class CloudAuthStateTest {
         assertNull(CloudAuthState.SignedOut.accountEmailOrNull)
     }
 
+    /**
+     * The four states the account card renders must stay mutually exclusive.
+     *
+     * The card branches on exactly these, and each one needs a different action. In particular
+     * `NotConfigured` is about the **build**, not the user: it is not a failure and not a
+     * signed-out session, and collapsing it into either is what made a supported feature read as
+     * "sign-in is not implemented".
+     */
+    @Test
+    fun theFourUserFacingStatesAreMutuallyExclusive() {
+        val states: List<CloudAuthState> = listOf(
+            CloudAuthState.NotConfigured,
+            CloudAuthState.SignedOut,
+            CloudAuthState.Authorizing,
+            CloudAuthState.Authorized("a@example.com", null),
+        )
+
+        // Exactly one can be a real grant and exactly one can be in flight, so a card that asks
+        // "authorized?" and "busy?" can never light up two branches at once.
+        assertEquals(1, states.count { it.isAuthorized })
+        assertEquals(1, states.count { it.isBusy })
+
+        // Configuration missing carries no account and is not authorized: it is its own state.
+        assertNull(CloudAuthState.NotConfigured.accountEmailOrNull)
+        assertFalse(CloudAuthState.NotConfigured.isAuthorized)
+        assertFalse(CloudAuthState.NotConfigured.isBusy)
+
+        // Signed out is the configured-but-not-connected state, and is distinct from a failure.
+        assertNull(CloudAuthState.SignedOut.accountEmailOrNull)
+        assertFalse(CloudAuthState.SignedOut.isAuthorized)
+        assertFalse(CloudAuthState.SignedOut.isBusy)
+    }
+
     @Test
     fun configurationMissingIsDistinctFromEveryOtherFailure() {
         val reasons = CloudAuthFailure.entries

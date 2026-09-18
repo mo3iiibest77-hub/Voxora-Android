@@ -241,7 +241,9 @@
     <string name="reader_preview_source">این قطعهٔ انتخاب‌شده از متن اصلی است. برجسته‌سازی بر اساس صدای واقعاً پخش‌شده تغییر می‌کند، نه زمان‌بندی تخمینی ترجمه.</string>
     <string name="reader_preview_next">قطعهٔ بعدی قابل مشاهده است و هنگام پخش هم می‌توانی انتخابش کنی.</string>
     <string name="settings_cloud_account">حساب Google</string>
-    <string name="settings_cloud_not_configured">ورود با Google در این نسخه تنظیم نشده است. همچنان می‌توانی از کلید API خودت استفاده کنی.</string>
+    <string name="settings_cloud_needs_setup">ورود نیاز به تنظیم دارد</string>
+    <string name="settings_cloud_not_configured">Voxora از ورود با حساب Google پشتیبانی می‌کند، اما این نسخه هنوز برای آن تنظیم نشده است، پس انتخابگر حساب باز نمی‌شود. کلید API Gemini در پایین بدون آن کار می‌کند.</string>
+    <string name="settings_cloud_not_connected">وصل نشده</string>
     <string name="settings_cloud_authorized">با حساب Google وارد شده‌ای</string>
     <string name="settings_cloud_access">Voxora می‌تواند پروژه‌ها و کلیدهای Gemini این حساب را فقط-خواندنی ببیند.</string>
     <string name="settings_cloud_change_account">تغییر حساب</string>
