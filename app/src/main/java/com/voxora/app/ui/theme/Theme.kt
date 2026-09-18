@@ -13,50 +13,33 @@ import androidx.compose.ui.graphics.Color
 import com.voxora.core.prefs.ThemeMode
 
 /**
- * The Voxora brand palette.
+ * The Voxora design system.
  *
- * Gold is the identity and stays gold in both appearances; the Live green and the stop red are
- * the same colours the floating bubbles and the Live Dub status dot already use. What changes
- * between light and dark is the *value* a role resolves to, never the role itself.
+ * Two appearances, one role map. `VoxoraPalette` holds the raw values (and is unit-tested);
+ * this file is the only place a value becomes a `Color`, and it is the only file in the app
+ * allowed to contain a colour literal. A screen asks for a role — `MaterialTheme.colorScheme.*`
+ * or `VoxoraColors.*` — and never for a number.
+ *
+ * The accents are Google's familiar families used semantically: **blue** for action and selection,
+ * **green** for success, **yellow** for warning, **red** for error. Voxora gold survives as the
+ * brand accent role ([tertiary]) for a subtle highlight, and in the Live waveform, but it no longer
+ * fills cards, backgrounds or explanatory text.
  */
-private val Gold = Color(0xFFD4AF37)
-private val GoldDim = Color(0xFFB8962E)
-private val NearBlack = Color(0xFF0A0A0B)
-private val SurfaceDark = Color(0xFF141416)
-private val Card = Color(0xFF1C1C1F)
-
-/** Active narration / success. Matches the Live bubble's green. */
-private val SuccessDark = Color(0xFF3DDC84)
-
-/** Paused, ready, preparing — the warm Voxora accent. */
-private val WarningDark = Color(0xFFE6B422)
-
-/** Stopped or failed. Matches the Live bubble's stop red. */
-private val DangerDark = Color(0xFFE85D5D)
-
-/**
- * Deep gold. The brand gold is a bright accent, which is legible as a *fill* on a dark surface but
- * not as text or a thin outline on a light one, so light mode uses a darker member of the same
- * family for the `primary` role and keeps the bright gold for containers.
- */
-private val GoldInk = Color(0xFF8A6A16)
-
-/** Light-mode status colours: the same semantics, darkened until they are readable on off-white. */
-private val SuccessLight = Color(0xFF1B7F4B)
-private val WarningLight = Color(0xFF8A6100)
-private val DangerLight = Color(0xFFB3261E)
 
 /**
  * Semantic colours Material 3 does not model.
  *
- * `colorScheme` has no success, warning or explanation role, so screens were reaching for literal
- * hex values or for `onSurfaceVariant`. These are the named roles those values meant:
+ * `colorScheme` has no success, warning, explanation, neutral or disabled role, so screens were
+ * reaching for literal hex values, for `onSurfaceVariant`, or for an alpha on `onSurface`. These
+ * are the named roles those values meant:
  *
- * - [success] / [warning] / [danger] are the status tones, matching the Live bubble's palette;
- * - [explanation] is the one role for **explanatory and help text** — the sentences that explain
- *   what a control does, why a figure is unavailable, or what a failure means. It is deliberately
- *   distinct from primary content, headings, buttons, errors and warnings, so a screen asks for
- *   "help text" instead of guessing at an alpha on `onSurface`.
+ * - [success] / [warning] / [danger] are the status tones;
+ * - [neutral] is the fourth status tone: idle, connecting, or an expected gap. It is neither good
+ *   nor bad, so it must never borrow success or danger;
+ * - [explanation] is the one role for **explanatory and help text** — the sentence under a control,
+ *   the note about why a figure is unavailable, the description of what a feature does. It is
+ *   deliberately less prominent than primary and secondary content;
+ * - [disabled] is content that is present but explicitly not actionable.
  *
  * Exposed through a composition local rather than added to `colorScheme` so the roles stay explicit
  * and each appearance resolves them deliberately.
@@ -66,35 +49,48 @@ data class VoxoraSemanticColors(
     val success: Color,
     val warning: Color,
     val danger: Color,
+    val neutral: Color,
     val explanation: Color,
+    val disabled: Color,
 )
 
 private val DarkSemantics = VoxoraSemanticColors(
-    success = SuccessDark,
-    warning = WarningDark,
-    danger = DangerDark,
-    explanation = Color(0xFFA79E8C),
+    success = Color(VoxoraPalette.GreenDark),
+    warning = Color(VoxoraPalette.YellowDark),
+    danger = Color(VoxoraPalette.RedDark),
+    neutral = Color(VoxoraPalette.NeutralDark),
+    explanation = Color(VoxoraPalette.ExplanationDark),
+    disabled = Color(VoxoraPalette.DisabledDark),
 )
 
 private val LightSemantics = VoxoraSemanticColors(
-    success = SuccessLight,
-    warning = WarningLight,
-    danger = DangerLight,
-    explanation = Color(0xFF6E685B),
+    success = Color(VoxoraPalette.Green),
+    warning = Color(VoxoraPalette.Yellow),
+    danger = Color(VoxoraPalette.Red),
+    neutral = Color(VoxoraPalette.NeutralLight),
+    explanation = Color(VoxoraPalette.ExplanationLight),
+    disabled = Color(VoxoraPalette.DisabledLight),
 )
 
 private val LocalVoxoraSemanticColors = staticCompositionLocalOf { DarkSemantics }
 
 /** Accessor for the semantic roles, e.g. `VoxoraColors.explanation`. */
 object VoxoraColors {
+    /** Active narration, a healthy connection, a completed action. */
     val success: Color
         @Composable @ReadOnlyComposable get() = LocalVoxoraSemanticColors.current.success
 
+    /** Paused, ready, preparing, a limit approaching. */
     val warning: Color
         @Composable @ReadOnlyComposable get() = LocalVoxoraSemanticColors.current.warning
 
+    /** Stopped, failed, refused. */
     val danger: Color
         @Composable @ReadOnlyComposable get() = LocalVoxoraSemanticColors.current.danger
+
+    /** Idle or connecting status, and an expected gap in the data. Never a success or an error. */
+    val neutral: Color
+        @Composable @ReadOnlyComposable get() = LocalVoxoraSemanticColors.current.neutral
 
     /**
      * Explanatory and help text. Use this for the sentence under a control or a note about why
@@ -102,6 +98,10 @@ object VoxoraColors {
      */
     val explanation: Color
         @Composable @ReadOnlyComposable get() = LocalVoxoraSemanticColors.current.explanation
+
+    /** Content that is present but not actionable. */
+    val disabled: Color
+        @Composable @ReadOnlyComposable get() = LocalVoxoraSemanticColors.current.disabled
 }
 
 /**
@@ -113,88 +113,107 @@ object VoxoraColors {
  * composable without pretending the colours carry meaning they do not.
  */
 object VoxoraBrand {
-    val waveGold = Color(0xFFE6B422)
+    /** The Voxora gold. Decorative only — the brand accent role is `colorScheme.tertiary`. */
+    val waveGold = Color(VoxoraPalette.Gold)
     val waveGreen = Color(0xFF3DDC97)
 }
 
 /**
- * Warm dark palette. The container and outline roles below are the ones Material 3 derives from
- * `primary` for tonal surfaces; without them the baseline scheme would tint grouped surfaces
- * purple, which is off-brand.
+ * The dark appearance: near-black surfaces, cool neutrals, and the lifted Google accents.
+ *
+ * This stays the product's primary visual direction. The warm brown/gold ramp the first pass used
+ * is gone — neutrals are cool grey and gold is confined to the `tertiary` brand accent — so
+ * explanatory text no longer reads as gold.
  */
 private val DarkColors = darkColorScheme(
-    primary = Gold,
-    onPrimary = NearBlack,
-    primaryContainer = Color(0xFF3A2E12),
-    onPrimaryContainer = Color(0xFFF6E3A8),
-    secondary = GoldDim,
-    onSecondary = NearBlack,
-    secondaryContainer = Color(0xFF2A2418),
-    onSecondaryContainer = Color(0xFFE3D2A0),
-    background = NearBlack,
-    onBackground = Color(0xFFF5F0E6),
-    surface = SurfaceDark,
-    onSurface = Color(0xFFF5F0E6),
-    surfaceVariant = Card,
-    onSurfaceVariant = Color(0xFFC4BBA8),
-    surfaceTint = Gold,
-    surfaceContainerLowest = Color(0xFF0A0A0B),
-    surfaceContainerLow = Color(0xFF121214),
-    surfaceContainer = Color(0xFF17171A),
-    surfaceContainerHigh = Color(0xFF1C1C1F),
-    surfaceContainerHighest = Color(0xFF242428),
-    outline = Color(0xFF4E4A42),
-    outlineVariant = Color(0xFF2E2C28),
-    error = DangerDark,
-    onError = Color.White,
-    errorContainer = Color(0xFF4A1F1F),
-    onErrorContainer = Color(0xFFFFD9D9),
+    primary = Color(VoxoraPalette.BlueDark),
+    onPrimary = Color(VoxoraPalette.OnBlueDark),
+    primaryContainer = Color(VoxoraPalette.BlueContainerDark),
+    onPrimaryContainer = Color(VoxoraPalette.OnBlueContainerDark),
+    inversePrimary = Color(VoxoraPalette.Blue),
+    secondary = Color(VoxoraPalette.OnSurfaceVariantDark),
+    onSecondary = Color(VoxoraPalette.SurfaceHighDark),
+    secondaryContainer = Color(VoxoraPalette.SurfaceHighestDark),
+    onSecondaryContainer = Color(VoxoraPalette.OnSurfaceDark),
+    // The brand accent. Subtle highlights and selected markers only — never a large surface.
+    tertiary = Color(VoxoraPalette.Gold),
+    onTertiary = Color(VoxoraPalette.OnGoldContainer),
+    tertiaryContainer = Color(VoxoraPalette.OnGoldContainer),
+    onTertiaryContainer = Color(VoxoraPalette.GoldContainer),
+    background = Color(VoxoraPalette.NearBlack),
+    onBackground = Color(VoxoraPalette.OnSurfaceDark),
+    surface = Color(VoxoraPalette.SurfaceDark),
+    onSurface = Color(VoxoraPalette.OnSurfaceDark),
+    surfaceVariant = Color(VoxoraPalette.SurfaceHighDark),
+    onSurfaceVariant = Color(VoxoraPalette.OnSurfaceVariantDark),
+    surfaceTint = Color(VoxoraPalette.BlueDark),
+    surfaceBright = Color(VoxoraPalette.SurfaceHighestDark),
+    surfaceDim = Color(VoxoraPalette.NearBlack),
+    surfaceContainerLowest = Color(VoxoraPalette.NearBlack),
+    surfaceContainerLow = Color(VoxoraPalette.SurfaceLowDark),
+    surfaceContainer = Color(VoxoraPalette.SurfaceContainerDark),
+    surfaceContainerHigh = Color(VoxoraPalette.SurfaceHighDark),
+    surfaceContainerHighest = Color(VoxoraPalette.SurfaceHighestDark),
+    outline = Color(VoxoraPalette.OutlineDark),
+    outlineVariant = Color(VoxoraPalette.OutlineVariantDark),
+    error = Color(VoxoraPalette.RedDark),
+    onError = Color(VoxoraPalette.OnErrorDark),
+    errorContainer = Color(VoxoraPalette.ErrorContainerDark),
+    onErrorContainer = Color(VoxoraPalette.OnErrorContainerDark),
 )
 
 /**
- * Light palette: clean, warm off-white surfaces with a strong hierarchy.
+ * The light appearance: clean white surfaces with a cool grey ramp.
  *
- * Every role is a real value rather than an inverted dark one, so contrast is deliberate: body and
- * heading text sits near-black on off-white, secondary text is a muted warm grey, and the gold
- * identity moves to a deep gold for text and outlines while the bright gold stays available as a
- * container tint. Voxora is not a Google clone — the gold, the warm neutrals and the Live green
- * are the product's own.
+ * Every role is a real value rather than an inverted dark one, so contrast is deliberate: content
+ * sits near-black on white, secondary content is a mid grey, help text is lighter still, and the
+ * Google blue carries action and selection. There is no brown and no gold on a large surface.
  */
 private val LightColors = lightColorScheme(
-    primary = GoldInk,
-    onPrimary = Color.White,
-    primaryContainer = Color(0xFFF6E3A8),
-    onPrimaryContainer = Color(0xFF3A2E12),
-    secondary = Color(0xFF6F6448),
-    onSecondary = Color.White,
-    secondaryContainer = Color(0xFFEFE6CE),
-    onSecondaryContainer = Color(0xFF2A2418),
-    background = Color(0xFFFAF9F6),
-    onBackground = Color(0xFF1B1A17),
-    surface = Color(0xFFFDFCFA),
-    onSurface = Color(0xFF1B1A17),
-    surfaceVariant = Color(0xFFEDEAE3),
-    onSurfaceVariant = Color(0xFF5C574C),
-    surfaceTint = GoldInk,
-    surfaceContainerLowest = Color(0xFFFFFFFF),
-    surfaceContainerLow = Color(0xFFF7F5F1),
-    surfaceContainer = Color(0xFFF2F0EA),
-    surfaceContainerHigh = Color(0xFFECE9E2),
-    surfaceContainerHighest = Color(0xFFE5E2DA),
-    outline = Color(0xFF7E796D),
-    outlineVariant = Color(0xFFD5D1C7),
-    error = DangerLight,
-    onError = Color.White,
-    errorContainer = Color(0xFFF9DEDC),
-    onErrorContainer = Color(0xFF410E0B),
+    primary = Color(VoxoraPalette.Blue),
+    onPrimary = Color(VoxoraPalette.OnBlue),
+    primaryContainer = Color(VoxoraPalette.BlueContainer),
+    onPrimaryContainer = Color(VoxoraPalette.OnBlueContainer),
+    inversePrimary = Color(VoxoraPalette.BlueDark),
+    secondary = Color(VoxoraPalette.OnSurfaceVariantLight),
+    onSecondary = Color(VoxoraPalette.White),
+    secondaryContainer = Color(VoxoraPalette.SurfaceContainerLight),
+    onSecondaryContainer = Color(VoxoraPalette.OnSurfaceLight),
+    // The brand accent. Deep enough to read as ink, never a surface.
+    tertiary = Color(VoxoraPalette.GoldInk),
+    onTertiary = Color(VoxoraPalette.White),
+    tertiaryContainer = Color(VoxoraPalette.GoldContainer),
+    onTertiaryContainer = Color(VoxoraPalette.OnGoldContainer),
+    background = Color(VoxoraPalette.White),
+    onBackground = Color(VoxoraPalette.OnSurfaceLight),
+    surface = Color(VoxoraPalette.SurfaceLight),
+    onSurface = Color(VoxoraPalette.OnSurfaceLight),
+    surfaceVariant = Color(VoxoraPalette.SurfaceContainerLight),
+    onSurfaceVariant = Color(VoxoraPalette.OnSurfaceVariantLight),
+    surfaceTint = Color(VoxoraPalette.Blue),
+    surfaceBright = Color(VoxoraPalette.White),
+    surfaceDim = Color(VoxoraPalette.SurfaceHighestLight),
+    surfaceContainerLowest = Color(VoxoraPalette.White),
+    surfaceContainerLow = Color(VoxoraPalette.SurfaceLowLight),
+    surfaceContainer = Color(VoxoraPalette.SurfaceContainerLight),
+    surfaceContainerHigh = Color(VoxoraPalette.SurfaceHighLight),
+    surfaceContainerHighest = Color(VoxoraPalette.SurfaceHighestLight),
+    outline = Color(VoxoraPalette.OutlineLight),
+    outlineVariant = Color(VoxoraPalette.OutlineVariantLight),
+    error = Color(VoxoraPalette.Red),
+    onError = Color(VoxoraPalette.White),
+    errorContainer = Color(VoxoraPalette.ErrorContainerLight),
+    onErrorContainer = Color(VoxoraPalette.OnErrorContainerLight),
 )
 
 /**
  * Applies the Voxora design system.
  *
  * [mode] is the user's persisted choice: [ThemeMode.SYSTEM] follows the device, and the other two
- * are explicit overrides. The semantic roles are resolved from the same decision as the colour
- * scheme, so a light screen can never be handed a dark status colour.
+ * are explicit overrides. `ThemeMode.DEFAULT` is `SYSTEM`, so an install that has never touched the
+ * control follows the device rather than defaulting to light. The semantic roles are resolved from
+ * the same decision as the colour scheme, so a light screen can never be handed a dark status
+ * colour.
  */
 @Composable
 fun VoxoraTheme(

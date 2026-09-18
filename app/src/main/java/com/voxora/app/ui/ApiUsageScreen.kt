@@ -672,7 +672,7 @@ private fun toneColor(tone: UsageTone): Color = when (tone) {
     UsageTone.OK -> VoxoraColors.success
     UsageTone.WARNING -> VoxoraColors.warning
     UsageTone.ERROR -> VoxoraColors.danger
-    UsageTone.NEUTRAL -> MaterialTheme.colorScheme.outline
+    UsageTone.NEUTRAL -> VoxoraColors.neutral
 }
 
 @Composable

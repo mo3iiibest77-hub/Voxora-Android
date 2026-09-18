@@ -7,9 +7,9 @@ import com.voxora.core.usage.UsageUnavailable
  * Which semantic colour a usage figure or status deserves.
  *
  * Kept separate from the composable and free of `android.*` so the mapping is unit-testable, and
- * so no composable has to decide a colour inline. The tones map onto the existing semantic roles:
+ * so no composable has to decide a colour inline. The tones map onto the semantic roles:
  * [OK] to `VoxoraColors.success`, [WARNING] to `VoxoraColors.warning`, [ERROR] to
- * `VoxoraColors.danger`, [NEUTRAL] to `colorScheme.outline`.
+ * `VoxoraColors.danger`, [NEUTRAL] to `VoxoraColors.neutral`.
  *
  * The distinction that matters most here is that **"we cannot show this" is usually not an error**.
  * An unconfigured key, a quota source that needs credentials, and a figure the API does not expose
