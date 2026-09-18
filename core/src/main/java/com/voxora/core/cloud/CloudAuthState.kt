@@ -26,6 +26,15 @@ enum class CloudAuthFailure {
     /** Google refused the requested scopes. */
     PERMISSION_DENIED,
 
+    /**
+     * Google rejected the held grant, so it must be re-issued.
+     *
+     * This is what a `401` from a Cloud read means: the token is expired or was revoked. It is
+     * kept apart from [NETWORK] because retrying the same token cannot help — the user has to
+     * authorize again.
+     */
+    EXPIRED,
+
     /** Google answered but not in a shape we can use. */
     UNSUPPORTED,
 
