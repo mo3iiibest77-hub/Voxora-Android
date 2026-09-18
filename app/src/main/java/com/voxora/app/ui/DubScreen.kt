@@ -35,7 +35,11 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -43,15 +47,23 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.voxora.app.R
 import com.voxora.app.dub.DubService
 import com.voxora.app.dub.DubUiStatus
+import com.voxora.app.dub.SyncStatusVisual
+import com.voxora.app.dub.SyncTone
+import com.voxora.app.dub.sync.MediaControlAccess
+import com.voxora.app.dub.sync.SyncState
 import com.voxora.app.ui.theme.VoxoraBrand
 import com.voxora.app.ui.theme.VoxoraColors
 import com.voxora.app.ui.theme.VoxoraTheme
@@ -76,14 +88,35 @@ fun DubScreen(
     modifier: Modifier = Modifier,
 ) {
     val level by DubService.audioLevel.collectAsStateWithLifecycle()
+    val syncState by DubService.syncState.collectAsStateWithLifecycle()
+
+    // The media-control grant is a system setting, so it can change while Voxora is in the
+    // background. Re-read it on every resume rather than trusting a value captured at first
+    // composition, or the card would still be showing after the user granted it.
+    val context = LocalContext.current
+    var mediaControlGranted by remember { mutableStateOf(MediaControlAccess.isGranted(context)) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                mediaControlGranted = MediaControlAccess.isGranted(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     DubContent(
         status = status,
         level = level,
+        syncState = syncState,
+        mediaControlGranted = mediaControlGranted,
         onStart = onStart,
         onStop = onStop,
         onBack = onBack,
         onOpenSettings = onOpenSettings,
         onDismissError = onDismissError,
+        onRequestMediaControl = { context.startActivity(MediaControlAccess.settingsIntent()) },
         modifier = modifier,
     )
 }
@@ -92,11 +125,14 @@ fun DubScreen(
 private fun DubContent(
     status: DubUiStatus,
     level: Float,
+    syncState: SyncState,
+    mediaControlGranted: Boolean,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onBack: () -> Unit,
     onOpenSettings: () -> Unit,
     onDismissError: () -> Unit,
+    onRequestMediaControl: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
@@ -203,6 +239,8 @@ private fun DubContent(
                             .fillMaxWidth()
                             .height(56.dp),
                     )
+                    Spacer(Modifier.height(12.dp))
+                    SyncStatusLine(state = syncState)
                 }
 
                 if (isError && status is DubUiStatus.Error) {
@@ -322,6 +360,18 @@ private fun DubContent(
                     style = MaterialTheme.typography.labelSmall,
                     textAlign = TextAlign.Center,
                 )
+                if (SyncStatusVisual.showsPermissionPrompt(live = isLive, granted = mediaControlGranted)) {
+                    Spacer(Modifier.height(14.dp))
+                    SyncPermissionCard(onRequest = onRequestMediaControl)
+                } else if (isLive && SyncStatusVisual.showsVideoNote(syncState)) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.sync_video_note),
+                        color = VoxoraColors.explanation,
+                        style = MaterialTheme.typography.labelSmall,
+                        textAlign = TextAlign.Center,
+                    )
+                }
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -329,6 +379,84 @@ private fun DubContent(
                     Text(stringResource(R.string.action_settings), color = colors.primary)
                 }
             }
+        }
+    }
+}
+
+/**
+ * One small line saying what synchronization is doing. The tone comes from
+ * [SyncStatusVisual]; the composable only asks for it.
+ */
+@Composable
+private fun SyncStatusLine(state: SyncState, modifier: Modifier = Modifier) {
+    val dot = when (SyncStatusVisual.tone(state)) {
+        SyncTone.ACTIVE -> VoxoraColors.success
+        SyncTone.WARNING -> VoxoraColors.warning
+        SyncTone.NEUTRAL -> VoxoraColors.neutral
+    }
+    val label = when (state) {
+        SyncState.IDLE -> stringResource(R.string.status_idle)
+        SyncState.WARMING_UP -> stringResource(R.string.sync_status_warming)
+        SyncState.SYNCED -> stringResource(R.string.sync_status_synced)
+        SyncState.CORRECTING -> stringResource(R.string.sync_status_correcting)
+        SyncState.AUDIO_ONLY -> stringResource(R.string.sync_status_audio_only)
+        SyncState.UNAVAILABLE -> stringResource(R.string.sync_status_unavailable)
+    }
+    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(dot),
+        )
+        Spacer(Modifier.size(8.dp))
+        Text(
+            text = label,
+            color = VoxoraColors.explanation,
+            style = MaterialTheme.typography.labelSmall,
+        )
+    }
+}
+
+/**
+ * The media-control opt-in.
+ *
+ * It explains *why* the permission is needed before offering the system settings page, and it is
+ * only shown while Live Dub is running without the grant — the feature works without it, as
+ * audio-only, so this is an offer and not a gate.
+ */
+@Composable
+private fun SyncPermissionCard(onRequest: () -> Unit, modifier: Modifier = Modifier) {
+    val colors = MaterialTheme.colorScheme
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(colors.surface)
+            .padding(14.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.sync_permission_title),
+            color = colors.onSurface,
+            fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = stringResource(R.string.sync_permission_body),
+            color = VoxoraColors.explanation,
+            style = MaterialTheme.typography.labelSmall,
+        )
+        Spacer(Modifier.height(10.dp))
+        OutlinedButton(
+            onClick = onRequest,
+            shape = RoundedCornerShape(10.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.sync_permission_action),
+                color = colors.primary,
+                style = MaterialTheme.typography.labelMedium,
+            )
         }
     }
 }
@@ -376,17 +504,94 @@ private fun LiveWaveform(
 
 @Preview(showBackground = true, uiMode = UI_MODE_NIGHT_YES)
 @Composable
+private fun SyncStatusLinePreview(modifier: Modifier = Modifier) {
+    VoxoraTheme {
+        Surface(modifier = modifier) {
+            Column(Modifier.padding(16.dp)) {
+                SyncStatusLine(state = SyncState.WARMING_UP)
+                Spacer(Modifier.height(8.dp))
+                SyncStatusLine(state = SyncState.SYNCED)
+                Spacer(Modifier.height(8.dp))
+                SyncStatusLine(state = SyncState.CORRECTING)
+                Spacer(Modifier.height(8.dp))
+                SyncStatusLine(state = SyncState.AUDIO_ONLY)
+                Spacer(Modifier.height(8.dp))
+                SyncStatusLine(state = SyncState.UNAVAILABLE)
+            }
+        }
+    }
+}
+
+@Preview(showBackground = true, uiMode = UI_MODE_NIGHT_YES)
+@Composable
+private fun SyncPermissionCardPreview(modifier: Modifier = Modifier) {
+    VoxoraTheme {
+        Surface(modifier = modifier) {
+            Box(Modifier.padding(16.dp)) {
+                SyncPermissionCard(onRequest = {})
+            }
+        }
+    }
+}
+
+@Preview(showBackground = true, uiMode = UI_MODE_NIGHT_YES)
+@Composable
 private fun DubContentPreview(modifier: Modifier = Modifier) {
     VoxoraTheme {
         Surface(modifier = modifier) {
             DubContent(
                 status = DubUiStatus.Idle,
                 level = 0f,
+                syncState = SyncState.IDLE,
+                mediaControlGranted = false,
                 onStart = {},
                 onStop = {},
                 onBack = {},
                 onOpenSettings = {},
                 onDismissError = {},
+                onRequestMediaControl = {},
+            )
+        }
+    }
+}
+
+@Preview(showBackground = true, uiMode = UI_MODE_NIGHT_YES)
+@Composable
+private fun DubContentSyncedPreview(modifier: Modifier = Modifier) {
+    VoxoraTheme {
+        Surface(modifier = modifier) {
+            DubContent(
+                status = DubUiStatus.Live,
+                level = 0.6f,
+                syncState = SyncState.SYNCED,
+                mediaControlGranted = true,
+                onStart = {},
+                onStop = {},
+                onBack = {},
+                onOpenSettings = {},
+                onDismissError = {},
+                onRequestMediaControl = {},
+            )
+        }
+    }
+}
+
+@Preview(showBackground = true, uiMode = UI_MODE_NIGHT_YES)
+@Composable
+private fun DubContentSyncPermissionPreview(modifier: Modifier = Modifier) {
+    VoxoraTheme {
+        Surface(modifier = modifier) {
+            DubContent(
+                status = DubUiStatus.Live,
+                level = 0.4f,
+                syncState = SyncState.AUDIO_ONLY,
+                mediaControlGranted = false,
+                onStart = {},
+                onStop = {},
+                onBack = {},
+                onOpenSettings = {},
+                onDismissError = {},
+                onRequestMediaControl = {},
             )
         }
     }

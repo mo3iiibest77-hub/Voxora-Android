@@ -19,6 +19,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 sealed class GeminiStatus {
     data object Idle : GeminiStatus()
@@ -35,11 +36,36 @@ class GeminiLiveSession(
     private val _status = MutableStateFlow<GeminiStatus>(GeminiStatus.Idle)
     val status: StateFlow<GeminiStatus> = _status.asStateFlow()
 
+    // DROP_OLDEST is kept deliberately: `handleMessage` runs on OkHttp's WebSocket thread, which
+    // cannot suspend, so blocking on a full buffer would stall the socket and the whole session.
+    // What changed is that a drop is no longer invisible — `emittedAudioChunks` below is compared
+    // with what the consumer received, and Live Dub reports the difference. The capacity stays
+    // generous so that, with the ordered consumer and the short output buffer, overflow is rare.
     private val _audioOut = MutableSharedFlow<FloatArray>(
         extraBufferCapacity = 48,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
     val audioOut: SharedFlow<FloatArray> = _audioOut.asSharedFlow()
+
+    /**
+     * How many dubbed chunks have been emitted since the session was created.
+     *
+     * The WebSocket callback cannot suspend, so a full buffer is dropped rather than blocking the
+     * socket — `tryEmit` cannot report that. Comparing this counter with the number of chunks a
+     * consumer actually received is what makes the loss *accounted* instead of silent, so the
+     * Live Dub instrumentation can report real drops rather than assume there were none.
+     */
+    private val emittedChunks = AtomicLong(0)
+    val emittedAudioChunks: Long get() = emittedChunks.get()
+
+    /**
+     * Invoked once with the first dubbed payload of each connection, for latency instrumentation.
+     * Set by the Live Dub service; never invoked from a test path that does not set it.
+     */
+    @Volatile
+    var onFirstAudio: (() -> Unit)? = null
+
+    private val awaitingFirstAudio = AtomicBoolean(true)
 
     private var ws: WebSocket? = null
     private val ready = AtomicBoolean(false)
@@ -86,6 +112,7 @@ class GeminiLiveSession(
 
     private fun openSocket() {
         _status.value = if (reconnectAttempts == 0) GeminiStatus.Connecting else GeminiStatus.Reconnecting
+        awaitingFirstAudio.set(true)
         val url = "${GeminiLiveConfig.WS_PATH}?key=${java.net.URLEncoder.encode(apiKey, "UTF-8")}"
         val request = Request.Builder().url(url).build()
         ws = client.newWebSocket(request, listener)
@@ -169,7 +196,11 @@ class GeminiLiveSession(
             val data = inline.optString("data")
             if (data.isNullOrBlank()) continue
             val pcm = PcmUtils.pcm16ToFloat(PcmUtils.fromBase64(data))
-            if (pcm.isNotEmpty()) _audioOut.tryEmit(pcm)
+            if (pcm.isNotEmpty()) {
+                if (awaitingFirstAudio.compareAndSet(true, false)) onFirstAudio?.invoke()
+                emittedChunks.incrementAndGet()
+                _audioOut.tryEmit(pcm)
+            }
         }
     }
 

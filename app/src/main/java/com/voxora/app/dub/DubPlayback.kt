@@ -11,10 +11,12 @@ import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Build
 import android.util.Log
+import com.voxora.app.dub.sync.SourceVolumeDuck
 import com.voxora.app.util.VoxoraLog
 import com.voxora.core.GeminiLiveConfig
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Gemini on USAGE_ASSISTANT (not STREAM_MUSIC).
@@ -31,12 +33,14 @@ class DubPlayback(context: Context? = null) {
     private var mediaSession: MediaSession? = null
     private val playing = AtomicBoolean(false)
     private var savedMusicVolume: Int = -1
+    private val writtenFrames = AtomicLong(0)
     /** 0..100 software gain for dub (volume keys) */
     private val dubVolume = AtomicInteger(100)
 
     fun start() {
         VoxoraLog.i("Playback", "start()")
         stop()
+        writtenFrames.set(0L)
         val attrs = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_ASSISTANT)
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
@@ -52,7 +56,11 @@ class DubPlayback(context: Context? = null) {
             AudioFormat.CHANNEL_OUT_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
         )
-        val bufSize = (minBuf * 8).coerceAtLeast(GeminiLiveConfig.OUTPUT_SAMPLE_RATE * 2)
+        // Keep the output buffer short. Every byte sitting in this buffer is added lip-sync delay
+        // before the first dubbed word is heard, so the old `minBuf * 8` (a full second at
+        // 24 kHz) was itself a latency bug. Two minimum buffers rides out a scheduling hiccup;
+        // MIN_BUFFER_BYTES floors it at ~125 ms so a tiny reported minimum cannot underrun.
+        val bufSize = (minBuf * 2).coerceAtLeast(MIN_BUFFER_BYTES)
         val builder = AudioTrack.Builder()
             .setAudioAttributes(attrs)
             .setAudioFormat(
@@ -93,7 +101,18 @@ class DubPlayback(context: Context? = null) {
             }
             offset += written
         }
+        writtenFrames.addAndGet(offset.toLong())
     }
+
+    /**
+     * Dubbed audio content handed to the output since [start], in nanoseconds.
+     *
+     * This is the dub side of the synchronizer's content clock. It counts what was *written*,
+     * not what the speaker has finished playing; with a short buffer the two differ by well
+     * under the drift tolerance, and counting writes keeps the number available on every thread.
+     */
+    fun writtenNanos(): Long =
+        writtenFrames.get() * 1_000_000_000L / GeminiLiveConfig.OUTPUT_SAMPLE_RATE
 
     fun stop() {
         VoxoraLog.i("Playback", "stop()")
@@ -226,13 +245,12 @@ class DubPlayback(context: Context? = null) {
         try {
             val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
             val cur = am.getStreamVolume(AudioManager.STREAM_MUSIC)
-            if (cur <= 0 || max <= 0) return
+            // The rule is pure and unit-tested; it returns null when there is no headroom, in
+            // which case the source is deliberately left exactly as it is.
+            val target = SourceVolumeDuck.duckTarget(cur, max) ?: return
             savedMusicVolume = cur
-            val target = (cur * 28 / 100).coerceAtLeast(1).coerceAtMost(cur - 1)
-            if (target < cur) {
-                am.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
-                VoxoraLog.i("Playback", "duck STREAM_MUSIC only $cur → $target (max=$max, ~28%); dub=ASSISTANT")
-            }
+            am.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
+            VoxoraLog.i("Playback", "duck STREAM_MUSIC only $cur → $target (max=$max, ~28%); dub=ASSISTANT")
         } catch (e: Exception) {
             Log.w(TAG, "lowerSourceMusicOnly: ${e.message}")
             VoxoraLog.w("Playback", "duck failed: ${e.message}")
@@ -242,9 +260,8 @@ class DubPlayback(context: Context? = null) {
 
     private fun restoreSourceMusic() {
         val am = audioManager ?: return
-        val saved = savedMusicVolume
+        val saved = SourceVolumeDuck.restoreTarget(savedMusicVolume) ?: return
         savedMusicVolume = -1
-        if (saved < 0) return
         try {
             am.setStreamVolume(AudioManager.STREAM_MUSIC, saved, 0)
             VoxoraLog.i("Playback", "restore STREAM_MUSIC → $saved")
@@ -255,5 +272,8 @@ class DubPlayback(context: Context? = null) {
 
     companion object {
         private const val TAG = "VoxoraPlayback"
+
+        /** Floor for the output buffer: ~125 ms of 24 kHz mono 16-bit audio. */
+        private val MIN_BUFFER_BYTES = GeminiLiveConfig.OUTPUT_SAMPLE_RATE * 2 / 8
     }
 }

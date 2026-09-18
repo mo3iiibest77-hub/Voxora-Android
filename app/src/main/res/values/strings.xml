@@ -132,6 +132,17 @@
     <string name="error_capture_failed">Could not capture system audio. Try again.</string>
     <string name="phase1_hint">Allow screen capture when asked — Voxora only uses system audio, not your camera.</string>
     <string name="latency_hint">Live dubbing has ~2–3s delay from the AI model — that is normal.</string>
+    <string name="sync_listener_label">Voxora Live Dub sync</string>
+    <string name="sync_status_warming">Synchronizing…</string>
+    <string name="sync_status_synced">Synced</string>
+    <string name="sync_status_correcting">Catching up…</string>
+    <string name="sync_status_audio_only">Audio only</string>
+    <string name="sync_status_unavailable">Sync unavailable</string>
+    <string name="sync_permission_title">Sharper sync</string>
+    <string name="sync_permission_body">To keep the translation lined up with the source, Voxora can briefly pause and resume the app that is playing. Android allows that only with notification access. Voxora never reads your notifications.</string>
+    <string name="sync_permission_action">Allow media control</string>
+    <string name="sync_permission_granted">Media control is on. Voxora can keep the source and the translation together.</string>
+    <string name="sync_video_note">External video cannot be delayed, so the translation stays a moment behind the picture. Syncing stops that gap from growing.</string>
     <string name="onboarding_welcome">Welcome to Voxora</string>
     <string name="onboarding_body">Hear any app in your language — powered by Gemini Live Translate.</string>
     <string name="permission_audio">Capture permission is required to hear system audio.</string>

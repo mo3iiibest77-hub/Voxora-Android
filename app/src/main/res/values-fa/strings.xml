@@ -115,6 +115,17 @@
     <string name="error_projection_denied">ضبط صفحه لغو شد. هر وقت آماده بودی دوباره تلاش کن.</string>
     <string name="phase1_hint">وقتی اجازهٔ ضبط صفحه خواست، تأیید کن — ⁨Voxora⁩ فقط صدای سیستم را می‌گیرد، نه دوربین.</string>
     <string name="latency_hint">در دوبله زنده، تأخیر حدود 2 تا 3 ثانیه‌ای مدل هوش مصنوعی طبیعی است.</string>
+    <string name="sync_listener_label">همگام‌سازی دوبله زندهٔ ⁨Voxora⁩</string>
+    <string name="sync_status_warming">در حال همگام‌سازی…</string>
+    <string name="sync_status_synced">همگام</string>
+    <string name="sync_status_correcting">در حال جبران تأخیر…</string>
+    <string name="sync_status_audio_only">فقط صدا</string>
+    <string name="sync_status_unavailable">همگام‌سازی در دسترس نیست</string>
+    <string name="sync_permission_title">همگام‌سازی دقیق‌تر</string>
+    <string name="sync_permission_body">برای اینکه ترجمه با منبع هماهنگ بماند، ⁨Voxora⁩ می‌تواند اپی را که در حال پخش است لحظه‌ای متوقف و دوباره پخش کند. ⁨Android⁩ این کار را فقط با دسترسی به اعلان‌ها اجازه می‌دهد. ⁨Voxora⁩ اعلان‌هایت را نمی‌خواند.</string>
+    <string name="sync_permission_action">اجازهٔ کنترل رسانه</string>
+    <string name="sync_permission_granted">کنترل رسانه فعال است. ⁨Voxora⁩ می‌تواند منبع و ترجمه را هماهنگ نگه دارد.</string>
+    <string name="sync_video_note">ویدیوی بیرونی را نمی‌توان عقب انداخت، پس ترجمه کمی از تصویر عقب‌تر می‌ماند. همگام‌سازی جلوی بیشتر شدن این فاصله را می‌گیرد.</string>
     <string name="bubble_live">زنده</string>
     <string name="notif_channel_name">⁨Voxora⁩ زنده</string>
     <string name="notif_channel_desc">وضعیت دوبله زنده و دکمهٔ توقف</string>

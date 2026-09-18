@@ -44,6 +44,24 @@
             android:name=".dub.FloatingBubbleService"
             android:exported="false" />
 
+        <!--
+          Live Dub synchronization. Android grants MediaSessionManager.getActiveSessions() only to
+          a notification listener, so this empty listener is what makes it possible to detect and
+          (only when the user opts in) pause/resume the app that is playing the source. It reads
+          no notification: it overrides nothing. The grant is requested through the system
+          settings page from the Live Dub screen, never silently; without it Live Dub runs as
+          audio-only. Only the system may bind it (BIND_NOTIFICATION_LISTENER_SERVICE).
+        -->
+        <service
+            android:name=".dub.sync.VoxoraNotificationListenerService"
+            android:exported="true"
+            android:label="@string/sync_listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <service
             android:name=".reader.ReaderService"
             android:exported="false"

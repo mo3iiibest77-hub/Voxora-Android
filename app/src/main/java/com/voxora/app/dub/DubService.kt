@@ -12,25 +12,39 @@ import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.voxora.app.MainActivity
 import com.voxora.app.R
+import com.voxora.app.dub.sync.DubEvent
+import com.voxora.app.dub.sync.DubSyncController
+import com.voxora.app.dub.sync.ExternalPlayer
+import com.voxora.app.dub.sync.LatencyTimeline
+import com.voxora.app.dub.sync.MediaSessionExternalPlayer
+import com.voxora.app.dub.sync.MonotonicClock
+import com.voxora.app.dub.sync.SyncDecision
+import com.voxora.app.dub.sync.SyncState
 import com.voxora.app.util.StatusToast
 import com.voxora.app.util.VoxoraLog
+import com.voxora.core.GeminiLiveConfig
 import com.voxora.core.gemini.GeminiLiveSession
 import com.voxora.core.gemini.GeminiStatus
 import com.voxora.core.prefs.UserPrefs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.sqrt
 
 private fun Intent.mediaProjectionData(): Intent? {
@@ -44,9 +58,25 @@ private fun Intent.mediaProjectionData(): Intent? {
 
 class DubService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val audioScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val gemini = GeminiLiveSession()
+
+    // ---- Synchronization layer. Pure logic lives in `dub/sync`; this class only feeds it. ----
+    private val clock = MonotonicClock { SystemClock.elapsedRealtimeNanos() }
+
+    // These are initialised in onCreate, not as field initialisers: a Service's fields are built
+    // before attachBaseContext, so `applicationContext` is not available yet and constructing
+    // anything context-bound here would crash on a null base context.
+    private lateinit var timeline: LatencyTimeline
+    private lateinit var externalPlayer: ExternalPlayer
+    private lateinit var sync: DubSyncController
+
+    /** Source audio content captured, in nanoseconds. Advanced only while the source is audible. */
+    private val sourceContentNanos = AtomicLong(0L)
+
+    /** Chunks the ordered consumer actually received, for accounting Gemini's drops. */
+    private val collectedDubChunks = AtomicLong(0L)
+
     private val capture = SystemAudioCapture { pcm ->
         var sum = 0.0
         for (s in pcm) sum += s * s
@@ -54,11 +84,23 @@ class DubService : Service() {
         val level = (rms * 4f).coerceIn(0f, 1f)
         val prev = _audioLevel.value
         _audioLevel.value = prev * 0.55f + level * 0.45f
+        timeline.mark(DubEvent.SOURCE_CHUNK)
+        // The source content clock advances only while the source is actually audible and not
+        // held by a correction. Counting silence would make a paused source look like it was
+        // still moving, and the synchronizer would try to "catch up" forever.
+        if (rms >= SOURCE_SILENCE_RMS && !sync.isHoldingSource) {
+            sourceContentNanos.addAndGet(
+                pcm.size * 1_000_000_000L / GeminiLiveConfig.INPUT_SAMPLE_RATE,
+            )
+        }
+        timeline.mark(DubEvent.PCM_SENT)
         gemini.sendPcm16k(pcm)
     }
     private lateinit var playback: DubPlayback
     private var projection: MediaProjection? = null
     private var lastToastKey: String = ""
+    private var syncJob: Job? = null
+    private var lastSyncState = SyncState.IDLE
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -67,7 +109,12 @@ class DubService : Service() {
         instance = this
         VoxoraLog.i("DubService", "onCreate")
         playback = DubPlayback(applicationContext)
+        timeline = LatencyTimeline(clock, log = { VoxoraLog.d("DubSync", it) })
+        externalPlayer = MediaSessionExternalPlayer(applicationContext)
+        sync = DubSyncController(externalPlayer, log = { VoxoraLog.i("DubSync", it) })
         createChannel()
+
+        gemini.onFirstAudio = { timeline.mark(DubEvent.GEMINI_FIRST_AUDIO) }
 
         scope.launch {
             gemini.status.collect { st ->
@@ -90,11 +137,19 @@ class DubService : Service() {
             }
         }
 
-        scope.launch {
+        // One ordered consumer, deliberately. The previous implementation launched a new
+        // coroutine per emission, so two chunks could be written to the AudioTrack out of order
+        // under load — audible as stutter and as the synchronizer's clocks disagreeing.
+        // `writeFloats` blocks on WRITE_BLOCKING, which is the backpressure that keeps the
+        // Gemini buffer from being overrun.
+        scope.launch(Dispatchers.IO) {
             gemini.audioOut.collect { samples ->
-                audioScope.launch {
-                    playback.writeFloats(samples)
-                }
+                timeline.mark(DubEvent.DUB_CHUNK)
+                playback.writeFloats(samples)
+                timeline.mark(DubEvent.AUDIO_WRITE)
+                collectedDubChunks.incrementAndGet()
+                val dropped = gemini.emittedAudioChunks - collectedDubChunks.get()
+                if (dropped > 0) timeline.recordDroppedChunks(dropped)
             }
         }
     }
@@ -180,6 +235,7 @@ class DubService : Service() {
             VoxoraLog.i("DubService", "gemini.connect called, starting capture...")
             capture.start(proj, scope, applicationInfo.uid)
             VoxoraLog.i("DubService", "capture started")
+            startSyncLoop()
             _status.value = DubUiStatus.Connecting
             postUiUpdate()
             VoxoraLog.i("DubService", "beginSession done → Connecting")
@@ -187,6 +243,43 @@ class DubService : Service() {
             VoxoraLog.e("DubService", "beginSession FAILED", e)
             Log.e(TAG, "beginSession", e)
             setErrorAndStop(mapError(e.message ?: getString(R.string.error_start_failed)))
+        }
+    }
+
+    /**
+     * Drives the adaptive synchronizer and the rate-limited latency log.
+     *
+     * A quarter-second tick is far below the drift tolerance, so the controller sees the drift
+     * long before it matters, and it is cheap enough to run for hours.
+     */
+    private fun startSyncLoop() {
+        syncJob?.cancel()
+        timeline.reset()
+        sourceContentNanos.set(0L)
+        collectedDubChunks.set(0L)
+        lastSyncState = SyncState.IDLE
+        sync.start(clock.nowNanos())
+        _syncState.value = SyncState.WARMING_UP
+        syncJob = scope.launch {
+            while (isActive) {
+                delay(SYNC_TICK_MS)
+                val now = clock.nowNanos()
+                val decision = sync.tick(now, sourceContentNanos.get(), playback.writtenNanos())
+                when (decision) {
+                    SyncDecision.PAUSE_SOURCE -> timeline.mark(DubEvent.SOURCE_PAUSE, now)
+                    SyncDecision.RESUME_SOURCE -> timeline.mark(DubEvent.SOURCE_RESUME, now)
+                    else -> Unit
+                }
+                _syncState.value = sync.state
+                val latencyMs = sync.baselineLatencyNanos / 1_000_000
+                val stateChanged = sync.state != lastSyncState
+                lastSyncState = sync.state
+                timeline.maybeLog(
+                    now,
+                    context = "state=${sync.state} latency=${latencyMs}ms",
+                    force = stateChanged,
+                )
+            }
         }
     }
 
@@ -219,12 +312,20 @@ class DubService : Service() {
     }
 
     private fun stopAll() {
+        syncJob?.cancel()
+        syncJob = null
+        // Order matters: release the source first (a correction may be holding it paused), then
+        // stop playback, which restores the source volume to exactly what the user had.
+        // Guarded because stopAll also runs from onDestroy even if onCreate failed early.
+        if (::sync.isInitialized) sync.stop()
+        if (::externalPlayer.isInitialized) externalPlayer.release()
         capture.stop()
         gemini.stop()
         try { playback.stop() } catch (_: Exception) {}
         try { projection?.stop() } catch (_: Exception) {}
         projection = null
         _audioLevel.value = 0f
+        _syncState.value = SyncState.IDLE
         FloatingBubbleService.hide(this)
         if (_status.value !is DubUiStatus.Error) {
             _status.value = DubUiStatus.Idle
@@ -259,7 +360,6 @@ class DubService : Service() {
     override fun onDestroy() {
         stopAll()
         scope.cancel()
-        audioScope.cancel()
         instance = null
         super.onDestroy()
     }
@@ -338,11 +438,20 @@ class DubService : Service() {
         const val EXTRA_RESULT_CODE = "resultCode"
         const val EXTRA_DATA = "data"
 
+        /** How often the synchronizer is allowed to look at the clocks. */
+        private const val SYNC_TICK_MS = 250L
+
+        /** Below this RMS a captured chunk is treated as silence, not as source progress. */
+        private const val SOURCE_SILENCE_RMS = 0.004f
+
         private val _status = MutableStateFlow<DubUiStatus>(DubUiStatus.Idle)
         val status: StateFlow<DubUiStatus> = _status.asStateFlow()
 
         private val _audioLevel = MutableStateFlow(0f)
         val audioLevel: StateFlow<Float> = _audioLevel.asStateFlow()
+
+        private val _syncState = MutableStateFlow(SyncState.IDLE)
+        val syncState: StateFlow<SyncState> = _syncState.asStateFlow()
 
         @Volatile
         var instance: DubService? = null
