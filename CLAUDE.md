@@ -168,6 +168,11 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
   the page/language pass below are CI-verified separately.
 - `feat/ci-feature-branch` = `76f0c96` + `dcbf852 ci: run Android CI on feature
   branch`, with **PR #2 open to `main`** (still open; deliberately NOT merged).
+- **PR #3 "Feat/reader segmented spooling"** (`feat/reader-segmented-spooling` →
+  `main`) is also **open and not merged**, created 2026-09-18T02:20:08Z (before the
+  page/language session). It tracks this branch, so its head moves with every push,
+  and it makes CI run twice per push (`push` + `pull_request`). Both runs are green
+  at `ee6d31b`. **Do not merge PR #2 or PR #3.**
 - IMPORTANT — how CI actually runs: the failing run `35279422099`
   (2026-09-17T21:56Z) was triggered by **`pull_request` from
   `feat/ci-feature-branch`**, not by a push. `android-ci.yml` triggers on pushes
@@ -305,7 +310,7 @@ deliberately left alone.
 - `AppLocales.resolve` did not compile as first written (`toLanguageTag()` on a
   nullable receiver); caught by the local `kotlinc` pass before any push.
 
-**Tests added (40 new, 175 total).**
+**Tests added (41 new, 175 total).**
 `ReaderStatusVisualTest` (8) — speaking is active; only active pulses; paused is
 ready and not green; stopped/error are stopped; connecting/extracting/preparing are
 neutral and never green; every phase has a tone; the four tones stay distinct.
@@ -314,7 +319,7 @@ document, exactly one chunk is ever the page, walking either direction visits ev
 chunk once and stops, a short drag is not a turn, LTR/RTL gestures map to the same
 logical turn, a Persian reader never gets reversed order, the arriving page comes
 from the side it was turned towards.
-`ReaderChunkStartLanguageTest` (13) — arriving at a chunk shows its cached
+`ReaderChunkStartLanguageTest` (14) — arriving at a chunk shows its cached
 selected-language text without waiting or re-rendering; a chunk with no rendering
 starts in the selected language and is reported as preparing rather than showing the
 previous chunk's language; the pending set shrinks unit by unit; a late transcript
@@ -355,8 +360,18 @@ steps success, including `Assemble debug` and `Upload debug APK`. The workflow h
 `continue-on-error`, so a green `Run unit tests` step is a genuine pass and a green
 `Assemble debug` step is a genuine compile check of the Compose changes
 (`ReaderScreen.kt`, `Theme.kt`, `DubScreen.kt`) that the dev server cannot compile.
-**Real-device verification was NOT performed** — nothing in this change was tested on
-a physical device, and no device behaviour may be claimed.
+The documentation commit on top, `ee6d31b`, is verified by run **`35301787713`**
+(run **#76**, event `push`, created 2026-09-18T03:04:12Z): both jobs success. The
+same commit also produced a `pull_request` run **`35301791595`** (run **#77**, from
+the pre-existing **PR #3**) — both jobs success as well, so the branch is green on
+both trigger paths. **Real-device verification was NOT performed** — nothing in this
+change was tested on a physical device, and no device behaviour may be claimed.
+
+**Note on PR #3.** `PR #3 "Feat/reader segmented spooling"` (`feat/reader-segmented-spooling`
+→ `main`) is **open and not merged**. It was created at 2026-09-18T02:20:08Z, before
+this session, and it tracks this branch automatically. It was deliberately left
+alone: the standing instruction is to push to the feature branch and never merge to
+`main`. Do not merge it, and do not merge **PR #2** either.
 
 **IN PROGRESS:** nothing — all of the requested work is implemented, tested, pushed
 and CI-verified on this branch.
