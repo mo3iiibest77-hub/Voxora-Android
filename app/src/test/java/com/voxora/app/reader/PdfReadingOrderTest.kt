@@ -12,7 +12,8 @@ import org.junit.Test
  * Second / First" for a page whose visible order is "First / Second / Third").
  * [PdfReadingOrder] rebuilds the order from geometry; these tests pin that
  * behaviour, including the multi-column case that a naive positional sort gets
- * wrong.
+ * wrong, and the full-width running header/footer case that used to erase the
+ * column gutter for the whole page.
  *
  * Coordinates follow PDFBox: `y` grows downwards, so the top of the page has the
  * smallest `y` and reading order is increasing `y`.
@@ -120,18 +121,89 @@ class PdfReadingOrderTest {
     }
 
     @Test
-    fun aFullWidthHeaderFallsBackToSingleColumnOrdering() {
-        // The header crosses the gutter, so the page is treated as one column and
-        // read top-to-bottom. Documented limitation: such pages keep stream row
-        // order instead of being split into columns.
+    fun aHeaderNarrowerThanTheGutterIsReadFirstAndTheColumnsStayDeInterleaved() {
+        // A header that sits above the body and does not reach across the gutter
+        // is simply the first line; it must not turn the page into one column.
         val words = listOf(
             Word("Left one", 72f, 100f), Word("Right one", 320f, 100f),
             Word("Left two", 72f, 120f), Word("Right two", 320f, 120f),
             Word("Wide header", 72f, 60f),
         )
-        val ordered = order(words)
-        assertEquals("Wide header", ordered.first())
-        assertEquals(5, ordered.size)
+        assertEquals(
+            listOf("Wide header", "Left one", "Left two", "Right one", "Right two"),
+            order(words),
+        )
+    }
+
+    @Test
+    fun aHeaderThatCrossesTheGutterDoesNotEraseTheColumnStructure() {
+        // Regression: a full-width running header used to cover the gutter for the
+        // whole page, so the columns were emitted row-interleaved
+        // ("Left one Right one Left two Right two ...") — scrambled text before it
+        // ever reached chunking or Gemini. The header is now read on its own and
+        // the columns below it are still read one after the other.
+        val words = listOf(
+            Word("THE RUNNING HEADER OF THE BOOK", 72f, 60f),
+            Word("Left one", 72f, 100f), Word("Right one", 320f, 100f),
+            Word("Left two", 72f, 120f), Word("Right two", 320f, 120f),
+        )
+        assertEquals(
+            listOf(
+                "THE RUNNING HEADER OF THE BOOK",
+                "Left one", "Left two", "Right one", "Right two",
+            ),
+            order(words),
+        )
+    }
+
+    @Test
+    fun aFullWidthFooterIsReadAfterBothColumns() {
+        val words = listOf(
+            Word("Left one", 72f, 100f), Word("Right one", 320f, 100f),
+            Word("Left two", 72f, 120f), Word("Right two", 320f, 120f),
+            Word("COPYRIGHT NOTICE AND PAGE FORTY TWO", 72f, 200f),
+        )
+        assertEquals(
+            listOf(
+                "Left one", "Left two", "Right one", "Right two",
+                "COPYRIGHT NOTICE AND PAGE FORTY TWO",
+            ),
+            order(words),
+        )
+    }
+
+    @Test
+    fun aRunningHeaderOnLaterPagesNoLongerScramblesThosePages() {
+        // The reported real-world pattern: the first page of a section has no
+        // running header and read correctly, while every later page carried one and
+        // came back row-interleaved. Both shapes must now read column by column.
+        val body = listOf(
+            Word("Left one", 72f, 100f), Word("Right one", 320f, 100f),
+            Word("Left two", 72f, 120f), Word("Right two", 320f, 120f),
+            Word("Left three", 72f, 140f), Word("Right three", 320f, 140f),
+        )
+        val bodyOrder = listOf(
+            "Left one", "Left two", "Left three",
+            "Right one", "Right two", "Right three",
+        )
+
+        // Page without a running header.
+        assertEquals(bodyOrder, order(body))
+
+        // The same page plus a running header spanning the gutter.
+        val withHeader = body + Word("THE RUNNING HEADER OF THE BOOK", 72f, 60f)
+        assertEquals(listOf("THE RUNNING HEADER OF THE BOOK") + bodyOrder, order(withHeader))
+    }
+
+    @Test
+    fun aPageWithTooFewLinesHasNoColumnStructureToInfer() {
+        // A column gutter is a property of many lines. With only two lines there is
+        // nothing to infer, so the page is read top to bottom.
+        val words = listOf(
+            Word("alpha", 72f, 100f), Word("beta", 320f, 100f),
+            Word("gamma", 72f, 120f), Word("delta", 320f, 120f),
+        )
+        assertEquals(listOf("alpha", "beta", "gamma", "delta"), order(words))
     }
 
     @Test
