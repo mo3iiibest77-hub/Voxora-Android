@@ -84,7 +84,7 @@
     <string name="usage_billing">Billing and spend</string>
     <string name="usage_billing_help">Billing is reported by Google for the project that owns the key, not by the Gemini API. Voxora never estimates a cost.</string>
     <string name="usage_project_unknown">Project not known</string>
-    <string name="usage_project_help">A Gemini API key does not say which Google account or Cloud project it belongs to, so Voxora does not guess.</string>
+    <string name="usage_project_help">A Gemini API key does not say which Google account or which project it belongs to, so Voxora does not guess.</string>
     <string name="usage_account_not_linked">Signing in to Google does not tell Voxora that this key belongs to that account.</string>
     <string name="usage_privacy">Usage history is stored on this device only. It contains no key, no document text and no audio.</string>
     <string name="settings_api_key">Gemini API key</string>
