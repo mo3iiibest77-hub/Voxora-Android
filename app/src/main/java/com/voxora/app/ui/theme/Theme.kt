@@ -302,7 +302,6 @@ fun VoxoraTheme(
     CompositionLocalProvider(LocalVoxoraSemanticColors provides semantics) {
         MaterialTheme(
             colorScheme = colorScheme,
-            typography = VoxoraTypography,
             content = content,
         )
     }
