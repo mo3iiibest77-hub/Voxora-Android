@@ -558,9 +558,14 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
 
     private fun publish(phase: ReaderPhase) {
         val units = queue.segments(queue.index)
-        // Reading text follows the selected language. A unit that has not been narrated
-        // in that language yet has no rendering, so the extracted source is shown for it
-        // rather than a blank card.
+        // Reading text follows the selected language, and it follows it *from the moment
+        // the chunk becomes the current one*: the producer renders whole chunks ahead of
+        // playback, so a chunk that is about to be narrated already has its renderings
+        // cached and this resolves them immediately. Nothing here waits for audio, and
+        // nothing here can delay audio — the spool and the consumer never read this
+        // state. A unit with no rendering yet falls back to the extracted source and is
+        // reported in `pendingSegments` so the UI can present it as still being prepared
+        // rather than as settled text.
         val displayed = displayText.readingText(outputLanguage, queue.index, units)
         mutableState.value = ReaderState(
             phase = phase,
@@ -570,6 +575,7 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
             segmentTotal = units.size,
             text = queue.current.orEmpty(),
             segments = displayed,
+            pendingSegments = displayText.pending(outputLanguage, queue.index, units.size),
             documentName = documentName,
             // Republishing a phase must not swallow the reason it is showing, and any
             // other phase transition means the failure no longer applies.

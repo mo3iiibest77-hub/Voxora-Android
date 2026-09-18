@@ -57,6 +57,20 @@ internal class ReaderDisplayText {
         units.mapIndexed { index, source -> text(language, chunk, index) ?: source }
 
     /**
+     * Indices of [unitCount] units of [chunk] that have no rendering in [language] yet.
+     *
+     * This is what lets the Reader tell "the selected-language text is not ready" apart
+     * from "the selected-language text happens to read like the source": [readingText]
+     * silently falls back to the extracted source, which is useful for browsing but must
+     * not be mistaken for a finished rendering while the chunk is being narrated.
+     */
+    fun pending(language: String, chunk: Int, unitCount: Int): Set<Int> {
+        if (unitCount <= 0) return emptySet()
+        val rendered = byLanguage[language]?.get(chunk) ?: return (0 until unitCount).toSet()
+        return (0 until unitCount).filterTo(mutableSetOf()) { rendered[it] == null }
+    }
+
+    /**
      * Whether a rendering just recorded for [chunk] in [language] is part of what the
      * Reader is showing right now, and therefore has to be republished immediately.
      *
