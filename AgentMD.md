@@ -114,7 +114,7 @@ point of the role.
 | `stringcheck.py` | local harness | every `R.string.*` exists, and `values`/`values-fa` parity holds |
 | `bidi_fa.py` | local harness | every Latin run inside Persian is isolated, format specifiers untouched |
 | `themecheck.py` | local harness | no colour literal outside `Theme.kt` and the three palette files |
-| `dubguard.py` | local harness | the disabled overlay stays unconstructed, no fixed delay or `Thread.sleep` returns to `dub/`, the pure sync core imports no `android.*`, `MediaSessionManager` stays in its adapter, and the synchronizer reads only a monotonic clock |
+| `dubguard.py` | local harness | the disabled overlay stays unconstructed, no fixed delay or `Thread.sleep` returns to `dub/`, the pure sync core (including the playback timeline and head unwrap) imports no `android.*`, `MediaSessionManager` stays in its adapter, the synchronizer reads only a monotonic clock, `DubService` consults `PlaybackTimeline.onChunkArrived` and branches on `ChunkAction.PLAY`, it feeds the synchronizer the playhead rather than `writtenNanos()`, and `DubPlayback` reads the device playback position |
 | `PaletteContrast` + the palette tests | `:app:testDebugUnitTest` | every text role clears WCAG AA on the surface it sits on |
 | `Android CI` | GitHub Actions | the only real compile check for Compose, which the dev server cannot run |
 

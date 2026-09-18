@@ -58,21 +58,42 @@ class LatencyTimelineTest {
         timeline.mark(DubEvent.GEMINI_FIRST_AUDIO, nowNanos = 2_000_000_000L)
         timeline.mark(DubEvent.DUB_CHUNK, nowNanos = 2_500_000_000L)
         timeline.mark(DubEvent.AUDIO_WRITE, nowNanos = 2_600_000_000L)
+        timeline.mark(DubEvent.SCHEDULED_PLAYBACK, nowNanos = 2_700_000_000L)
+        timeline.mark(DubEvent.ACTUAL_PLAYBACK, nowNanos = 2_900_000_000L)
 
         val summary = timeline.summary()
         assertTrue(summary, summary.contains("capture→send 3ms"))
-        assertTrue(summary, summary.contains("send→first audio 1996ms"))
-        assertTrue(summary, summary.contains("send→dub 2496ms"))
-        assertTrue(summary, summary.contains("dub→write 100ms"))
+        assertTrue(summary, summary.contains("send→response 1996ms"))
+        assertTrue(summary, summary.contains("send→scheduled 2696ms"))
+        assertTrue(summary, summary.contains("send→played 2896ms"))
+        assertTrue(summary, summary.contains("write→played 300ms"))
         assertTrue(summary, summary.contains("source chunks 1"))
         assertTrue(summary, summary.contains("dub chunks 1"))
+    }
+
+    @Test
+    fun `the summary separates written audio from played audio`() {
+        val timeline = LatencyTimeline(FakeClock(), log = {})
+        timeline.mark(DubEvent.AUDIO_WRITE, nowNanos = 1_000_000_000L)
+        // The device has not presented anything yet: only the write side exists, so the gap
+        // between handing audio to the output and hearing it is reported as absent, not as zero.
+        assertNull(timeline.firstElapsedNanos(DubEvent.AUDIO_WRITE, DubEvent.ACTUAL_PLAYBACK))
     }
 
     @Test
     fun `a missing stage is shown as a dash, not as zero`() {
         val timeline = LatencyTimeline(FakeClock(), log = {})
         timeline.mark(DubEvent.PCM_SENT, nowNanos = 1)
-        assertTrue(timeline.summary().contains("send→first audio —"))
+        assertTrue(timeline.summary().contains("send→response —"))
+        assertTrue(timeline.summary().contains("send→played —"))
+    }
+
+    @Test
+    fun `chunks discarded by the playback timeline are counted in the summary`() {
+        val timeline = LatencyTimeline(FakeClock(), log = {})
+        timeline.mark(DubEvent.CHUNK_DROPPED, nowNanos = 1)
+        timeline.mark(DubEvent.CHUNK_DROPPED, nowNanos = 2)
+        assertTrue(timeline.summary().contains("dropped 2"))
     }
 
     @Test

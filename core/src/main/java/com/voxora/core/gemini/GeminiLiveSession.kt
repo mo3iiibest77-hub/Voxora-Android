@@ -39,10 +39,14 @@ class GeminiLiveSession(
     // DROP_OLDEST is kept deliberately: `handleMessage` runs on OkHttp's WebSocket thread, which
     // cannot suspend, so blocking on a full buffer would stall the socket and the whole session.
     // What changed is that a drop is no longer invisible — `emittedAudioChunks` below is compared
-    // with what the consumer received, and Live Dub reports the difference. The capacity stays
-    // generous so that, with the ordered consumer and the short output buffer, overflow is rare.
+    // with what the consumer received, and Live Dub reports the difference.
+    //
+    // The capacity is deliberately small. It used to be 48 chunks, which is about 2.9s of audio:
+    // a burst could sit in this buffer entirely unnoticed while the dub fell seconds behind. The
+    // playback timeline now owns backlog policy, and this buffer is only a hand-off, so it is
+    // sized to roughly the timeline's own tolerance rather than generously.
     private val _audioOut = MutableSharedFlow<FloatArray>(
-        extraBufferCapacity = 48,
+        extraBufferCapacity = 12,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
     val audioOut: SharedFlow<FloatArray> = _audioOut.asSharedFlow()

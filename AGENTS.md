@@ -63,6 +63,9 @@ Voxora-Android/
 │       │       ├── ExternalPlayer.kt      ← pure; the seam that makes sync testable
 │       │       ├── SourceVolumeDuck.kt    ← pure; duck/restore arithmetic
 │       │       ├── LatencyTimeline.kt     ← pure; monotonic stage instrumentation
+│       │       ├── PlaybackTimeline.kt    ← pure; the dub playhead and backlog policy
+│       │       ├── PlaybackTimelineConfig.kt ← pure; the adaptive backlog tolerance
+│       │       ├── PlaybackHead.kt        ← pure; unwraps AudioTrack's 32-bit head
 │       │       ├── DubSyncController.kt   ← pure; the adaptive state machine
 │       │       ├── MediaControlAccess.kt  ← Android; the permission question
 │       │       ├── MediaSessionExternalPlayer.kt ← Android; only MediaSessionManager user
@@ -630,6 +633,41 @@ letting the dub drain its backlog until the offset returns to the baseline, then
 - A constant latency of 200 ms, 3 s or 4.5 s all report `SYNCED` with **zero** corrections. That is
   the contract, and `DubSyncControllerTest` pins each case.
 
+### The dub-side playhead, and why both halves are needed
+
+Pausing the source is the right correction, but it is unavailable on a device where the user has not
+granted media control — and on those devices the dub had **no** defence against a backlog. If Gemini
+stalled and then delivered several seconds of audio at once, all of it was played, and the dub ended
+up permanently further behind. That is the failure mode `PlaybackTimeline` exists to prevent.
+
+- The timeline keeps one number: the **backlog** — dubbed audio received but not yet heard. That
+  number *is* the added delay, and it is derived from the **playhead**, not from bytes written:
+  `scheduledNanos` is what was accepted for playback, `playedNanos` is what the device has actually
+  presented (`DubPlayback.playedNanos()`, from `AudioTrack.playbackHeadPosition`, unwrapped by
+  `PlaybackHead`). `DubService` feeds the controller the playhead, never `writtenNanos()`.
+- In a healthy pipeline the backlog sits at the output buffer's own occupancy and holds still. When
+  Gemini bursts, it spikes past the **tolerance**; the timeline then refuses to feed the output until
+  it is back inside, so the surplus is discarded instead of being played out. Because the consumer
+  receives oldest-first, refusing the chunk it is holding is exactly "discard the oldest queued
+  audio" — the content jumps forward instead of the dub falling further behind.
+- The tolerance **adapts**: running dry means it was too tight, so it loosens by one step; a quiet
+  stretch tightens it again. Both moves are clamped (`minToleranceNanos`..`maxToleranceNanos`) and
+  rate-limited by `adaptationCooldownNanos`, so one burst cannot make the buffer oscillate. There is
+  no fixed backlog constant, for the same reason there is no fixed latency constant.
+- `DubService` must ask `PlaybackTimeline.onChunkArrived` about **every** chunk and branch on
+  `ChunkAction.PLAY`; writing straight from the Gemini flow bypasses the policy. `dubguard.py`
+  enforces this, along with the playhead requirement and the purity of the timeline.
+- On a Gemini reconnect the timeline is **rebased**, not zeroed: the audio in flight is gone, but the
+  output track is still playing, and zeroing the playhead would make the backlog look enormous and
+  discard audio that should have played.
+- `GeminiLiveSession`'s hand-off buffer was cut from 48 chunks (~2.9 s, enough to hide a burst
+  entirely) to 12. The timeline owns backlog policy now; that buffer is only a hand-off.
+
+**This is additive, not a replacement.** `DubSyncController` still owns source-side drift and the
+`ExternalPlayer` seam is unchanged. The two compose: the timeline bounds the backlog locally and
+needs no permissions, and the controller corrects whatever residual drift remains when control is
+available. Neither is a substitute for the other.
+
 ### Source control, and the honest limit
 
 `ExternalPlayer` is the seam; `MediaSessionExternalPlayer` is the only file that knows about
@@ -656,15 +694,19 @@ reconnect, `stop()`, service teardown — resumes it. `DubService.stopAll()` cal
 ### Latency instrumentation
 
 `LatencyTimeline` records monotonic timestamps (`SystemClock.elapsedRealtimeNanos()` through
-`MonotonicClock`) for capture, send, first model audio, dub chunk, audio write, and pause/resume. It
-is synchronized (marked from three threads) and its log line is rate-limited to one per two seconds,
-forced on a state change — Live Dub runs for hours and must not flood the Logs ring buffer. It
-answers "where is the delay": capture→send, send→first audio, send→dub, dub→write. Gemini's
-`DROP_OLDEST` buffer cannot report drops through `tryEmit`, so `GeminiLiveSession.emittedAudioChunks`
-is compared with what the consumer received and the difference is reported as `DROPPED n` instead of
-being silent.
+`MonotonicClock`) for capture, send, first model audio, dub chunk, audio write, scheduled playback,
+actual playback, dropped chunk, and pause/resume. It is synchronized (marked from three threads) and
+its log line is rate-limited to one per two seconds, forced on a state change — Live Dub runs for
+hours and must not flood the Logs ring buffer. It answers "where is the delay": capture→send,
+send→response, send→scheduled, send→played, write→played. The two playback stages are separate on
+purpose: writing a chunk and hearing it are separated by the whole output buffer, and only
+`ACTUAL_PLAYBACK` — the platform's own `AudioTrack.getTimestamp` — can show how large that gap really
+is. Gemini's `DROP_OLDEST` buffer cannot report drops through `tryEmit`, so
+`GeminiLiveSession.emittedAudioChunks` is compared with what the consumer received and the difference
+is reported as `DROPPED n` instead of being silent; chunks discarded by the playback timeline are
+counted separately as `dropped n`.
 
-### Two pipeline bugs fixed with this work
+### Three pipeline bugs fixed with this work
 
 1. `DubService` launched a **new coroutine per audio emission** to write to the track, so chunks
    could be written out of order under load. There is now one ordered consumer, and
@@ -672,6 +714,8 @@ being silent.
 2. `DubPlayback` sized the `AudioTrack` buffer at `minBuf * 8`, floored at a full second of audio —
    a full second of added lip-sync delay before the first dubbed word. It is now `minBuf * 2` floored
    at ~125 ms.
+3. The dub's content clock was the **write cursor**, so audio sitting unplayed in the output buffer
+   counted as progress and the pipeline could not see its own backlog. It is now the playhead.
 
 The source ducking rule (~28 %, never silent) is `SourceVolumeDuck`, pure and unit-tested; the
 original level is saved and restored exactly. Volume keys still control the dub through the local
@@ -899,7 +943,9 @@ A task is NOT done until:
   - `ChunkQueueTest`, `ReaderSpoolTest` — chunking and spool contracts.
   - `DubSyncControllerTest` (app) — the adaptive synchronizer, driven by a fake clock and a fake player through a small pipeline model, with **no Android and no coroutines**. Pins: zero, small, 3 s, 4.5 s and 700 ms latencies all become a measured baseline with **zero** corrections; a wobble inside the tolerance stays synced; a drift spike pauses the source once and resumes when caught up; a correction is bounded by `maxPauseNanos`; corrections are rate-limited and spaced by the cooldown; a controllable playing source may be corrected (the video fallback); a user pause is never fought and a user resume re-engages; an uncontrollable source is audio-only and never paused; losing the session releases the source; a stalled dub withdraws the claim and never leaves the source paused; stopping while synchronized leaves the source alone, stopping while correcting resumes it; and a Gemini reconnect releases the source, re-measures and settles (see §6).
   - `SourceVolumeDuckTest` (app) — the source ducking contract: the source is reduced but never muted, a low level keeps one audible step, there is nothing to duck into at the bottom of the range, an unusable range is left alone, restoring returns exactly the saved level, and every duckable level produces a strictly lower positive level (see §6).
-  - `LatencyTimelineTest` (app) — the instrumentation contract: first and last occurrences tracked separately, a missing stage reported as absent rather than zero, a backwards timestamp reported as absent rather than negative, the summary naming every stage and its milliseconds, accounted drops, rate-limited logging with a forced override, the context appended verbatim, `reset`, and marking through the injected monotonic clock (see §6).
+  - `LatencyTimelineTest` (app) — the instrumentation contract: first and last occurrences tracked separately, a missing stage reported as absent rather than zero, a backwards timestamp reported as absent rather than negative, the summary naming every stage and its milliseconds, the write/played stages kept distinct, accounted drops, rate-limited logging with a forced override, the context appended verbatim, `reset`, and marking through the injected monotonic clock (see §6).
+  - `PlaybackTimelineTest` (app) — the dub playhead and backlog contract, driven by a fake clock and a fake device playhead: a steady realtime stream is played in full with no drops and no starvation; the backlog reflects the output buffer rather than the write cursor; a burst is trimmed back inside the tolerance instead of becoming permanent delay, while still playing what it can; a single late chunk is absorbed without discarding anything; variable chunk sizes accumulate no backlog; running dry loosens the tolerance and a quiet stretch tightens it back, both clamped; a reconnect rebases the playhead rather than reporting a phantom backlog and does not carry the previous session's counters; a playhead that goes backwards is rebased; stopping withdraws the policy; discarded audio is accounted exactly; and the configuration rejects an underrun threshold that would make a healthy pipeline look starved (see §6).
+  - `PlaybackHeadTest` (app) — the `AudioTrack` head unwrap: the first read becomes the total, successive reads accumulate, a repeated read does not advance, a wrapped head continues past four billion frames, a second wrap continues correctly, and the unwrapped total is always monotonic (see §6).
   - `SyncStatusVisualTest` (app) — the Live Dub status-tone contract: only a synced pipeline is active, measuring and catching up are in-progress rather than success, and audio-only/unavailable are **neutral, never a failure**; the external-video note appears only once synced; the media-control opt-in is offered only while live and without the grant (see §6).
 - **The background-playback surfaces add no new pure-JVM rule, deliberately.** The notification's previous/next and the bubble's stop call the same `ReaderController.jumpToSegment` / `stop` the screen already uses, and their bounds are the ones `ReaderSegmentNavigationTest` pins; the bubble preference is a plain boolean with a DataStore default. Adding a second step rule (and a second test) would be duplication, so the honest statement is that these surfaces are compile-checked by CI and device-verification items, not that they carry a new unit contract.
 - Do not weaken or delete these tests to make a change pass. If a contract genuinely changes, update the contract text in `AGENTS.md` and the test in the same commit.
@@ -924,7 +970,7 @@ A task is NOT done until:
 - Local pre-CI validation without Gradle is allowed and encouraged: compile the changed pure-JVM/Android sources with `kotlinc` against the pinned dependency jars and run the JUnit classes directly with `-ea`. This never substitutes for CI — the branch must still go green in Actions. The `1504669` pass was validated locally this way: `kotlinc 2.0.21` plus JUnit `-ea` gave **134 tests OK** across `ReaderDisplayLanguageTest`, `ReaderDisplayRefreshTest`, `ReaderStartupGatesTest`, `LanguageCatalogTest`, `AppLocalesTest`, `ReaderPipelineOrderTest`, `ChunkQueueTest`, `PdfReadingOrderTest`, `ReaderSpoolTest`, `ReaderNarrationModesTest`, `ReaderLanguageFlagsTest` and `GeminiReaderSessionTest`. Two harness details matter and cost a round each when forgotten: `internal` declarations need `-Xfriend-paths=<main-out>` on the test compile, and `ReaderSpool`'s `VoxoraLog` dependency needs a plain-JVM stub because the real one touches `android.util.Log`.
 - Prefer pure-JVM, deterministic tests with `TemporaryFolder` for file-backed code; avoid Robolectric unless an Android API genuinely cannot be avoided.
 - **The local harness cannot compile Compose, so run an import guard before pushing.** A missing `import androidx.compose.runtime.LaunchedEffect` reached CI once and failed **both** jobs; because the dev server has no Compose artifacts, nothing local caught it. It also produced four errors for one mistake — the unresolved reference plus three cascading "suspend function should be called only from a coroutine", since without `LaunchedEffect` the lambda is not a suspend scope. Before pushing, check that no file uses a Compose or AndroidX symbol it has not imported. Read CI job logs with `GET /repos/…/actions/jobs/<job_id>/logs` (works, HTTP 200) rather than the run-level archive endpoint (403); the useful line is `e: file:///…/File.kt:97:5 Unresolved reference 'X'.`
-- **Six local checks worth running on every change, all cheap and all caught real bugs:** a `R.string.*` cross-check of every Kotlin reference against `values/` and `values-fa/` (it caught a `reader_page_chunk` key that no locale declared); an unused-import sweep of changed files; a **colour-literal guard** that fails if `Color(0x…)` or a named `Color.White`/`Color.Black`/… appears anywhere outside `ui/theme/Theme.kt` and the three `ui/theme/*Palette.kt` files (`Color.Transparent` is allowed); a **theme guard** (`themeguard.py`) that fails on a `ThemeMode` with no branch in `Theme.kt`, on a palette that assigns another palette's value, on a leftover of a deleted palette, and on a bundled font being reintroduced (`res/font/` or a `FontFamily` override in the theme layer); and a **bidi guard** (`bidi_fa.py`) that isolates every Latin run embedded in a Persian string and verifies the format specifiers are untouched; and a **dub guard** (`dubguard.py`) that fails if the disabled `DelayedScreenOverlay` is constructed, if a fixed-lag constant or a `Thread.sleep` returns to `dub/`, if the pure sync core imports `android.*`, if `MediaSessionManager` is used outside its adapter, or if the synchronizer reads wall-clock time. The harness cannot compile Compose, so these guards are what stop a stray hex, a dead theme, a mangled Persian string or a reintroduced fixed delay from reaching CI.
+- **Six local checks worth running on every change, all cheap and all caught real bugs:** a `R.string.*` cross-check of every Kotlin reference against `values/` and `values-fa/` (it caught a `reader_page_chunk` key that no locale declared); an unused-import sweep of changed files; a **colour-literal guard** that fails if `Color(0x…)` or a named `Color.White`/`Color.Black`/… appears anywhere outside `ui/theme/Theme.kt` and the three `ui/theme/*Palette.kt` files (`Color.Transparent` is allowed); a **theme guard** (`themeguard.py`) that fails on a `ThemeMode` with no branch in `Theme.kt`, on a palette that assigns another palette's value, on a leftover of a deleted palette, and on a bundled font being reintroduced (`res/font/` or a `FontFamily` override in the theme layer); and a **bidi guard** (`bidi_fa.py`) that isolates every Latin run embedded in a Persian string and verifies the format specifiers are untouched; and a **dub guard** (`dubguard.py`) that fails if the disabled `DelayedScreenOverlay` is constructed, if a fixed-lag constant or a `Thread.sleep` returns to `dub/`, if the pure sync core (including the playback timeline and head unwrap) imports `android.*`, if `MediaSessionManager` is used outside its adapter, if the synchronizer reads wall-clock time, if `DubService` writes audio without consulting `PlaybackTimeline.onChunkArrived` and branching on `ChunkAction.PLAY`, if it goes back to feeding the synchronizer `writtenNanos()` instead of the playhead, or if `DubPlayback` stops reading the device playback position. Each of those rules was verified to fail on an injected violation. The harness cannot compile Compose, so these guards are what stop a stray hex, a dead theme, a mangled Persian string or a reintroduced fixed delay from reaching CI.
 
 ---
 

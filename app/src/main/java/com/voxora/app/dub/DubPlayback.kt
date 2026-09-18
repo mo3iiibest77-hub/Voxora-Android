@@ -5,12 +5,15 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioFormat
 import android.media.AudioManager
+import android.media.AudioTimestamp
 import android.media.AudioTrack
 import android.media.VolumeProvider
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Build
 import android.util.Log
+import com.voxora.app.dub.sync.PlaybackHead
+import com.voxora.app.dub.sync.PlaybackHeadState
 import com.voxora.app.dub.sync.SourceVolumeDuck
 import com.voxora.app.util.VoxoraLog
 import com.voxora.core.GeminiLiveConfig
@@ -34,6 +37,16 @@ class DubPlayback(context: Context? = null) {
     private val playing = AtomicBoolean(false)
     private var savedMusicVolume: Int = -1
     private val writtenFrames = AtomicLong(0)
+
+    /**
+     * The device's playback head, unwrapped.
+     *
+     * Guarded by [playedFrames]'s lock rather than by a thread rule: three callers read it — the
+     * audio consumer, the sync tick and the status collector — and a torn read would look like a
+     * wrap.
+     */
+    private var headState = PlaybackHeadState()
+
     /** 0..100 software gain for dub (volume keys) */
     private val dubVolume = AtomicInteger(100)
 
@@ -41,6 +54,7 @@ class DubPlayback(context: Context? = null) {
         VoxoraLog.i("Playback", "start()")
         stop()
         writtenFrames.set(0L)
+        headState = PlaybackHeadState()
         val attrs = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_ASSISTANT)
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
@@ -107,12 +121,56 @@ class DubPlayback(context: Context? = null) {
     /**
      * Dubbed audio content handed to the output since [start], in nanoseconds.
      *
-     * This is the dub side of the synchronizer's content clock. It counts what was *written*,
-     * not what the speaker has finished playing; with a short buffer the two differ by well
-     * under the drift tolerance, and counting writes keeps the number available on every thread.
+     * This counts what was *written*. It is the scheduling side of the timeline; the played side
+     * comes from [playedNanos], and the difference between them is the buffer the user is
+     * currently waiting through.
      */
     fun writtenNanos(): Long =
         writtenFrames.get() * 1_000_000_000L / GeminiLiveConfig.OUTPUT_SAMPLE_RATE
+
+    /**
+     * Frames the device has actually presented since [start], unwrapped into a monotonic count.
+     *
+     * Returns the last known total when the track is gone or refuses to report, which the
+     * timeline reads as "no progress" rather than as a negative position.
+     *
+     * Synchronized because three threads read it — the audio consumer, the sync tick and the
+     * status collector — and the unwrap mutates state; a torn read would look like a wrap and
+     * fabricate an enormous backlog.
+     */
+    @Synchronized
+    fun playedFrames(): Long {
+        val t = track ?: return headState.total
+        return try {
+            headState = PlaybackHead.advance(headState, t.playbackHeadPosition)
+            headState.total
+        } catch (e: Exception) {
+            VoxoraLog.w("Playback", "playbackHeadPosition failed: ${e.message}")
+            headState.total
+        }
+    }
+
+    /** The playhead: dubbed audio the user has actually heard, in nanoseconds. */
+    fun playedNanos(): Long =
+        playedFrames() * 1_000_000_000L / GeminiLiveConfig.OUTPUT_SAMPLE_RATE
+
+    /**
+     * The monotonic time the platform associates with the audio currently leaving the speaker,
+     * or null when the device cannot report it.
+     *
+     * This is the only honest source for "when did the first dubbed word actually play" —
+     * a write timestamp is not a playback timestamp.
+     */
+    fun playbackTimestampNanos(): Long? {
+        val t = track ?: return null
+        return try {
+            val ts = AudioTimestamp()
+            if (t.getTimestamp(ts)) ts.nanoTime else null
+        } catch (e: Exception) {
+            VoxoraLog.w("Playback", "getTimestamp failed: ${e.message}")
+            null
+        }
+    }
 
     fun stop() {
         VoxoraLog.i("Playback", "stop()")
@@ -126,6 +184,7 @@ class DubPlayback(context: Context? = null) {
         } catch (_: Exception) {
         }
         track = null
+        headState = PlaybackHeadState()
         abandonFocus()
         restoreSourceMusic()
     }

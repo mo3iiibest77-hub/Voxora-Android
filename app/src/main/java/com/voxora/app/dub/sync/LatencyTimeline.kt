@@ -26,6 +26,20 @@ enum class DubEvent {
     /** A dubbed chunk finished being written to the output track. */
     AUDIO_WRITE,
 
+    /** The playback timeline accepted a chunk, so its position is scheduled. */
+    SCHEDULED_PLAYBACK,
+
+    /**
+     * The output device reported it had actually presented audio.
+     *
+     * Distinct from [AUDIO_WRITE] on purpose: writing a chunk and hearing it are separated by
+     * the whole output buffer, and only this event can show how large that gap really is.
+     */
+    ACTUAL_PLAYBACK,
+
+    /** A chunk was discarded to keep the playback backlog bounded. */
+    CHUNK_DROPPED,
+
     /** The source was paused by the synchronizer. */
     SOURCE_PAUSE,
 
@@ -104,17 +118,23 @@ class LatencyTimeline(
     @Synchronized
     fun summary(): String {
         val captureToSend = lastElapsedNanos(DubEvent.SOURCE_CHUNK, DubEvent.PCM_SENT)
-        val endToEnd = firstElapsedNanos(DubEvent.PCM_SENT, DubEvent.GEMINI_FIRST_AUDIO)
-        val sendToDub = lastElapsedNanos(DubEvent.PCM_SENT, DubEvent.DUB_CHUNK)
-        val dubToWrite = lastElapsedNanos(DubEvent.DUB_CHUNK, DubEvent.AUDIO_WRITE)
+        // First-to-first for the whole chain, because that is the number the user hears: how
+        // long the very first dubbed word took to leave the speaker after the source was heard.
+        val sendToResponse = firstElapsedNanos(DubEvent.PCM_SENT, DubEvent.GEMINI_FIRST_AUDIO)
+        val sendToScheduled = firstElapsedNanos(DubEvent.PCM_SENT, DubEvent.SCHEDULED_PLAYBACK)
+        val sendToPlayed = firstElapsedNanos(DubEvent.PCM_SENT, DubEvent.ACTUAL_PLAYBACK)
+        val writeToPlayed = lastElapsedNanos(DubEvent.AUDIO_WRITE, DubEvent.ACTUAL_PLAYBACK)
         return buildString {
             append("sync: ")
             append("capture→send ").append(ms(captureToSend)).append(", ")
-            append("send→first audio ").append(ms(endToEnd)).append(", ")
-            append("send→dub ").append(ms(sendToDub)).append(", ")
-            append("dub→write ").append(ms(dubToWrite)).append(", ")
+            append("send→response ").append(ms(sendToResponse)).append(", ")
+            append("send→scheduled ").append(ms(sendToScheduled)).append(", ")
+            append("send→played ").append(ms(sendToPlayed)).append(", ")
+            append("write→played ").append(ms(writeToPlayed)).append(", ")
             append("source chunks ").append(count(DubEvent.SOURCE_CHUNK)).append(", ")
             append("dub chunks ").append(count(DubEvent.DUB_CHUNK))
+            val dropped = count(DubEvent.CHUNK_DROPPED)
+            if (dropped > 0) append(", dropped ").append(dropped)
             if (droppedChunks > 0) append(", DROPPED ").append(droppedChunks)
         }
     }

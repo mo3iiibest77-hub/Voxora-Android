@@ -17,12 +17,14 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.voxora.app.MainActivity
 import com.voxora.app.R
+import com.voxora.app.dub.sync.ChunkAction
 import com.voxora.app.dub.sync.DubEvent
 import com.voxora.app.dub.sync.DubSyncController
 import com.voxora.app.dub.sync.ExternalPlayer
 import com.voxora.app.dub.sync.LatencyTimeline
 import com.voxora.app.dub.sync.MediaSessionExternalPlayer
 import com.voxora.app.dub.sync.MonotonicClock
+import com.voxora.app.dub.sync.PlaybackTimeline
 import com.voxora.app.dub.sync.SyncDecision
 import com.voxora.app.dub.sync.SyncState
 import com.voxora.app.util.StatusToast
@@ -44,6 +46,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.sqrt
 
@@ -68,6 +71,7 @@ class DubService : Service() {
     // before attachBaseContext, so `applicationContext` is not available yet and constructing
     // anything context-bound here would crash on a null base context.
     private lateinit var timeline: LatencyTimeline
+    private lateinit var playbackTimeline: PlaybackTimeline
     private lateinit var externalPlayer: ExternalPlayer
     private lateinit var sync: DubSyncController
 
@@ -76,6 +80,9 @@ class DubService : Service() {
 
     /** Chunks the ordered consumer actually received, for accounting Gemini's drops. */
     private val collectedDubChunks = AtomicLong(0L)
+
+    /** Guards the one-shot "first audio actually left the speaker" instrumentation mark. */
+    private val actualPlaybackMarked = AtomicBoolean(false)
 
     private val capture = SystemAudioCapture { pcm ->
         var sum = 0.0
@@ -110,6 +117,7 @@ class DubService : Service() {
         VoxoraLog.i("DubService", "onCreate")
         playback = DubPlayback(applicationContext)
         timeline = LatencyTimeline(clock, log = { VoxoraLog.d("DubSync", it) })
+        playbackTimeline = PlaybackTimeline(log = { VoxoraLog.i("DubPlayback", it) })
         externalPlayer = MediaSessionExternalPlayer(applicationContext)
         sync = DubSyncController(externalPlayer, log = { VoxoraLog.i("DubSync", it) })
         createChannel()
@@ -125,7 +133,14 @@ class DubService : Service() {
                     }
                     is GeminiStatus.Connecting -> DubUiStatus.Connecting
                     is GeminiStatus.Ready -> DubUiStatus.Live
-                    is GeminiStatus.Reconnecting -> DubUiStatus.Connecting
+                    is GeminiStatus.Reconnecting -> {
+                        // The audio that was in flight is gone, and the new connection may have a
+                        // different round trip. Rebase both timelines rather than carrying stale
+                        // counters into a session that no longer matches them.
+                        playbackTimeline.reset(clock.nowNanos(), playback.playedNanos())
+                        sync.onGeminiReconnect(clock.nowNanos())
+                        DubUiStatus.Connecting
+                    }
                     is GeminiStatus.Error -> DubUiStatus.Error(mapError(st.message))
                 }
                 _status.value = mapped
@@ -142,15 +157,49 @@ class DubService : Service() {
         // under load — audible as stutter and as the synchronizer's clocks disagreeing.
         // `writeFloats` blocks on WRITE_BLOCKING, which is the backpressure that keeps the
         // Gemini buffer from being overrun.
+        //
+        // The consumer is also where the playback timeline is enforced. Because it receives
+        // oldest-first, refusing the chunk it is holding is exactly the reference behaviour of
+        // discarding the oldest queued audio: the content the user hears jumps forward instead of
+        // the dub falling further behind.
         scope.launch(Dispatchers.IO) {
             gemini.audioOut.collect { samples ->
-                timeline.mark(DubEvent.DUB_CHUNK)
-                playback.writeFloats(samples)
-                timeline.mark(DubEvent.AUDIO_WRITE)
+                val now = clock.nowNanos()
+                val durationNanos =
+                    samples.size * 1_000_000_000L / GeminiLiveConfig.OUTPUT_SAMPLE_RATE
+                timeline.mark(DubEvent.DUB_CHUNK, now)
+                val action = playbackTimeline.onChunkArrived(
+                    now,
+                    durationNanos,
+                    playback.playedNanos(),
+                )
+                if (action == ChunkAction.PLAY) {
+                    playback.writeFloats(samples)
+                    timeline.mark(DubEvent.AUDIO_WRITE)
+                    timeline.mark(DubEvent.SCHEDULED_PLAYBACK)
+                } else {
+                    timeline.mark(DubEvent.CHUNK_DROPPED)
+                }
                 collectedDubChunks.incrementAndGet()
                 val dropped = gemini.emittedAudioChunks - collectedDubChunks.get()
                 if (dropped > 0) timeline.recordDroppedChunks(dropped)
+                markActualPlayback()
             }
+        }
+    }
+
+    /**
+     * Marks, once per session, the monotonic time the platform associates with audio actually
+     * leaving the speaker.
+     *
+     * Deliberately not derived from the write timestamp: the whole point of the measurement is
+     * to separate "handed to the output" from "heard", and only the device can answer the second.
+     */
+    private fun markActualPlayback() {
+        if (actualPlaybackMarked.get()) return
+        val playedAt = playback.playbackTimestampNanos() ?: return
+        if (actualPlaybackMarked.compareAndSet(false, true)) {
+            timeline.mark(DubEvent.ACTUAL_PLAYBACK, playedAt)
         }
     }
 
@@ -255,16 +304,25 @@ class DubService : Service() {
     private fun startSyncLoop() {
         syncJob?.cancel()
         timeline.reset()
+        actualPlaybackMarked.set(false)
         sourceContentNanos.set(0L)
         collectedDubChunks.set(0L)
         lastSyncState = SyncState.IDLE
-        sync.start(clock.nowNanos())
+        val startedAt = clock.nowNanos()
+        playbackTimeline.start(startedAt, playback.playedNanos())
+        sync.start(startedAt)
         _syncState.value = SyncState.WARMING_UP
         syncJob = scope.launch {
             while (isActive) {
                 delay(SYNC_TICK_MS)
                 val now = clock.nowNanos()
-                val decision = sync.tick(now, sourceContentNanos.get(), playback.writtenNanos())
+                // The dub's content clock is the *playhead*, not the write cursor. Audio sitting
+                // in the output buffer has been written but not heard, and counting it as
+                // progress is exactly how a pipeline convinces itself it is in sync when it is
+                // not.
+                val played = playback.playedNanos()
+                playbackTimeline.onPlayed(played)
+                val decision = sync.tick(now, sourceContentNanos.get(), played)
                 when (decision) {
                     SyncDecision.PAUSE_SOURCE -> timeline.mark(DubEvent.SOURCE_PAUSE, now)
                     SyncDecision.RESUME_SOURCE -> timeline.mark(DubEvent.SOURCE_RESUME, now)
@@ -276,7 +334,11 @@ class DubService : Service() {
                 lastSyncState = sync.state
                 timeline.maybeLog(
                     now,
-                    context = "state=${sync.state} latency=${latencyMs}ms",
+                    context = "state=${sync.state} latency=${latencyMs}ms " +
+                        "backlog=${playbackTimeline.backlogNanos / 1_000_000}ms " +
+                        "tolerance=${playbackTimeline.toleranceNanos / 1_000_000}ms " +
+                        "drops=${playbackTimeline.dropCount} " +
+                        "underruns=${playbackTimeline.underrunCount}",
                     force = stateChanged,
                 )
             }
@@ -318,6 +380,7 @@ class DubService : Service() {
         // stop playback, which restores the source volume to exactly what the user had.
         // Guarded because stopAll also runs from onDestroy even if onCreate failed early.
         if (::sync.isInitialized) sync.stop()
+        if (::playbackTimeline.isInitialized) playbackTimeline.stop()
         if (::externalPlayer.isInitialized) externalPlayer.release()
         capture.stop()
         gemini.stop()

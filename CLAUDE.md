@@ -163,7 +163,72 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
 > must not expire with any single feature. Add a rule to `AgentMD.md` only when it
 > applies to every future UI change; everything else belongs in `AGENTS.md`.
 
-### Last change (this session) — the Persian UI restored to the platform font, every Persian string audited, and Live Dub given an adaptive synchronization layer
+### Last change (this session) — the dub-side playback timeline: an explicit playhead and a bounded backlog
+
+**DONE — one additive change to Live Dub, no Reader change, no architecture replacement.**
+
+**The reference.** `mobinbiback/Subify` was cloned and read as a *reference architecture* only, never
+copied. Its live path (`offscreen.js` `playLiveAudio`) schedules each packet at a running
+`livePlayhead` with a 60 ms lead, and its chunked path bounds a `playQueue` at `maxQ = 3`, dropping
+the oldest segment ("Runaway backlog means the dub drifts further behind forever") and playing 15 %
+faster when the queue is at two. Its capture worklet emits ~100 ms frames in `stream` mode; its
+client buffers up to 20 input frames while the socket is not ready and flushes them on
+`setupComplete`; it tracks latency against a content clock (`capturedSec`) as well as wall time.
+
+**What was adopted, and why.** The decisive observation is that Subify corrects drift **on the dub
+side**, which needs no permissions, whereas Voxora could only correct it by pausing an external player
+— a correction that is unavailable on most devices. So:
+
+- **An explicit playhead.** `PlaybackTimeline` keeps `scheduledNanos` (accepted for playback) and
+  `playedNanos` (actually presented), and the backlog is their difference. `DubPlayback` now reads
+  `AudioTrack.playbackHeadPosition` (unwrapped by `PlaybackHead`, because a 32-bit head that wraps
+  would fabricate a four-billion-frame backlog and trigger spurious discards) and
+  `getTimestamp` for the real playback timestamp.
+- **Bounded backlog with controlled dropping.** When the backlog exceeds an **adaptive tolerance**
+  the consumer refuses the chunk it is holding. Because the consumer receives oldest-first, that *is*
+  Subify's "drop the oldest queued segment", and it makes the content jump forward instead of the dub
+  falling further behind. The hand-off buffer in `GeminiLiveSession` was cut from 48 chunks (~2.9 s,
+  enough to hide a burst) to 12.
+- **Jitter adaptation.** Running dry loosens the tolerance by one step; a quiet stretch tightens it.
+  Both are clamped and rate-limited by a cooldown, mirroring Subify's bounded queue but expressed as
+  a measured quantity rather than a fixed queue length.
+- **Monotonic timing and ducking** were already Voxora's and are unchanged; the duck/restore rule
+  stays `SourceVolumeDuck`, pure and tested.
+
+**What was rejected, and why.**
+
+- **The 1.15× speed-up.** `AudioTrack.setPlaybackRate` exists, but a 15 % rate change is audible on
+  speech and artifact-prone on a streaming track; discarding surplus audio is the honest correction
+  for a translation, and the drop is counted and logged.
+- **Buffering input frames while the socket is down and flushing them on reconnect.** Replaying up to
+  two seconds of stale audio after a reconnect *creates* the drift this work exists to remove.
+- **VAD segmentation (3.5–9 s chunks).** That is Subify's chunked REST path; for live streaming it
+  would add seconds of latency. Voxora's 60 ms continuous frames are better.
+- **`onended`-driven sequential playback**, which is the seam-producing approach Subify itself moved
+  away from in the live path.
+- **Wall-clock `Date.now()` for latency.** Voxora uses `SystemClock.elapsedRealtimeNanos()` only, and
+  `dubguard.py` fails on `currentTimeMillis` in the synchronizer.
+
+**Why the architecture was not replaced.** The existing content-clock controller and the
+`ExternalPlayer` seam are sound; they solve the *source* side. The gap was that the dub had no
+timeline of its own. The two now compose — the timeline bounds the backlog locally without
+permissions, the controller corrects residual drift when control exists — and neither replaces the
+other. `DubSyncController`, `SyncConfig`, `ExternalPlayer` and the Reader subsystem are untouched.
+
+**Files.** New: `dub/sync/PlaybackTimeline.kt`, `dub/sync/PlaybackTimelineConfig.kt`,
+`dub/sync/PlaybackHead.kt`, plus `PlaybackTimelineTest` (22) and `PlaybackHeadTest` (6). Modified:
+`DubPlayback.kt` (playhead + real playback timestamp, synchronized because three threads read it),
+`DubService.kt` (consults the timeline per chunk, feeds the controller the playhead, rebases on
+reconnect), `LatencyTimeline.kt` (`SCHEDULED_PLAYBACK`, `ACTUAL_PLAYBACK`, `CHUNK_DROPPED`, and a
+summary that separates write from playback), `GeminiLiveSession.kt` (hand-off buffer).
+
+**Verification.** 71 sync tests pass locally (kotlinc + JUnit, `-ea`); `DubPlayback`, `dub/sync` and
+`DubService` are type-checked against `android.jar` with stubs; all six guards pass, with
+`dubguard.py` extended by three rules and each one verified to fail on an injected violation. **Not
+verified on a device** — see the owner-verification items above. Do not claim the synchronization is
+solved: the constants are bounded and measured, not tuned against real Gemini behaviour.
+
+### Last change (previous session) — the Persian UI restored to the platform font, every Persian string audited, and Live Dub given an adaptive synchronization layer
 
 **DONE — two parts, requested together. No Reader code was touched.**
 
@@ -218,34 +283,51 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
   pausing the source corrects drift, it does not align lip movement. `DelayedScreenOverlay` stays a
   disabled stub (its VirtualDisplay overlay caused recursive frame-in-frame and froze the UI) and
   `dubguard.py` fails if anything constructs it.
-- **Two real latency bugs were fixed.** (1) `DubService` launched a new coroutine per audio emission
-  to write to the track, so chunks could be written out of order; there is now one ordered consumer,
-  with `WRITE_BLOCKING` as the backpressure. (2) `DubPlayback` sized the `AudioTrack` buffer at
-  `minBuf * 8` floored at a full second of audio — a second of added lip-sync delay; it is now
-  `minBuf * 2` floored at ~125 ms.
+- **The dub now has a playhead of its own.** Source-side correction needs media control, which is
+  often unavailable — and on those devices the dub had no defence against a backlog. `PlaybackTimeline`
+  keeps one number, the **backlog** (dubbed audio received but not yet heard), derived from the
+  *playhead* (`DubPlayback.playedNanos()`, from `AudioTrack.playbackHeadPosition`, unwrapped by
+  `PlaybackHead`) rather than from bytes written. When a Gemini burst pushes it past an **adaptive
+  tolerance** — loosened when the output runs dry, tightened when it is quiet, both clamped and
+  rate-limited — the timeline refuses to feed the output until it is back inside, so the surplus is
+  discarded instead of becoming permanent drift. The consumer receives oldest-first, so refusing the
+  chunk it holds is exactly "discard the oldest queued audio". On reconnect the timeline is **rebased**,
+  not zeroed. This is **additive**: `DubSyncController` and the `ExternalPlayer` seam are unchanged.
+- **Two real latency bugs were fixed, and a third measurement bug.** (1) `DubService` launched a new
+  coroutine per audio emission to write to the track, so chunks could be written out of order; there is
+  now one ordered consumer, with `WRITE_BLOCKING` as the backpressure. (2) `DubPlayback` sized the
+  `AudioTrack` buffer at `minBuf * 8` floored at a full second of audio — a second of added lip-sync
+  delay; it is now `minBuf * 2` floored at ~125 ms. (3) The dub's content clock was the write cursor,
+  so audio sitting unplayed in the output buffer counted as progress and the pipeline could not see its
+  own backlog; it is now the playhead, and `dubguard.py` fails if `writtenNanos()` is fed back in.
 - **Gemini's `DROP_OLDEST` is no longer silent.** `tryEmit` cannot report a drop, so
   `GeminiLiveSession.emittedAudioChunks` is compared with what the consumer actually received and the
   difference is reported as `DROPPED n` in the instrumentation line.
 - **Instrumentation is monotonic and rate-limited.** `LatencyTimeline` records
-  `SystemClock.elapsedRealtimeNanos()` for capture, send, first model audio, dub chunk, audio write and
-  pause/resume, and emits one summary per two seconds (forced on a state change) through `VoxoraLog` —
-  enough to attribute the delay to capture, transport, Gemini, the output buffer or the sync
-  algorithm, without flooding the ring buffer.
+  `SystemClock.elapsedRealtimeNanos()` for capture, send, first model audio, dub chunk, audio write,
+  scheduled playback, actual playback, dropped chunk and pause/resume, and emits one summary per two
+  seconds (forced on a state change) through `VoxoraLog` — enough to attribute the delay to capture,
+  transport, Gemini, the output buffer or the sync algorithm, without flooding the ring buffer. The
+  write and playback stages are separate on purpose: only the platform's own `AudioTrack.getTimestamp`
+  can show how long audio waits in the output buffer.
 - **Safety.** Every path that could leave the source paused — control lost, a stalled dub, a Gemini
   reconnect, `stop()`, service teardown — resumes it; a user's own pause is detected and never fought;
   the ducked source level is saved and restored exactly (`SourceVolumeDuck`, pure and tested); the
   volume-key `MediaSession`/`VolumeProvider` is untouched.
 
-**Locally verified (no Gradle).** `kotlinc 2.0.21` + JUnit 4.13.2 with `-ea`: **41 new sync tests
-pass** — `DubSyncControllerTest` 19, `SourceVolumeDuckTest` 6, `LatencyTimelineTest` 10,
-`SyncStatusVisualTest` 6 — and the comprehensive harness is still green (**383 tests across 33
-classes**; the Cloud suite separately **485 tests across 43 classes**). The modified
-`GeminiLiveSession` was compiled on the JVM against an `android.util.Base64` stub, since no existing
-harness covered it. All six static guards pass: `themecheck.py`, `checkimports.py`, `stringcheck.py`,
-`themeguard.py`, `bidi_fa.py` and the new `dubguard.py` — the last verified to fail when a violation
-is injected. The Compose, Play Services and Android layers are **not** compiled locally; the CI
-`Assemble debug` job is their only compile check. **No real-device testing was performed**: the
-measured latency, whether drift correction engages, and the media-session pause/resume are all
+**Locally verified (no Gradle).** `kotlinc 2.0.21` + JUnit 4.13.2 with `-ea`: **71 sync tests
+pass** — `DubSyncControllerTest` 19, `SourceVolumeDuckTest` 6, `LatencyTimelineTest` 12,
+`PlaybackTimelineTest` 22, `PlaybackHeadTest` 6, `SyncStatusVisualTest` 6 — and the comprehensive
+harness is still green (**383 tests across 33 classes**; the Cloud suite separately **485 tests across
+43 classes**). `DubPlayback`, the whole `dub/sync` package and `DubService` are additionally
+type-checked against `android.jar` with small stubs for the AndroidX/app collaborators, since the
+harness cannot compile them; the modified `GeminiLiveSession` is compiled on the JVM against an
+`android.util.Base64` stub. All six static guards pass: `themecheck.py`, `checkimports.py`,
+`stringcheck.py`, `themeguard.py`, `bidi_fa.py` and `dubguard.py` — the last extended with three new
+rules and verified to fail on each injected violation. The Compose, Play Services and Android layers
+are **not** fully compiled locally; the CI `Assemble debug` job is their only compile check. **No
+real-device testing was performed**: the measured latency, whether drift correction engages, whether
+the playback timeline ever discards audio in practice, and the media-session pause/resume are all
 owner-verification items.
 
 **BLOCKED:** nothing in this change is blocked on code. The external item noted below (the Google
