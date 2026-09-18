@@ -56,6 +56,24 @@ internal class ReaderDisplayText {
     fun readingText(language: String, chunk: Int, units: List<String>): List<String> =
         units.mapIndexed { index, source -> text(language, chunk, index) ?: source }
 
+    /**
+     * Whether a rendering just recorded for [chunk] in [language] is part of what the
+     * Reader is showing right now, and therefore has to be republished immediately.
+     *
+     * Production runs ahead of playback: a producer renders whole chunks before they are
+     * audible, and the reader may switch language mid-run. Republishing on every record
+     * would pull the UI onto a prefetched chunk or onto a language the reader has left.
+     * Requiring both to match keeps the visible state owned by the current position.
+     *
+     * Pure JVM so the refresh rule is unit-testable without Android.
+     */
+    fun shouldRepublish(
+        language: String,
+        chunk: Int,
+        displayedLanguage: String,
+        displayedChunk: Int,
+    ): Boolean = language == displayedLanguage && chunk == displayedChunk
+
     /** Languages that currently hold at least one rendering. */
     fun languages(): Set<String> = byLanguage.keys.toSet()
 

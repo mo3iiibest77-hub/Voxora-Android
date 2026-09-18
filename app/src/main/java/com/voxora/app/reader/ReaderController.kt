@@ -361,6 +361,15 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
                             // Gemini narrated this unit in `language`, so the transcript is
                             // that unit's selected-language reading text.
                             displayText.record(language, slot.index, unit, transcript)
+                            // The producer renders whole chunks ahead of playback, so a
+                            // recording only becomes visible state when it belongs to the
+                            // chunk on screen and to the language being displayed. Without
+                            // this the UI would keep showing the extracted source until some
+                            // unrelated event republished, which is what made the reading
+                            // text lag the narration by a chunk.
+                            if (displayText.shouldRepublish(language, slot.index, outputLanguage, queue.index)) {
+                                publish(state.value.phase)
+                            }
                         }
                         break
                     } catch (e: CancellationException) {
@@ -562,6 +571,9 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
             text = queue.current.orEmpty(),
             segments = displayed,
             documentName = documentName,
+            // Republishing a phase must not swallow the reason it is showing, and any
+            // other phase transition means the failure no longer applies.
+            error = if (phase == ReaderPhase.ERROR) state.value.error else null,
         )
         if (phase != ReaderPhase.SPEAKING) mutableNarrationText.value = ""
     }
