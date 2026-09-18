@@ -148,10 +148,12 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
 ### Actual repository state (inspected, not assumed):
 - `main`: `1f0a719 fix(reader): fix suspend output language persistence`.
 - `feat/reader-segmented-spooling` (the implementation branch) HEAD is
-  `1504669 refactor(i18n): drive every language picker from one catalog`, on top of
-  `882ab27 fix(reader): keep the reader usable while a document is extracting`,
-  `1c0df1e fix(reader): refresh reading text as soon as a unit is narrated` and the
-  earlier `06a3bb3`/`7f47805`/`a9b9336`. It carries the Reader quality pass —
+  `14bd894 docs: record the reader refresh, extraction gates and language catalog`,
+  on top of the three code commits `1504669 refactor(i18n): drive every language
+  picker from one catalog`, `882ab27 fix(reader): keep the reader usable while a
+  document is extracting` and `1c0df1e fix(reader): refresh reading text as soon as a
+  unit is narrated`, and the earlier `06a3bb3`/`7f47805`/`a9b9336`. It carries the
+  Reader quality pass —
   `925ee1d feat(reader): redesign the reader screen`,
   `72527e7 feat(reader): expose the loaded document name`,
   `f644d2f feat(reader): map language catalog to deterministic flags`,
@@ -287,9 +289,11 @@ job is their real check.
 created 2026-09-18T02:05:29Z): `Unit tests` success (including the `Run unit tests`
 step, which runs `gradle :core:testDebugUnitTest :app:testDebugUnitTest`) and
 `Assemble debug APK` success (including `Assemble debug` and `Upload debug APK`). The
-workflow has no `continue-on-error`, so a green `Run unit tests` step is a genuine
-pass and a green `Assemble debug` step is a genuine compile check of the Compose
-changes.
+documentation commit on top of it, `14bd894` (the current HEAD), is verified by run
+**`35298147134`** (run **#71**, created 2026-09-18T02:13Z): both jobs success, 10 and
+14 steps green. The workflow has no `continue-on-error`, so a green `Run unit tests`
+step is a genuine pass and a green `Assemble debug` step is a genuine compile check of
+the Compose changes.
 
 **IN PROGRESS:** nothing — all three objectives are implemented, tested and
 CI-verified on this branch.
