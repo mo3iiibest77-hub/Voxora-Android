@@ -141,7 +141,6 @@
     <string name="sync_permission_title">Sharper sync</string>
     <string name="sync_permission_body">To keep the translation lined up with the source, Voxora can briefly pause and resume the app that is playing. Android allows that only with notification access. Voxora never reads your notifications.</string>
     <string name="sync_permission_action">Allow media control</string>
-    <string name="sync_permission_granted">Media control is on. Voxora can keep the source and the translation together.</string>
     <string name="sync_video_note">External video cannot be delayed, so the translation stays a moment behind the picture. Syncing stops that gap from growing.</string>
     <string name="onboarding_welcome">Welcome to Voxora</string>
     <string name="onboarding_body">Hear any app in your language — powered by Gemini Live Translate.</string>

@@ -124,7 +124,6 @@
     <string name="sync_permission_title">همگام‌سازی دقیق‌تر</string>
     <string name="sync_permission_body">برای اینکه ترجمه با منبع هماهنگ بماند، ⁨Voxora⁩ می‌تواند اپی را که در حال پخش است لحظه‌ای متوقف و دوباره پخش کند. ⁨Android⁩ این کار را فقط با دسترسی به اعلان‌ها اجازه می‌دهد. ⁨Voxora⁩ اعلان‌هایت را نمی‌خواند.</string>
     <string name="sync_permission_action">اجازهٔ کنترل رسانه</string>
-    <string name="sync_permission_granted">کنترل رسانه فعال است. ⁨Voxora⁩ می‌تواند منبع و ترجمه را هماهنگ نگه دارد.</string>
     <string name="sync_video_note">ویدیوی بیرونی را نمی‌توان عقب انداخت، پس ترجمه کمی از تصویر عقب‌تر می‌ماند. همگام‌سازی جلوی بیشتر شدن این فاصله را می‌گیرد.</string>
     <string name="bubble_live">زنده</string>
     <string name="notif_channel_name">⁨Voxora⁩ زنده</string>
