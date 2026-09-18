@@ -16,9 +16,6 @@ class UserPrefs(private val context: Context) {
     private val keyLang = stringPreferencesKey("target_lang")
     private val keyAppLang = stringPreferencesKey("app_lang")
     private val keyOnboarding = booleanPreferencesKey("onboarding_done")
-    private val keyEmail = stringPreferencesKey("user_email")
-    private val keyDisplayName = stringPreferencesKey("user_display_name")
-    private val keySignedIn = booleanPreferencesKey("signed_in")
     private val keyReaderEndpoint = stringPreferencesKey("reader_endpoint")
     private val keyReaderMode = stringPreferencesKey("reader_mode")
     private val keyReaderOutputLang = stringPreferencesKey("reader_output_lang")
@@ -69,9 +66,6 @@ class UserPrefs(private val context: Context) {
     /** UI language — default English (international) */
     val appLanguage: Flow<String> = context.dataStore.data.map { it[keyAppLang] ?: "en" }
     val onboardingDone: Flow<Boolean> = context.dataStore.data.map { it[keyOnboarding] == true }
-    val userEmail: Flow<String> = context.dataStore.data.map { it[keyEmail].orEmpty() }
-    val displayName: Flow<String> = context.dataStore.data.map { it[keyDisplayName].orEmpty() }
-    val signedIn: Flow<Boolean> = context.dataStore.data.map { it[keySignedIn] == true }
 
     suspend fun setApiKey(value: String) {
         context.dataStore.edit { it[keyApi] = value.trim() }
@@ -87,21 +81,5 @@ class UserPrefs(private val context: Context) {
 
     suspend fun setOnboardingDone(done: Boolean = true) {
         context.dataStore.edit { it[keyOnboarding] = done }
-    }
-
-    suspend fun setAccount(email: String, name: String, signedIn: Boolean) {
-        context.dataStore.edit {
-            it[keyEmail] = email
-            it[keyDisplayName] = name
-            it[keySignedIn] = signedIn
-        }
-    }
-
-    suspend fun clearAccount() {
-        context.dataStore.edit {
-            it.remove(keyEmail)
-            it.remove(keyDisplayName)
-            it[keySignedIn] = false
-        }
     }
 }
