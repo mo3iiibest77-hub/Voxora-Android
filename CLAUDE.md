@@ -147,14 +147,17 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
 
 ### Last change (this session) — Persian localization, Reader segment swipe, Logs, Cloud authorization
 
-Five commits on `feat/reader-segmented-spooling`:
+Nine commits on `feat/reader-segmented-spooling` this cycle:
 
 - `7c12b7d fix(reader): navigate segments independently from chunks` (already on the branch)
 - `2d953fa fix(ui): modernize logs screen` (already on the branch)
 - `2644b57 fix(i18n): rewrite Persian UI terminology and unify the register`
 - `12eb52b fix(ui): correct the dub screen's RTL back navigation and typography`
 - `2ebf1d5 feat(cloud): add the authorized Google Cloud discovery layer`
-- plus the app-side wiring commit that connects Settings, the usage screen and the authorizer.
+- `97e33f8 feat(cloud): model what a Cloud read should look like on screen`
+- `a73a479 feat(auth): authorize Google Cloud access with an OAuth access token`
+- `316a6a4 feat(settings): connect the Google account, project and Gemini key`
+- `089a71f docs: record the cloud authorization, segment swipe and Persian localization`
 
 **DONE — the Reader swipe moves segments, not chunks.** The branch already carried this in
 `7c12b7d`, and it was verified rather than assumed: `ReaderPager.swipeStep` is the whole swipe rule
@@ -209,11 +212,26 @@ authorises no Cloud read, so it could never discover a project or a key. The acc
 - **Manual API-key mode remains a first-class fallback** and is unaffected by sign-out.
 
 **Tests actually run (no Gradle).** `kotlinc 2.0.21` + JUnit with `-ea`, matching Gradle's test JVM:
-**364 tests OK across 32 classes**, including the new `CloudSelectionTest`, `CloudAuthStateTest`,
+**374 tests OK across 33 classes**, including the new `CloudSelectionTest`, `CloudAuthStateTest`,
 `CloudParsersTest`, `CloudUsageTest`, `GoogleCloudHttpTest` (driven against `MockWebServer`, so
 nothing reaches Google), `CloudLoadStateTest` and `CloudAuthFailureClassifierTest`. Static checks:
 the `R.string.*` cross-check passes for both locales with matching format args, the Compose/AndroidX
 import guard passes, and the auth-layer removal left no dangling references.
+
+**Removal fallout cleaned up.** Deleting the ID-token layer left three kinds of dead weight, all
+removed rather than left behind: the Credential Manager dependencies (`androidx.credentials:credentials`,
+`credentials-play-services-auth`, `googleid`) that nothing imports any more; the `auth_failed` /
+`auth_optional_hint` / `auth_signing_in` / `auth_signed_out` / `auth_welcome` / `auth_need_client_id`
+strings from the five non-Persian locales (they were already deleted from `values/` and `values-fa/`),
+and the stale `GoogleAuthHelper` reference in `GoogleCloudAuthorizer`'s KDoc. Note that `ar`, `es`,
+`fr`, `de` and `tr` were **already** missing 189–226 of the 261 keys before this cycle, so they fall
+back to English for the new Cloud strings exactly as they do for the rest of the app — the Persian
+translation is the complete one, and no machine translation was produced for the others.
+
+**CI.** The branch is pushed, so the `Android CI` workflow (`assembleDebug` + `:core:testDebugUnitTest`
+`:app:testDebugUnitTest`) runs on it. Its status could not be read from this environment — `gh` is not
+authenticated and no GitHub token is present — so CI must be confirmed from the repository, not
+assumed green. The local pure-JVM suite above is the evidence that the test sources are sound.
 
 **Real-device verification was NOT performed.** Nothing in this cycle was tested on a physical
 device, and no device behaviour may be claimed.
@@ -237,6 +255,12 @@ confirm the previous account's project and key disappear immediately.
 ### Actual repository state (inspected, not assumed):
 - `main`: `1f0a719 fix(reader): fix suspend output language persistence`.
 - `feat/reader-segmented-spooling` (the implementation branch) HEAD is
+  `089a71f docs: record the cloud authorization, segment swipe and Persian localization`, on top of
+  `316a6a4 feat(settings): connect the Google account, project and Gemini key`,
+  `a73a479 feat(auth): authorize Google Cloud access with an OAuth access token`,
+  `97e33f8 feat(cloud): model what a Cloud read should look like on screen`,
+  `2ebf1d5 feat(cloud): add the authorized Google Cloud discovery layer`,
+  `2644b57`/`12eb52b`/`2d953fa`/`7c12b7d` (Persian, dub RTL, Logs, segment navigation), which sit on
   `db831d2 feat(onboarding): introduce both products and the shared key`, on top of
   `4d9608d feat(settings): harden the account card and add the API usage dashboard` and
   `982786b feat(usage): add the Gemini key probe and observed-usage model`, which sit on
@@ -249,10 +273,11 @@ confirm the previous account's project and key disappear immediately.
   `b0d556d fix(reader): preserve pdf reading order`,
   `a74db6c fix(reader): define fluent and faithful narration semantics` — plus the
   reading-order fix `6d826e0 fix(reader): de-interleave pdf columns when a page
-  carries a running header` and the documentation commits. **31 commits ahead of
-  `main` (`1f0a719`)**, pushed to `origin`, and **not merged**. CI is green at
-  `7f47805` (run `35294468431`, both jobs) and at `707cc3c` (run #66); every later
-  slice is CI-verified separately.
+  carries a running header` and the documentation commits. **Pushed to `origin`
+  at `089a71f`, and not merged.** CI was green at `7f47805` (run `35294468431`, both
+  jobs) and at `707cc3c` (run #66); the runs for the cloud commits are triggered by
+  this push but **their result was not readable from this environment**, so treat
+  them as unconfirmed until checked on the repository.
 - `feat/ci-feature-branch` = `76f0c96` + `dcbf852 ci: run Android CI on feature
   branch`, with **PR #2 open to `main`** (still open; deliberately NOT merged).
 - **PR #3 "Feat/reader segmented spooling"** (`feat/reader-segmented-spooling` →

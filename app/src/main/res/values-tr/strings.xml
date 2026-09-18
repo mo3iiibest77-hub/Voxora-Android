@@ -35,10 +35,4 @@
     <string name="onboarding_page2_body">Android ekran yakalama istediğinde izin ver. Voxora yalnızca ses kullanır — kamera değil.</string>
     <string name="onboarding_page3_title">Ücretsiz Gemini anahtarını ekle</string>
     <string name="onboarding_page3_body">Google AI Studio da anahtar oluştur, Ayarlara yapıştır, dublaj dilini seç, Start a bas.</string>
-    <string name="auth_optional_hint">İsteğe bağlı. Yalnızca API anahtarıyla, giriş yapmadan kullanabilirsin.</string>
-    <string name="auth_signing_in">Giriş yapılıyor…</string>
-    <string name="auth_failed">Giriş başarısız. Tekrar dene veya misafir olarak devam et.</string>
-    <string name="auth_signed_out">Çıkış yapıldı</string>
-    <string name="auth_welcome">Hoş geldin, %1$s</string>
-    <string name="auth_need_client_id">Google girişi için Web client ID gerekir. API anahtarıyla misafir olarak devam edebilirsin.</string>
 </resources>

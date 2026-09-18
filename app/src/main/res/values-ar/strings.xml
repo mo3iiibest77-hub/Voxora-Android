@@ -35,12 +35,6 @@
     <string name="onboarding_page2_body">عندما يطلب أندرويد التقاط الشاشة، اسمح به. Voxora يستخدم الصوت فقط — ليس الكاميرا. يمكنك الإيقاف في أي وقت من التطبيق أو الإشعار.</string>
     <string name="onboarding_page3_title">أضف مفتاح Gemini المجاني</string>
     <string name="onboarding_page3_body">أنشئ مفتاحاً في Google AI Studio، الصقه في الإعدادات، اختر لغة الدبلجة، ثم اضغط ابدأ. اختياري: سجّل الدخول عبر Google.</string>
-    <string name="auth_optional_hint">اختياري. يمكنك استخدام Voxora بدون تسجيل دخول — فقط الصق مفتاح API.</string>
-    <string name="auth_signing_in">جارٍ تسجيل الدخول…</string>
-    <string name="auth_failed">فشل تسجيل الدخول. أعد المحاولة أو تابع كضيف.</string>
-    <string name="auth_signed_out">تم تسجيل الخروج</string>
-    <string name="auth_welcome">مرحباً، %1$s</string>
-    <string name="auth_need_client_id">تسجيل الدخول عبر Google يحتاج Web client ID. يمكنك المتابعة كضيف بمفتاح API.</string>
     <string name="action_show_key">إظهار مفتاح API</string>
     <string name="action_hide_key">إخفاء المفتاح</string>
     <string name="action_retry">إعادة المحاولة</string>

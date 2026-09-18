@@ -53,12 +53,6 @@
     <string name="onboarding_page2_body">Quand Android demande de capturer l\'écran, autorisez. Voxora utilise uniquement l\'audio — pas la caméra. Vous pouvez arrêter à tout moment depuis l\'app ou la notification.</string>
     <string name="onboarding_page3_title">Ajoutez votre clé Gemini gratuite</string>
     <string name="onboarding_page3_body">Créez une clé dans Google AI Studio, collez-la dans les paramètres, choisissez une langue de doublage, puis appuyez sur Démarrer. Facultatif : connectez-vous avec Google.</string>
-    <string name="auth_optional_hint">Facultatif. Vous pouvez utiliser Voxora sans connexion — collez juste une clé API.</string>
-    <string name="auth_signing_in">Connexion…</string>
-    <string name="auth_failed">Échec de la connexion. Réessayez ou continuez en invité.</string>
-    <string name="auth_signed_out">Déconnecté</string>
-    <string name="auth_welcome">Bienvenue, %1$s</string>
-    <string name="auth_need_client_id">La connexion Google nécessite un Web client ID. Vous pouvez continuer en invité avec une clé API.</string>
     <string name="action_show_key">Afficher la clé API</string>
     <string name="action_hide_key">Masquer la clé</string>
     <string name="home_now_dubbing">Doublage en %1$s</string>

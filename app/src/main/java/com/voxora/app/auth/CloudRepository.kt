@@ -99,13 +99,23 @@ class CloudRepository @Inject constructor(@ApplicationContext private val contex
 
     private fun onGranted(outcome: CloudAuthorizationOutcome.Granted) {
         accessToken = outcome.accessToken
-        val email = outcome.accountEmail
-        // The account may have changed, so the selection's invalidation rule runs before anything
-        // is loaded: the new account starts with no project and no key.
-        mutableSelection.value = mutableSelection.value.withAccount(email)
-        mutableAuth.value = CloudAuthState.Authorized(accountEmail = email, expiresAtMillis = null)
-        VoxoraLog.i(TAG, "Cloud authorization granted")
-        refreshProjects()
+        // Stay in the authorizing state until we know *which* account granted access. Applying the
+        // grant first would briefly show the previous account's project against the new one.
+        mutableAuth.value = CloudAuthState.Authorizing
+        scope.launch {
+            // `AuthorizationResult` carries no account, so the email is read from the official
+            // OpenID Connect userinfo endpoint. An unresolved email is passed through as null,
+            // which makes `withAccount` clear the previous account's resources conservatively.
+            val email = directory.accountEmail(outcome.accessToken).valueOrNull
+            if (accessToken != outcome.accessToken) return@launch
+            // The invalidation rule runs here, on the real identity: a different account drops the
+            // previous projects, keys and active key, while re-authorizing the same account keeps
+            // the project the user already chose.
+            mutableSelection.value = mutableSelection.value.withAccount(email)
+            mutableAuth.value = CloudAuthState.Authorized(accountEmail = email, expiresAtMillis = null)
+            VoxoraLog.i(TAG, "Cloud authorization granted")
+            refreshProjects()
+        }
     }
 
     /** Re-reads the accessible projects for the current account. */

@@ -107,17 +107,26 @@ class CloudAuthStateTest {
         assertTrue(CloudAuthFailure.CANCELLED in reasons)
     }
 
+    /**
+     * The scope set is pinned rather than pattern-matched: adding a scope must be a deliberate
+     * decision, and every entry is read-only because Voxora never writes to Google Cloud.
+     */
     @Test
-    fun theScopeSetIsReadOnlyAndHasNoDuplicates() {
+    fun theScopeSetIsExactlyTheReadOnlySetVoxoraNeeds() {
+        assertEquals(
+            listOf(
+                CloudScopes.CLOUD_PLATFORM_READ_ONLY,
+                CloudScopes.MONITORING_READ,
+                CloudScopes.USERINFO_EMAIL,
+            ),
+            CloudScopes.ALL,
+        )
         assertEquals(CloudScopes.ALL.size, CloudScopes.ALL.toSet().size)
-        assertTrue(CloudScopes.ALL.isNotEmpty())
-        // Every scope must be a read scope: Voxora never writes to Google Cloud.
+        assertTrue(CloudScopes.ALL.all { it.startsWith("https://www.googleapis.com/auth/") })
         assertTrue(
-            CloudScopes.ALL.all {
-                it.startsWith("https://www.googleapis.com/auth/") &&
-                    (it.endsWith("read") || it.endsWith("read-only"))
+            CloudScopes.ALL.none {
+                it.contains("write") || it.endsWith(".full") || it.endsWith("/cloud-platform")
             },
         )
-        assertTrue(CloudScopes.ALL.none { it.contains("write") || it.contains("full") })
     }
 }

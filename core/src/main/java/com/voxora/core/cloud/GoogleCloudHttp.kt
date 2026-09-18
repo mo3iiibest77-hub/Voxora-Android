@@ -49,6 +49,13 @@ class GoogleCloudHttpDirectory(
             parse = CloudParsers::projects,
         )
 
+    override suspend fun accountEmail(accessToken: String): CloudResult<String> =
+        get(
+            url = url(endpoints.userInfoBase, "v1/userinfo"),
+            accessToken = accessToken,
+            parse = CloudParsers::email,
+        )
+
     override suspend fun listKeys(
         accessToken: String,
         projectId: String,

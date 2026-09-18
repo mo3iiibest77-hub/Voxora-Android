@@ -11,6 +11,7 @@ data class CloudEndpoints(
     val apiKeysBase: String = "https://apikeys.googleapis.com",
     val monitoringBase: String = "https://monitoring.googleapis.com",
     val quotasBase: String = "https://cloudquotas.googleapis.com",
+    val userInfoBase: String = "https://openidconnect.googleapis.com",
 ) {
     companion object {
         val PRODUCTION = CloudEndpoints()

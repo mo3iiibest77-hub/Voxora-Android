@@ -26,7 +26,7 @@ sealed interface CloudAuthorizationOutcome {
     data class NeedsConsent(val pendingIntent: PendingIntent) : CloudAuthorizationOutcome
 
     /** Scopes granted. [accessToken] is short-lived and must never be logged or persisted. */
-    data class Granted(val accessToken: String, val accountEmail: String?) : CloudAuthorizationOutcome
+    data class Granted(val accessToken: String) : CloudAuthorizationOutcome
 
     /** The attempt failed, with a classified reason. */
     data class Denied(val reason: CloudAuthFailure) : CloudAuthorizationOutcome
@@ -36,10 +36,10 @@ sealed interface CloudAuthorizationOutcome {
  * Requests an OAuth **access token** for Google Cloud, through Google Identity Services.
  *
  * ## Why this is not Google Sign-In
- * `GoogleAuthHelper` obtains an ID token, which identifies the account and authorises nothing.
- * Reading projects, keys and usage needs a Cloud-scoped access token, so this class asks the
- * Authorization API for exactly [CloudScopes.ALL] and nothing more. The two are deliberately
- * separate, and neither is a substitute for the other.
+ * A Google ID token identifies the account and authorises nothing. Reading projects, keys and
+ * usage needs a Cloud-scoped access token, so this class asks the Authorization API for exactly
+ * [CloudScopes.ALL] and nothing more. The two are deliberately separate, and neither is a
+ * substitute for the other — which is why this app holds no ID token at all.
  *
  * ## Configuration
  * A Web client ID must exist in [R.string.default_web_client_id]. Until it does, [configured] is
@@ -98,8 +98,10 @@ class GoogleCloudAuthorizer(private val context: Context) {
             VoxoraLog.w(TAG, "Authorization returned no access token")
             return CloudAuthorizationOutcome.Denied(CloudAuthFailure.PERMISSION_DENIED)
         }
-        // The account name is the email address. Only the email leaves this method — never the token.
-        return CloudAuthorizationOutcome.Granted(accessToken = token, accountEmail = result.account?.name)
+        // Only the token leaves this method. `AuthorizationResult` exposes no account, so the
+        // email is read separately through the OpenID Connect userinfo endpoint; guessing one
+        // here would put an unverified address on the account card.
+        return CloudAuthorizationOutcome.Granted(accessToken = token)
     }
 
     private fun classify(error: Exception): CloudAuthFailure {

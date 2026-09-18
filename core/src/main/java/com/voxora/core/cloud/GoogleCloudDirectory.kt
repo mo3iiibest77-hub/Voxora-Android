@@ -16,6 +16,16 @@ interface GoogleCloudDirectory {
     /** Projects the account can actually access, via the Resource Manager API. */
     suspend fun listProjects(accessToken: String): CloudResult<List<CloudProject>>
 
+    /**
+     * The signed-in account's email, via the OpenID Connect userinfo endpoint.
+     *
+     * `AuthorizationResult` does not expose an account, and its `toGoogleSignInAccount()` is
+     * deprecated, so this is the supported way to learn which account granted access. Returns an
+     * empty failure when Google did not include an email — the app then shows a generic label
+     * rather than inventing one.
+     */
+    suspend fun accountEmail(accessToken: String): CloudResult<String>
+
     /** Key **metadata** in [projectId], via the API Keys API. Never returns key secrets. */
     suspend fun listKeys(accessToken: String, projectId: String): CloudResult<List<CloudApiKey>>
 
@@ -53,6 +63,15 @@ object CloudParsers {
         }
         return result
     }
+
+    /**
+     * Reads the `email` claim from an OpenID Connect userinfo response.
+     *
+     * A response with no email, or one that is not JSON, is `null` — never an empty string, which
+     * would be shown as a blank account.
+     */
+    fun email(body: String?): String? =
+        rootObject(body)?.optString("email")?.trim()?.takeIf { it.isNotEmpty() }
 
     /**
      * Sums every point of a Cloud Monitoring `ListTimeSeriesResponse`.

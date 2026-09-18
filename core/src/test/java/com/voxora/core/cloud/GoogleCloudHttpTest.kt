@@ -50,6 +50,7 @@ class GoogleCloudHttpTest {
             apiKeysBase = base,
             monitoringBase = base,
             quotasBase = base,
+            userInfoBase = base,
         )
     }
 
@@ -139,6 +140,33 @@ class GoogleCloudHttpTest {
     fun keyListingIsRefusedCleanly() = runBlocking {
         enqueue(403, "{}")
         assertEquals(CloudResult.PermissionDenied, directory().listKeys("t", "alpha-123"))
+    }
+
+    // ---- account email --------------------------------------------------------------
+
+    @Test
+    fun readsTheAccountEmailFromTheUserinfoEndpoint() = runBlocking {
+        enqueue(200, """{"sub":"12345","email":"owner@example.com"}""")
+
+        val result = directory().accountEmail("ya29.SECRET")
+
+        assertEquals("owner@example.com", result.valueOrNull)
+        val recorded = server.takeRequest()
+        assertTrue(recorded.path!!.contains("/v1/userinfo"))
+        assertEquals("Bearer ya29.SECRET", recorded.getHeader("Authorization"))
+        assertFalse(recorded.path!!.contains("ya29.SECRET"))
+    }
+
+    @Test
+    fun aRefusedUserinfoReadIsReportedAsDenied() = runBlocking {
+        enqueue(403, "{}")
+        assertEquals(CloudResult.PermissionDenied, directory().accountEmail("t"))
+    }
+
+    @Test
+    fun aUserinfoAnswerWithNoEmailIsAFailureNotABlankAccount() = runBlocking {
+        enqueue(200, """{"sub":"12345"}""")
+        assertTrue(directory().accountEmail("t") is CloudResult.Failed)
     }
 
     // ---- project usage --------------------------------------------------------------

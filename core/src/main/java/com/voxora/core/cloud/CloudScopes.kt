@@ -30,6 +30,15 @@ object CloudScopes {
      */
     const val MONITORING_READ = "https://www.googleapis.com/auth/monitoring.read"
 
+    /**
+     * The signed-in account's email address.
+     *
+     * Needed to show *which* Google account is connected, which is the top level of the account →
+     * project → key hierarchy. It is read through the OpenID Connect userinfo endpoint. Nothing
+     * else about the user is requested, and `AuthorizationResult` does not expose an account.
+     */
+    const val USERINFO_EMAIL = "https://www.googleapis.com/auth/userinfo.email"
+
     /** Everything the authorizer requests, in a stable order. */
-    val ALL: List<String> = listOf(CLOUD_PLATFORM_READ_ONLY, MONITORING_READ)
+    val ALL: List<String> = listOf(CLOUD_PLATFORM_READ_ONLY, MONITORING_READ, USERINFO_EMAIL)
 }

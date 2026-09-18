@@ -162,4 +162,21 @@ class CloudParsersTest {
         assertNull(CloudParsers.quotaLimit("nope"))
         assertNull(CloudParsers.quotaLimit(null))
     }
+
+    // ---- account email ---------------------------------------------------------------
+
+    @Test
+    fun readsTheAccountEmailFromTheUserinfoResponse() {
+        assertEquals("owner@example.com", CloudParsers.email("""{"email":"owner@example.com"}"""))
+        assertEquals("owner@example.com", CloudParsers.email("""{"email":"  owner@example.com  "}"""))
+    }
+
+    /** A response with no email is null, never a blank account shown on the card. */
+    @Test
+    fun aUserinfoResponseWithNoEmailIsNull() {
+        assertNull(CloudParsers.email("""{"sub":"12345"}"""))
+        assertNull(CloudParsers.email("""{"email":""}"""))
+        assertNull(CloudParsers.email("not json"))
+        assertNull(CloudParsers.email(null))
+    }
 }
