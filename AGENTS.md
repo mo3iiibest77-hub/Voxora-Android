@@ -128,34 +128,38 @@ Voxora-Android/
 
 ## 3. THEME — ALWAYS FOLLOW THIS
 
+There are **two** schemes. `app/src/main/java/com/voxora/app/ui/theme/Theme.kt` is authoritative and is the **only** file allowed to contain colour literals.
+
 ```kotlin
-// Background hierarchy
-Background:     #0A0A0F  (near black)
-Surface:        #12121A
-SurfaceVariant: #1C1C28
+// Dark (the original Voxora look, unchanged)
+Background: #0A0A0F   Surface: #12121A   SurfaceVariant: #1C1C28
+Gold: #FFD700         GoldDim: #F5A623  GoldSubtle: #B8860B
+OnBackground: #F0F0F5 OnSurface: #C8C8D4 Disabled: #4A4A5A
 
-// Accent / Primary
-Gold:           #FFD700
-GoldDim:        #F5A623
-GoldSubtle:     #B8860B
+// Light (Material-inspired, not a Google clone)
+Background: #FAF9F6 (off-white)   Surface: #FDFCFA
+surfaceContainerHigh: #ECE9E2     outlineVariant: #D5D1C7
+Primary (gold that reads as ink): #8A6A16   onSurface: #1B1A17
 
-// Text
-OnBackground:   #F0F0F5  (primary text)
-OnSurface:      #C8C8D4  (secondary text)
-Disabled:       #4A4A5A
-
-// Status colors — semantic roles, not literals. `Theme.kt` is authoritative;
-// these are the values `VoxoraColors` exposes and they are what the Live
-// bubble already used.
-Success:  #3DDC84  (active narration / live / speaking)
-Warning:  #E6B422  (paused, ready, preparing — the warm Voxora accent)
-Error:    #E85D5D  (stopped or failed; also `colorScheme.error`)
+// Status colors — semantic roles, not literals. Same roles in both schemes,
+// with scheme-appropriate values (dark #3DDC84/#E6B422/#E85D5D, light
+// #1B7F4B/#8A6100/#B3261E).
+Success:  active narration / live / speaking
+Warning:  paused, ready, preparing — the warm Voxora accent
+Error:    stopped or failed; also `colorScheme.error`
 Neutral:  colorScheme.outline  (idle, connecting, extracting)
+Explanation: help/subtitle text under a control (see below)
 ```
 
+**Theme selection:**
+- The user's choice is `core/.../prefs/ThemeMode.kt` — `SYSTEM` (default), `LIGHT`, `DARK` — persisted through `UserPrefs`/DataStore (`themeMode`). `MainActivity` collects it and passes it to `VoxoraTheme(mode = …)`; `SettingsScreen` exposes a `ThemeSelector` that writes it. Never hold the selection in a composable's own `remember`, and never read `isSystemInDarkTheme()` anywhere except inside `VoxoraTheme`'s `SYSTEM` branch.
+- A third mode must be added to the enum and the selector together; `ThemeMode.normalize` is total (unknown/blank → `DEFAULT`), so a corrupt preference can never leave the app themeless.
+
 **Compose rules:**
-- Always use `MaterialTheme.colorScheme.*` tokens — never hardcode hex in composables
-- **Status is semantic.** Material 3 models no success or warning role, so `Theme.kt` exposes `VoxoraSemanticColors` through `VoxoraColors.success` / `.warning` / `.danger` (a `staticCompositionLocalOf`, read via `@Composable @ReadOnlyComposable`). Ask for "the active colour", never a number. `ReaderStatusVisual` maps each `ReaderPhase` to a tone, and that mapping — not the composable — decides which role a phase gets: **speaking and playing are green, paused is gold and never green, stopped and failed are red, connecting and preparing stay neutral and must not falsely show green.**
+- Always use `MaterialTheme.colorScheme.*` tokens — never hardcode hex in composables. The only accepted literal in a composable is `Color.Transparent` (a framework constant, not a brand colour).
+- **Status is semantic.** Material 3 models no success or warning role, so `Theme.kt` exposes `VoxoraSemanticColors` through `VoxoraColors.success` / `.warning` / `.danger` / `.explanation` (a `staticCompositionLocalOf`, read via `@Composable @ReadOnlyComposable`). Ask for "the active colour", never a number. `ReaderStatusVisual` maps each `ReaderPhase` to a tone, and that mapping — not the composable — decides which role a phase gets: **speaking and playing are green, paused is gold and never green, stopped and failed are red, connecting and preparing stay neutral and must not falsely show green.**
+- **One explanation role.** Every help, hint, caption or "why this is unavailable" line uses `VoxoraColors.explanation`. Do not reach for `onSurfaceVariant` for one note and `outline` for the next; a single token is what makes the hierarchy consistent across Reader, Settings, usage and account surfaces.
+- `VoxoraBrand` (`waveGold`, `waveGreen`) is decorative only — the Live bubble waveform. It is **not** a text or surface colour and must never be used for status.
 - An active-state pulse must modify alpha, glow or scale of the semantic colour. Never introduce a separate neon colour for animation, and never run an infinite animation for a phase that is not active.
 - Use `MaterialTheme.typography.*` — never hardcode `sp` sizes directly
 - Shapes: `RoundedCornerShape(12.dp)` for cards, `CircleShape` for FABs/bubbles
@@ -284,6 +288,9 @@ The reading text shown for the current chunk must be in the selected narration l
 - `app/src/main/java/com/voxora/app/reader/ReaderDisplayText.kt` is the layer that holds the selected-language rendering of individual narration units. It is pure JVM (no `android.*`) so the language contract stays unit-testable.
 - **The Reader Gemini path is the only translation mechanism.** The Reader does not call a second backend, an external translation API, or device text-to-speech, and it never sends the API key anywhere new. `GeminiReaderSession.narrate` already returns each unit's transcript in the selected language, so no new session type or request shape is required.
 - **Every entry is keyed by language as well as chunk and segment.** A language change can therefore never surface a rendering produced for a different language, and two languages can never share an entry. This is the property that stops stale text from being shown after a language change.
+- **The visible text is a function of the selected language *and* the selected narration style.** Faithful and Fluent are two independent selections over the same source, and the instruction Gemini receives differs, so a transcript produced for one is not a rendering for the other. `app/src/main/java/com/voxora/app/reader/ReaderDisplayModes.kt` is the layer that enforces this: it owns **one `ReaderDisplayText` per mode** (`ReaderNarrationModes.all`), and `ReaderController` reads and writes through `displayTexts.forMode(mode)`. The mode is the cache's identity, so "the other style's wording is on screen" is unrepresentable rather than merely unlikely. Do not collapse the modes back into one cache, and never let a composable choose which cache to read — it reads `ReaderState.narrationMode`, which is the mode the text was actually rendered with.
+- **The display text is `selected language + selected narration mode + current chunk + current segment`.** `ReaderState` carries the two selections it was produced under (`outputLanguage`, `narrationMode`), and `publish` derives the reading text from those rather than from whatever the user last tapped. Never publish text for a mode or language other than the one recorded with it.
+- `ReaderController.setNarrationMode(mode)` updates the mode and republishes, mirroring `setOutputLanguage`; `ReaderViewModel` calls it on init and from `setMode`, so the controller is always in step with the persisted selection. Never let the UI keep its own copy.
 - A unit that has not been narrated in the selected language yet has no rendering, and `readingText` falls back to the extracted source for that unit. The published list therefore always keeps the canonical chunk's length, order and boundaries. This is an honest limitation, not a bug: display text appears as Gemini narrates, so an unplayed chunk still shows the document's original text. Do not claim in UI copy that the whole document is translated up front.
 - Blank transcripts are rejected rather than stored, so an empty rendering can never overwrite a usable one or hide the extracted source behind an empty string.
 - `ReaderController` records each unit's transcript under **the language the run's instruction was built with** (the same value passed to `ReaderNarrationModes.instruction`), so the instruction and the reading text can never disagree within a run. It clears the cache when a new document replaces the queue, because chunk indices then refer to different content.
@@ -293,8 +300,11 @@ The reading text shown for the current chunk must be in the selected narration l
 - **The displayed language switches when the chunk becomes current, not when the chunk finishes.** `publish` derives the reading text for `queue.index` in the same synchronous step that makes that chunk current, so arriving at Chunk N immediately shows N's selected-language renderings. It must never wait for N to finish narrating, and it must never keep showing Chunk N−1's language while N's transcript is still being produced. The reason this is free is the prefetch architecture: the producer renders whole chunks ahead of playback, so the chunk about to be narrated already has its renderings cached and the turn is a pure state read. Do not "fix" this by making the UI wait for a translation step — that is exactly the ordering that would insert a pause between chunks.
 - `ReaderDisplayText.pending(language, chunk, unitCount)` returns the units of a chunk with no selected-language rendering yet, and `publish` reports them as `ReaderState.pendingSegments`. This exists because `readingText` falls back to the extracted source for an unrendered unit: without it, "not rendered yet" is indistinguishable from "the selection happens to read like the source", and the source language would be presented as if it were the selected one. `ReaderPageText` (`isPreparing`, `isPreparingWholePage`) is the pure-JVM rule for when that temporary treatment is actually shown — only while the chunk is being narrated (`ReaderGates.isNarrating`), never while browsing, paused or stopped, because a reader who has not pressed Play still has to be able to read their document.
 - **A run's first audible frame waits for the first segment's selected-language rendering.** The reading text *is* the Gemini transcript, so "text before audio" can only mean the producer finishes the unit the run starts on before any PCM is written; playback then starts from the audio the spool buffered while that unit was produced. `ReaderController.awaitInitialRendering` is that wait, and it is the **only** place the narration path waits for text — exactly one unit, so nothing blocks on the whole document and nothing is translated up front. `output.start()` is deliberately called *after* the gate: starting the track earlier held audio focus in silence for the whole synthesis of the first unit. The decision itself is `ReaderInitialPlayback.gate`, pure JVM and pinned by `ReaderInitialPlaybackTest`. **Every gate read happens under the controller lock** — the producer ends the unit and records the rendering in one critical section but publishes the spool snapshot *before* recording, so observing the snapshot alone would not make the rendering visible, and reading `ReaderDisplayText` outside the lock would race its map. A gate failure is terminal and must not drain partial audio: playing a unit whose transcript never arrived is precisely the "audio first, text later" sequence the gate exists to prevent. Do not add a "the source language is the selection, so the source counts" shortcut — Voxora detects no document language anywhere, so the source was never a valid rendering for a selected language; the real fast path is a unit an earlier run already rendered, which returns immediately.
+- **The same wait applies between units, not just at the start of a run.** The lifecycle the Reader must hold is `current audio -> prepare N+1 -> N+1 text correct -> N+1 audio`, never `source-language N+1 -> wait -> text changes -> audio`. `ReaderController.awaitNextUnitRendering` is that wait: after the spool promotes the next chunk (and after the empty-promoted retry), it blocks until `ReaderInitialPlayback.gate` reports the upcoming unit's rendering exists **for the run's language and mode**, so the text the reader sees when N+1 begins is the text that was prepared, not the extracted source. It is deliberately the *same* rule object as the first-frame gate — do not fork a second gate — and it only ever adds the wait for text: a producer failure is handed to the consumer, which drains partial audio and reports the precise message, rather than being turned into a terminal error here. Keep it out of the audio path's ownership: it reads the display cache and the spool snapshot, and never writes PCM or advances a cursor.
+- **This look-ahead is preparation, not pre-translation.** It waits for at most the unit about to be spoken; it must never be widened into rendering the whole document or the whole next chunk up front, which would reintroduce the "translate everything first" pause the architecture exists to avoid. Pinned by `app/src/test/java/com/voxora/app/reader/ReaderNextUnitPreparationTest.kt`, which composes `ReaderInitialPlayback.gate` with `ReaderDisplayModes` for the next unit and fails if a rendering for another mode or language is allowed to release it.
 - **The display layer is derived and must stay derived.** `publish` only reads `ReaderDisplayText` and the canonical `ChunkQueue`; it never appends PCM, advances a consumer cursor or completes a spool unit. The producer and the consumer never read `ReaderState`. That one-way dependency is what guarantees a display-language change cannot insert silence between chunks — keep it that way, and never make the spool or the consumer consult display state to decide how much audio to play.
 - `ReaderState.pendingSegments` is raw state; whether the temporary treatment is shown is `ReaderPageText`'s decision, because it depends on the phase. Do not branch on the set directly in a composable.
+- **The initial preparation state is real state, not a delay.** `ReaderState.preparing` is set from `preparingFirstUnit`, which is toggled around the actual first-unit gate in `play` — true for exactly as long as the run is waiting for the first rendering, false the moment it is ready or the run is cancelled. The UI must transition on that flag and never on a timer, a fake progress bar or a fixed "this may take a moment" sleep. The copy shown while it is true names both transformations truthfully ("preparing the first segment in the selected language and narration style"), because the wait can be a translation, a rewrite, or both; it must not say "translation" when the mode only rewrites. Strings live in `values/strings.xml` and `values-fa/strings.xml` — never inline Kotlin.
 - Changing the language must not leave narration from the previous language on screen: `publish` clears `narrationText` for every phase other than `SPEAKING`, and language selection is disabled while narration is active (`canConfigure()` in `ReaderViewModel`).
 - The instruction prompt is a pure function of `(mode, language)`. Never make the visible-text requirement change the audio semantics, the Faithful/Fluent contracts, or `PdfReadingOrder`.
 - Pinned by `app/src/test/java/com/voxora/app/reader/ReaderDisplayLanguageTest.kt`: language/chunk/segment scoping, that a language never sees another language's rendering, that a change does not surface the previous language's text, blank rejection, trimming, replace-not-duplicate, clear, and the pipeline contract above the real `ChunkQueue` — length/order/boundary preservation, every chunk obeying the same contract, no cross-language mixing, no inheritance across documents, and that the canonical source is unchanged. Four of these tests fail when the cache key is mutated to ignore the language, so they reproduce the defect rather than restating it.
@@ -337,8 +347,11 @@ There is exactly **one** language catalog: `core/.../gemini/ReaderLanguages.kt`.
 5. **playback** — status dot + phase label, chunk/segment progress, progress bar, prominent Play/Pause, Stop
 6. **error card** — only when `state.error` or a settings error is present
 7. **reading page** — the current chunk as one page (see below), not the whole document
-8. **narration preview** — Gemini's live transcript, visually separate from the reading text
-9. privacy note
+8. **floating-bubble explanation** — a short card saying what the bubble does (keeps narration active in the background, quick access), that it can be enabled/disabled here, and that it is independent of Live Dub; the toggle sits on the top bar
+9. **narration preview** — Gemini's live transcript, visually separate from the reading text
+10. privacy note
+
+**The floating bubble is explained where it is toggled.** The card in item 8 exists so a reader can discover the bubble without leaving the Reader, and it states the two facts that are otherwise invisible: that the bubble keeps narration running when the app is backgrounded, and that it has nothing to do with Live Dub. It is a discoverability surface only — do not move bubble behaviour into it, and do not make it a second settings panel. Copy lives in both locales (`reader_bubble_section`, `reader_bubble_explain`, `reader_bubble_toggle`). The bubble itself stays under `reader/` (`ReaderBubbleService`) and must never import `dub/`.
 
 **The reading surface is a page, not a scroll.**
 - `ChunkPage` composes **exactly one narration segment** of the current chunk — never every chunk, and never a whole chunk as one card. A 210-chunk PDF with 8 units each still composes one unit, so the page is bounded by the 80-word narration split, not by the document. Do not add a document-wide list.
@@ -415,6 +428,7 @@ Both Settings language pickers are built from the one catalog (see "One language
 
 - **Two usage sources must never be conflated.** *Local observed usage* is what Voxora counted from the requests it made on this device (`ApiUsageSnapshot`), and it can never answer "what is my project quota doing". *Google project usage* is what Google officially reports for the selected authorized project (`CloudProjectUsage`, `CloudUsageSource.GOOGLE_PROJECT`). They are shown in separate sections and neither is labelled as the other.
 - **An API key still cannot read project quota or billing**, and the key path must not pretend otherwise: `ApiUsageSnapshot.projectQuota`/`.billing` stay `UsageUnavailable.AUTH_REQUIRED`, and `accountLinkedToKey` stays hard-coded `false` because nothing can verify that the key belongs to the signed-in account. Do not add a Cloud call behind an API key — it cannot succeed.
+- **The usage ring draws only a measured ratio, and nothing when there is none.** `UsageRing` in `ApiUsageScreen` is the dashboard's one visualisation, and it is fed `ApiUsageSnapshot.successShare()`: successes ÷ requests among Voxora's **own observed** requests this month — the only fraction on the screen with a real denominator. It is deliberately **not** a quota gauge; nothing is divided by a limit Google never reported, and `successShare()` returns `null` (so the ring draws no arc and the caption says nothing was recorded) whenever either count is missing or the month had no requests. An arc at zero or full when nothing was measured is a fake percentage — do not add one, and do not "improve" the ring by inventing a quota denominator. Arc colour uses the `success`/`warning`/`danger` roles, never a new literal.
 - **With a Cloud grant, the project figures are read for real, and each gap still names its reason.** `CloudProjectUsage` reports request count and quota limit only when Google returned them; tokens, remaining quota and billing are `NOT_OFFERED` because no official API in this path exposes them, and a refusal or network problem propagates as `PERMISSION_DENIED`/`NETWORK_ERROR`. Never estimate, never substitute a local count, and never render an unavailable figure as `0`.
 - **The key check uses only official, non-generative surface.** `GeminiKeyProbe` calls the documented `models.list` endpoint (`https://generativelanguage.googleapis.com/v1beta/models`), which accepts an API key and generates no content, so it consumes no tokens. Never point a key test at a generative method.
 - **The key travels in the `x-goog-api-key` header, not a `?key=` query parameter.** A URL is the part of a request most likely to reach a log, a crash report or a proxy trace, so the secret must not be in one. Never log the probe URL or any request-specific URL.

@@ -145,7 +145,93 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
 > pair is `AGENTS.md` (project law / architecture record) and this `CLAUDE.md`
 > (handoff / cloud context). Update those two — do not add duplicate docs.
 
-### Last change (this session) — Reader corrections, Logs severity/selection, the Gemini product model, and the background-playback surface
+### Last change (this session) — language+style-correct Reader text, a real light/dark theme system, and the authoritative usage ring
+
+Four commits on `feat/reader-segmented-spooling`, then the documentation commit:
+
+- `440c796 fix(reader): match the displayed text to the selected language and style`
+- `f25cc5b feat(ui): add the Voxora light and dark theme system`
+- `bd994b4 feat(settings): add the authoritative Gemini usage ring and account card`
+- `8278fba test(reader): pin the next-unit look-ahead to the selected language and mode`
+
+**DONE — the visible text is a function of the selected language *and* narration style.** Faithful
+and Fluent are two independent selections over the same source, and the instruction Gemini receives
+differs, so a transcript produced for one was being served for the other: the display cache was keyed
+by language only, so the two styles shared storage. `ReaderDisplayModes` now owns **one
+`ReaderDisplayText` per mode** and `ReaderController` reads and writes through
+`displayTexts.forMode(mode)`. The mode is the cache's identity, so "the other style's wording is on
+screen" is unrepresentable rather than merely unlikely. `ReaderState` gained `narrationMode` (the mode
+the text was actually rendered with) and `ReaderController.setNarrationMode` mirrors
+`setOutputLanguage`; `ReaderViewModel` calls it on init and from `setMode`. Pinned by the new
+`ReaderDisplayModesTest` (7 cases).
+
+**DONE — the next unit is prepared before its audio, not after.** The first-frame gate only covered
+the start of a run; between units the reader could still see source-language N+1 and watch it change
+after the audio began. `ReaderController.awaitNextUnitRendering` now applies the **same**
+`ReaderInitialPlayback.gate` to the upcoming unit — for the run's language *and* mode — after the spool
+promotes the next chunk and after the empty-promoted retry. It adds only the wait for text: a producer
+failure is still handed to the consumer, which drains partial audio and reports the precise message,
+rather than becoming a terminal error here. It waits for at most the unit about to be spoken, so
+nothing is translated up front. Pinned by the new `ReaderNextUnitPreparationTest`, which composes the
+gate with `ReaderDisplayModes` and fails if another mode's or language's rendering releases N+1.
+
+**DONE — the initial preparation state is real state with truthful copy.** `ReaderState.preparing` is
+driven by `preparingFirstUnit`, toggled around the actual first-unit gate in `play` — true only while
+the run waits for the first rendering, false the moment it is ready or the run is cancelled. The UI
+transitions on that flag and never on a timer or fake progress. The message names both transformations
+truthfully ("the selected language and narration style"), because the wait can be a translation, a
+rewrite, or both; strings are in both locales, never inline Kotlin.
+
+**DONE — the floating bubble is explained in the Reader.** A new card (item 8 of the Reader's
+`LazyColumn`) says what the bubble does — keeps narration active in the background, quick access, can
+be enabled/disabled from the Reader, independent of Live Dub — with the toggle on the top bar.
+Discoverability only: no bubble behaviour changed, and the bubble stays under `reader/` and never
+imports `dub/`.
+
+**DONE — a real light theme alongside the kept dark theme.** `Theme.kt` now exposes `LightColors` and
+`DarkColors` (off-white surfaces, deep-gold `GoldInk` primary that reads as ink, restrained elevation,
+rounded M3 components) with Voxora's gold/green identity intact — not a copy of Google's palette.
+`VoxoraSemanticColors` gained an `explanation` role, and every help/hint/caption across Reader,
+Settings, usage and account surfaces now uses that one token. `ThemeMode` (`core/.../prefs/ThemeMode.kt`,
+`SYSTEM`/`LIGHT`/`DARK`) is persisted through `UserPrefs`/DataStore; `MainActivity` collects it into
+`VoxoraTheme(mode = …)` and Settings exposes a `ThemeSelector` with icon and selection semantics.
+Pinned by the new `ThemeModeTest` (6 cases). The only literal left in a composable is
+`Color.Transparent`.
+
+**DONE — the usage ring draws only a measured ratio.** `ApiUsageSnapshot` gained
+`successesThisMonth`/`failuresThisMonth` and `successShare()` — successes ÷ requests among Voxora's
+**own observed** requests this month, the only fraction with a real denominator. It is deliberately
+**not** a quota gauge: `successShare()` returns `null` (so `UsageRing` draws no arc and the caption
+says nothing was recorded) when either count is missing or the month had no requests, because an arc
+at zero or full would be a percentage nobody measured. Arc colour uses the existing
+`success`/`warning`/`danger` roles. `CloudAccountCard` gained a read-only access note and an "open
+usage" action so the account hierarchy leads to the figures.
+
+**Tests actually run (no Gradle).** `kotlinc 2.0.21` + JUnit 4.13.2 with `-ea`: **426 tests OK across
+39 classes** (up from 403/36 at the previous head), adding `ReaderDisplayModesTest`,
+`ReaderNextUnitPreparationTest`, `ThemeModeTest` and four `successShare` cases in
+`ApiUsageSnapshotTest`. Static checks: `checkimports.py` OK; `stringcheck.py` OK (values 285,
+values-fa 284, parity intact, only `default_web_client_id` intentionally untranslated). The Compose,
+Play Services and Android service layers are **not** compiled locally — CI is their only compile
+check.
+
+**Real-device verification was NOT performed.** The light theme's contrast and hierarchy, the
+theme-switch control, the Reader's style/language switching, the between-unit look-ahead timing, the
+bubble explanation card and the usage ring are all device-verification items. Nothing in this cycle
+was tested on a physical device.
+
+**BLOCKED on external configuration (not on code):** unchanged — `default_web_client_id` is still a
+placeholder (`REPLACE_…`), so `GoogleCloudAuthorizer.configured` is false and authorization reports
+`CONFIGURATION_MISSING` without touching the provider. The manual API key remains fully functional.
+Cloud authorization and any real project usage read cannot run end to end until the owner supplies the
+OAuth Web client ID, and the Cloud APIs must be enabled on the queried project.
+
+**NEXT:** the real-device list above, plus: confirm switching Faithful↔Fluent updates the visible text
+for the current segment without showing the other style's wording; confirm the light theme persists
+across a restart and that System follows the device; confirm the usage ring shows no arc rather than 0%
+on a fresh install; and confirm the account card's "open usage" action reaches the dashboard.
+
+### Last change (previous session) — Reader corrections, Logs severity/selection, the Gemini product model, and the background-playback surface
 
 Five code commits on `feat/reader-segmented-spooling`, then the documentation commits:
 
