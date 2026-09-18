@@ -211,6 +211,8 @@
     <string name="reader_page_section">Reading page</string>
     <string name="reader_page_hint">One narration unit per page. Swipe left or right — or use the arrows — to move through this chunk\'s units. The buttons below change the chunk.</string>
     <string name="reader_page_preparing">Preparing %1$s text…</string>
+    <string name="reader_page_style">Narration style: %1$s</string>
+    <string name="reader_preparing_first">Preparing the first segment in the selected language and narration style. This may take a moment before playback starts.</string>
     <string name="reader_segment_preparing">Preparing…</string>
     <string name="reader_segment_now">Now narrating</string>
     <string name="reader_narration_section">Gemini narration</string>
@@ -218,6 +220,9 @@
     <string name="reader_back">Back to home</string>
     <string name="reader_bubble_show">Show floating bubble</string>
     <string name="reader_bubble_hide">Hide floating bubble</string>
+    <string name="reader_bubble_section">Background narration</string>
+    <string name="reader_bubble_explain">Narration keeps playing in the background, even with the screen off. The floating bubble gives you quick access to it over other apps, and you can turn it on or off here or from the top bar. It is separate from Live Dub.</string>
+    <string name="reader_bubble_toggle">Floating bubble</string>
     <string name="reader_choose_language">Narration language</string>
     <string name="reader_search_language">Search languages</string>
     <string name="reader_no_languages">No matching languages</string>

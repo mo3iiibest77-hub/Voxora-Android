@@ -210,6 +210,8 @@
     <string name="reader_page_section">صفحهٔ خواندن</string>
     <string name="reader_page_hint">هر صفحه یک قطعه از روایت است. برای جابه‌جایی بین قطعه‌های همین بخش، چپ یا راست بکش یا از فلش‌ها استفاده کن. دکمه‌های پایین بخش را عوض می‌کنند.</string>
     <string name="reader_page_preparing">در حال آماده‌سازی متن %1$s</string>
+    <string name="reader_page_style">سبک روایت: %1$s</string>
+    <string name="reader_preparing_first">قطعهٔ اول در زبان و سبک روایت انتخاب‌شده آماده می‌شود. ممکن است پیش از شروع پخش کمی طول بکشد.</string>
     <string name="reader_segment_preparing">در حال آماده‌سازی</string>
     <string name="reader_segment_now">در حال روایت</string>
     <string name="reader_narration_section">روایت Gemini</string>
@@ -217,6 +219,9 @@
     <string name="reader_back">بازگشت به خانه</string>
     <string name="reader_bubble_show">نمایش حباب شناور</string>
     <string name="reader_bubble_hide">پنهان کردن حباب شناور</string>
+    <string name="reader_bubble_section">روایت در پس‌زمینه</string>
+    <string name="reader_bubble_explain">روایت در پس‌زمینه و حتی با صفحهٔ خاموش ادامه دارد. حباب شناور دسترسی سریع به آن را روی برنامه‌های دیگر می‌دهد و می‌توانی آن را از همین‌جا یا از نوار بالا روشن یا خاموش کنی. این حباب از Live Dub جدا است.</string>
+    <string name="reader_bubble_toggle">حباب شناور</string>
     <string name="reader_choose_language">زبان روایت</string>
     <string name="reader_search_language">جست‌وجوی زبان‌ها</string>
     <string name="reader_no_languages">زبانی پیدا نشد</string>

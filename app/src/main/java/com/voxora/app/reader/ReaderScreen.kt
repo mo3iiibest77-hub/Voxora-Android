@@ -60,6 +60,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -272,6 +273,12 @@ private fun ReaderContent(
                     onJumpToSegment = onJumpToSegment,
                 )
             }
+        }
+        item(key = "bubble") {
+            BubbleCard(
+                enabled = readerBubble,
+                onToggle = onToggleBubble,
+            )
         }
         item(key = "narration") {
             NarrationCard(narrationText = narrationText)
@@ -648,6 +655,24 @@ private fun PlaybackCard(
                     color = colors.onSurfaceVariant,
                 )
             }
+            // Real state, not a timer: `preparing` is true only while the run is actually
+            // waiting for its first unit's selected-language and selected-style text, so this
+            // says what is happening instead of pretending to show progress.
+            if (state.preparing) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        strokeWidth = 2.dp,
+                        color = colors.primary,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = stringResource(R.string.reader_preparing_first),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.onSurfaceVariant,
+                    )
+                }
+            }
             Button(
                 onClick = if (playing) onPause else onPlay,
                 enabled = ReaderGates.canPlay(ready, state.phase, hasDocument),
@@ -692,6 +717,74 @@ private fun PlaybackCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = colors.onSurfaceVariant,
             )
+        }
+    }
+}
+
+/**
+ * The background-playback explanation.
+ *
+ * Narration is kept alive by the foreground service, not by the bubble; the bubble is a
+ * quick-access surface over other apps. The card says exactly that, states that it is
+ * independent from Live Dub, and carries the same toggle as the top bar so the setting is
+ * discoverable without hunting for an icon.
+ */
+@Composable
+private fun BubbleCard(
+    enabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        color = colors.surfaceContainerHigh,
+        border = BorderStroke(1.dp, colors.outlineVariant),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(colors.primary.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.BubbleChart,
+                        contentDescription = null,
+                        tint = colors.primary,
+                    )
+                }
+                Spacer(Modifier.width(14.dp))
+                Text(
+                    text = stringResource(R.string.reader_bubble_section),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.onSurface,
+                )
+            }
+            Text(
+                text = stringResource(R.string.reader_bubble_explain),
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.onSurfaceVariant,
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.reader_bubble_toggle),
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.onSurface,
+                )
+                Switch(checked = enabled, onCheckedChange = onToggle)
+            }
         }
     }
 }
@@ -966,6 +1059,7 @@ private fun ChunkPage(
             segmentTotal = state.segmentTotal,
             languageFlag = languageFlag,
             languageLabel = languageLabel,
+            mode = state.narrationMode,
             preparing = ReaderPageText.isPreparingWholePage(
                 phase = state.phase,
                 pending = state.pendingSegments,
@@ -1036,7 +1130,7 @@ private fun ChunkPage(
     }
 }
 
-/** Compact page identity: where the reader is, in which language, and how far in. */
+/** Compact page identity: where the reader is, in which language and style, and how far in. */
 @Composable
 private fun ChunkHeader(
     chunk: Int,
@@ -1045,6 +1139,7 @@ private fun ChunkHeader(
     segmentTotal: Int,
     languageFlag: String,
     languageLabel: String,
+    mode: String,
     preparing: Boolean,
     modifier: Modifier = Modifier,
 ) {
@@ -1106,6 +1201,14 @@ private fun ChunkHeader(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
+            // The page's text is the selected language *and* the selected narration style, so
+            // the page says which variant it is showing. A reader who switches style can see
+            // that the wording on screen belongs to the new one rather than the old.
+            Text(
+                text = stringResource(R.string.reader_page_style, stringResource(modeLabelOf(mode))),
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.onSurfaceVariant,
+            )
             if (preparing) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(
@@ -1537,6 +1640,10 @@ private const val ACTIVE_BREATH_MS = 1500
 private const val PAGE_TURN_THRESHOLD_DP = 56
 private const val PAGE_ENTER_TRAVEL_DP = 40
 private const val PAGE_MAX_DRAG_DP = 150
+
+/** Human label for the narration style, from the one mode contract. */
+private fun modeLabelOf(mode: String): Int =
+    if (mode == ReaderNarrationModes.FLUENT) R.string.reader_fluent else R.string.reader_faithful
 
 private fun statusLabelOf(phase: ReaderPhase): Int = when (phase) {
     ReaderPhase.IDLE -> R.string.reader_idle

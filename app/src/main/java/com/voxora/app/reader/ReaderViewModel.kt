@@ -67,9 +67,10 @@ class ReaderViewModel @Inject constructor(
             } finally {
                 mutableReady.value = true
             }
-            // Keep the display language in step with the persisted selection before the
-            // document is restored, so the reading text is never rendered in a stale one.
+            // Keep the display language and style in step with the persisted selection before
+            // the document is restored, so the reading text is never rendered from a stale one.
             controller.setOutputLanguage(mutableOutputLang.value)
+            controller.setNarrationMode(mutableMode.value)
             controller.restoreLastDocument()
         }
     }
@@ -91,6 +92,10 @@ class ReaderViewModel @Inject constructor(
         if (!canConfigure() || value == mode.value || !ReaderNarrationModes.isValid(value)) return@runCommand
         prefs.setReaderSettings("", value)
         mutableMode.value = value
+        // The controller owns the reading text, so it has to learn about the change too. It
+        // keeps one rendering cache per narration mode, which is what stops text produced for
+        // the previous style from being shown after the switch.
+        controller.setNarrationMode(value)
     }
 
     fun setOutputLang(language: String) = runCommand {
@@ -100,9 +105,9 @@ class ReaderViewModel @Inject constructor(
         val selected = ReaderLanguages.language(language)
         mutableLanguageLabel.value = selected.displayName(languageLocale)
         mutableLanguageFlag.value = selected.flagEmoji
-        // The controller owns the reading text, so it has to learn about the change too.
-        // Its cache is keyed by language, which is what stops text rendered for the
-        // previous language from being shown after the switch.
+        // The controller owns the reading text, so it has to learn about the change too. Its
+        // cache is keyed by language within a mode, which is what stops text rendered for the
+        // previous language (or the other narration style) from being shown after the switch.
         controller.setOutputLanguage(language)
     }
 

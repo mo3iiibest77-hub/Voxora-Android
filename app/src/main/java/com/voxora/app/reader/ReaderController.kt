@@ -62,13 +62,31 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
     private var documentName = ""
     private var segmentIndex = 0
     /**
-     * Selected-language reading text, keyed by language. The canonical extracted
-     * document stays in [queue]; this only holds the selected-language rendering of
-     * individual units, derived from the Gemini transcript for that unit.
+     * Selected-language reading text, one cache per narration mode. The canonical extracted
+     * document stays in [queue]; these only hold the selected-language rendering of individual
+     * units, derived from the Gemini transcript for that unit.
+     *
+     * Mode is a separate cache rather than a key so a Faithful rendering can never be served
+     * while Fluent is selected; see [ReaderDisplayModes].
      */
-    private val displayText = ReaderDisplayText()
+    private val displayTexts = ReaderDisplayModes()
     /** Language the display text and the narration instruction are rendered in. */
     private var outputLanguage = ReaderLanguages.DEFAULT
+    /**
+     * Narration mode the display text and the narration instruction are rendered in.
+     *
+     * The instruction is built from it, so the text on screen and the audio the reader hears can
+     * never disagree about the style they are in.
+     */
+    private var outputMode = ReaderNarrationModes.DEFAULT
+    /**
+     * True while a run is waiting for its **first** unit's rendering before it may emit sound.
+     *
+     * This is real state, not a timer: it is set immediately before the first-unit gate and
+     * cleared the moment that gate resolves, so the UI can say "preparing" only for as long as
+     * preparation is actually happening.
+     */
+    private var preparingFirstUnit = false
     private var generation = 0L
     private val navigationRevision = MutableStateFlow(0L)
     private val navigation: Long get() = navigationRevision.value
@@ -111,8 +129,8 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
         val previous = loadJob
         queue = ChunkQueue(emptyList())
         // Chunk indices now refer to a different document, so no rendering from the
-        // previous one may survive.
-        displayText.clear()
+        // previous one may survive — in any narration mode.
+        displayTexts.clear()
         documentName = ""
         segmentIndex = 0
         publish(ReaderPhase.EXTRACTING)
@@ -194,10 +212,13 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
                     val key = prefs.apiKey.first().trim()
                     if (key.isEmpty()) throw NarrationFailure(R.string.error_no_api_key)
                     val language = prefs.readerOutputLang.first()
-                    // The instruction and the displayed reading text must always agree on
-                    // one language for the whole run, so the run's language is recorded
-                    // here and every unit is stored under exactly this key.
-                    synchronized(lock) { outputLanguage = language }
+                    // The instruction and the displayed reading text must always agree on one
+                    // language *and one style* for the whole run, so both are recorded here and
+                    // every unit is stored under exactly these keys. `mode` was validated above.
+                    synchronized(lock) {
+                        outputLanguage = language
+                        outputMode = ReaderNarrationModes.normalize(mode)
+                    }
                     while (true) {
                         currentCoroutineContext().ensureActive()
                         val position = synchronized(lock) {
@@ -286,7 +307,14 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
             // The run's first unit must already have its selected-language text before a single
             // frame is audible, so the wait happens here — before the output track is started, so
             // the app does not sit holding audio focus in silence while that unit is synthesised.
-            awaitInitialRendering(current, position.segment, language, run, position.revision)
+            // The wait is real work, so the reader is told about it while it happens rather than
+            // being shown a timer that pretends to be progress.
+            setPreparingFirstUnit(true, run)
+            try {
+                awaitInitialRendering(current, position.segment, language, mode, run, position.revision)
+            } finally {
+                setPreparingFirstUnit(false, run)
+            }
             try {
                 output.start()
             } catch (e: Exception) {
@@ -302,6 +330,9 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
                     slots.remove(current)
                     VoxoraLog.w("Reader", "Retrying empty promoted chunk=${current.index + 1} with a fresh spool")
                     current = prepare(current.index, 0, MAX_UNIT_ATTEMPTS - 1)
+                    // The retry is still a chunk whose audio must not start before its first
+                    // unit's text, so it goes through the same wait as any other promotion.
+                    awaitNextUnitRendering(current, language, mode, run, position.revision)
                     continue
                 }
                 current.producer?.join()
@@ -326,6 +357,13 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
                 }
                 current = promoted
                 next = prefetch(current.index + 1)
+                // The promoted chunk's first unit must be on the page in the selected language
+                // *and style* before its audio begins. The prefetch producer has been rendering
+                // this chunk since the previous one started, so this normally returns at once;
+                // when it does not, waiting here is the documented order — current audio,
+                // prepare, correct text, next audio — instead of showing the extracted source as
+                // if it were the selection.
+                awaitNextUnitRendering(current, language, mode, run, position.revision)
             }
         } finally {
             withContext(NonCancellable) {
@@ -365,9 +403,11 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
         slot: Slot,
         unit: Int,
         language: String,
+        mode: String,
         run: Long,
         revision: Long,
     ) {
+        val display = displayTexts.forMode(mode)
         while (true) {
             currentCoroutineContext().ensureActive()
             val rendering: String?
@@ -375,7 +415,7 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
             synchronized(lock) {
                 checkOwned(run, revision)
                 val snapshot = slot.spool.state.value
-                rendering = displayText.text(language, slot.index, unit)
+                rendering = display.text(language, slot.index, unit)
                 failed = snapshot.ends.any { it.index == unit } ||
                     snapshot.failure?.unit == unit ||
                     snapshot.complete ||
@@ -389,8 +429,58 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
         }
     }
 
+    /**
+     * Waits for a promoted chunk's first unit to have its rendering before that chunk's audio.
+     *
+     * Unlike [awaitInitialRendering], a unit the producer has already failed is **not** turned
+     * into an error here: the consumer reports that failure with the precise message (including
+     * partial audio) and drains whatever was produced, so this gate only ever adds the wait for
+     * text, never changes how a failure is surfaced.
+     */
+    private suspend fun awaitNextUnitRendering(
+        slot: Slot,
+        language: String,
+        mode: String,
+        run: Long,
+        revision: Long,
+    ) {
+        val unit = slot.spool.firstUnit
+        val display = displayTexts.forMode(mode)
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            val rendering: String?
+            val failed: Boolean
+            synchronized(lock) {
+                checkOwned(run, revision)
+                val snapshot = slot.spool.state.value
+                rendering = display.text(language, slot.index, unit)
+                failed = snapshot.failure?.unit == unit ||
+                    snapshot.complete ||
+                    slot.producer?.isCompleted == true
+            }
+            if (ReaderInitialPlayback.gate(rendering, failed) != ReaderInitialPlayback.Gate.AWAIT) return
+            delay(10)
+        }
+    }
+
+    /**
+     * Publishes the real first-unit preparation state.
+     *
+     * Guarded by ownership so a cancelled run cannot clear the flag a newer run has just set, and
+     * a no-op when the value has not changed, so the fast path (the rendering already exists)
+     * does not emit a redundant state.
+     */
+    private fun setPreparingFirstUnit(value: Boolean, run: Long) = synchronized(lock) {
+        if (run != generation || preparingFirstUnit == value) return@synchronized
+        preparingFirstUnit = value
+        publish(state.value.phase)
+    }
+
     private suspend fun produce(slot: Slot, key: String, mode: String, language: String, run: Long, revision: Long) {
         val producerContext = currentCoroutineContext()
+        // The run's mode owns its own rendering cache, so a Faithful transcript can never be
+        // recorded into — or served from — the Fluent display.
+        val display = displayTexts.forMode(mode)
         var session: GeminiReaderSession? = null
         var sessionStarted = 0L
         var unit = slot.spool.firstUnit
@@ -432,16 +522,16 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
                             producerContext.ensureActive()
                             checkOwned(run, revision)
                             slot.spool.endUnit(unit, transcript)
-                            // Gemini narrated this unit in `language`, so the transcript is
-                            // that unit's selected-language reading text.
-                            displayText.record(language, slot.index, unit, transcript)
+                            // Gemini narrated this unit in `language` and `mode`, so the
+                            // transcript is that unit's reading text for this exact variant.
+                            display.record(language, slot.index, unit, transcript)
                             // The producer renders whole chunks ahead of playback, so a
                             // recording only becomes visible state when it belongs to the
-                            // chunk on screen and to the language being displayed. Without
-                            // this the UI would keep showing the extracted source until some
-                            // unrelated event republished, which is what made the reading
-                            // text lag the narration by a chunk.
-                            if (displayText.shouldRepublish(language, slot.index, outputLanguage, queue.index)) {
+                            // chunk on screen and to the language and mode being displayed.
+                            // Without this the UI would keep showing the extracted source
+                            // until some unrelated event republished, which is what made the
+                            // reading text lag the narration by a chunk.
+                            if (display.shouldRepublish(language, slot.index, outputLanguage, queue.index)) {
                                 publish(state.value.phase)
                             }
                         }
@@ -639,6 +729,9 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
 
     private fun cancelOwned() {
         generation++
+        // A cancelled run is no longer preparing anything, and the flag must not survive into
+        // the next publish as a stale "preparing" claim.
+        preparingFirstUnit = false
         activeJob?.cancel()
         pipelineJob?.cancel()
         loadJob?.cancel()
@@ -663,17 +756,37 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
         publish(state.value.phase)
     }
 
+    /**
+     * Selects the narration style of the displayed reading text.
+     *
+     * Faithful and Fluent are different rewrites of the same source, so the mode owns its own
+     * rendering cache ([ReaderDisplayModes]). Switching therefore shows this mode's cached text
+     * where it exists and the extracted source — marked as still being prepared — where it does
+     * not; it can never leave the previous style's wording on the page.
+     *
+     * The narration instruction is built from the same mode, so the text and the audio can never
+     * disagree about the style they are in. The canonical extracted document is untouched.
+     */
+    fun setNarrationMode(mode: String) = synchronized(lock) {
+        val normalized = ReaderNarrationModes.normalize(mode)
+        if (normalized == outputMode) return@synchronized
+        outputMode = normalized
+        publish(state.value.phase)
+    }
+
     private fun publish(phase: ReaderPhase) {
         val units = queue.segments(queue.index)
-        // Reading text follows the selected language, and it follows it *from the moment
-        // the chunk becomes the current one*: the producer renders whole chunks ahead of
-        // playback, so a chunk that is about to be narrated already has its renderings
-        // cached and this resolves them immediately. Nothing here waits for audio, and
-        // nothing here can delay audio — the spool and the consumer never read this
-        // state. A unit with no rendering yet falls back to the extracted source and is
-        // reported in `pendingSegments` so the UI can present it as still being prepared
-        // rather than as settled text.
-        val displayed = displayText.readingText(outputLanguage, queue.index, units)
+        // Reading text follows the selected language *and narration style*, and it follows them
+        // from the moment the chunk becomes the current one: the producer renders whole chunks
+        // ahead of playback, so a chunk that is about to be narrated already has its renderings
+        // cached and this resolves them immediately. Nothing here waits for audio, and nothing
+        // here can delay audio — the spool and the consumer never read this state. A unit with no
+        // rendering for this variant yet falls back to the extracted source and is reported in
+        // `pendingSegments` so the UI can present it as still being prepared rather than as
+        // settled text. The mode's own cache is the only one consulted, so a rendering produced
+        // for the other style can never reach the page.
+        val display = displayTexts.forMode(outputMode)
+        val displayed = display.readingText(outputLanguage, queue.index, units)
         mutableState.value = ReaderState(
             phase = phase,
             chunk = if (queue.size == 0) 0 else queue.index + 1,
@@ -682,8 +795,10 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
             segmentTotal = units.size,
             text = queue.current.orEmpty(),
             segments = displayed,
-            pendingSegments = displayText.pending(outputLanguage, queue.index, units.size),
+            pendingSegments = display.pending(outputLanguage, queue.index, units.size),
             documentName = documentName,
+            narrationMode = outputMode,
+            preparing = preparingFirstUnit,
             // Republishing a phase must not swallow the reason it is showing, and any
             // other phase transition means the failure no longer applies.
             error = if (phase == ReaderPhase.ERROR) state.value.error else null,
