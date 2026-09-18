@@ -48,6 +48,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.voxora.app.R
 import com.voxora.app.dub.DubService
 import com.voxora.app.dub.DubUiStatus
+import com.voxora.app.ui.theme.VoxoraColors
 import com.voxora.app.ui.theme.VoxoraTheme
 import kotlin.math.sin
 
@@ -103,10 +104,10 @@ private fun DubContent(
         is DubUiStatus.Error -> stringResource(R.string.status_error)
     }
     val dotColor = when (status) {
-        is DubUiStatus.Live -> Color(0xFF3DDC84)
-        is DubUiStatus.Connecting -> Color(0xFFE6B422)
+        is DubUiStatus.Live -> VoxoraColors.success
+        is DubUiStatus.Connecting -> VoxoraColors.warning
         is DubUiStatus.Error -> colors.error
-        else -> Color(0xFF666666)
+        else -> colors.outline
     }
 
     Column(

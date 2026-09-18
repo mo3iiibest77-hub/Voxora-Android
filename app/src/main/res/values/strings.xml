@@ -117,8 +117,8 @@
     <string name="reader_lang_original">Original</string>
     <string name="reader_lang_fa">Persian</string>
     <string name="reader_lang_en">English</string>
-    <string name="reader_prev_chunk">← Prev</string>
-    <string name="reader_next_chunk">Next →</string>
+    <string name="reader_prev_chunk">Previous</string>
+    <string name="reader_next_chunk">Next</string>
     <string name="reader_play">Play</string>
     <string name="reader_pause">Pause</string>
     <string name="reader_progress">Chunk %1$d of %2$d</string>
@@ -145,8 +145,13 @@
     <string name="reader_mode_selected">Selected</string>
     <string name="reader_language_section">Narration language</string>
     <string name="reader_language_change">Change language</string>
-    <string name="reader_display_section">Reading text · %1$s</string>
-    <string name="reader_display_hint">Shown in your narration language as Gemini narrates. A unit not narrated in that language yet still shows the document\'s original text. Tap a unit to start there.</string>
+    <string name="reader_page_chunk">Chunk %1$d of %2$d</string>
+    <string name="reader_page_section">Reading page</string>
+    <string name="reader_page_hint">One page per chunk. Swipe left or right, or use the arrows, to move through the document. Tap a paragraph to start there.</string>
+    <string name="reader_page_previous">Previous page</string>
+    <string name="reader_page_next">Next page</string>
+    <string name="reader_page_preparing">Preparing %1$s text…</string>
+    <string name="reader_segment_preparing">Preparing…</string>
     <string name="reader_segment_now">Now narrating</string>
     <string name="reader_narration_section">Gemini narration</string>
     <string name="reader_narration_empty">Gemini\'s narration appears here while it speaks.</string>

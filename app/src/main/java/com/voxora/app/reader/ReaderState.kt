@@ -16,6 +16,12 @@ internal enum class ReaderPhase { IDLE, EXTRACTING, READY, CONNECTING, REWRITING
  * a unit already narrated in that language shows its rendering, and a unit that has
  * not been narrated in it yet falls back to the extracted source. The extracted
  * document is never overwritten.
+ *
+ * [pendingSegments] holds the units of [segments] that have no selected-language
+ * rendering yet, so the UI can show them as being prepared instead of presenting the
+ * source language as if it were the selection. It is raw state — whether that temporary
+ * treatment is shown at all is [ReaderPageText]'s decision, because it depends on the
+ * phase.
  */
 internal data class ReaderState(
     val phase: ReaderPhase = ReaderPhase.IDLE,
@@ -25,6 +31,7 @@ internal data class ReaderState(
     val segmentTotal: Int = 0,
     val text: String = "",
     val segments: List<String> = emptyList(),
+    val pendingSegments: Set<Int> = emptySet(),
     val documentName: String = "",
     val error: String? = null,
 )

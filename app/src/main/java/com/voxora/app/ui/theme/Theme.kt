@@ -3,6 +3,9 @@ package com.voxora.app.ui.theme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
 private val Gold = Color(0xFFD4AF37)
@@ -10,6 +13,49 @@ private val GoldDim = Color(0xFFB8962E)
 private val NearBlack = Color(0xFF0A0A0B)
 private val SurfaceDark = Color(0xFF141416)
 private val Card = Color(0xFF1C1C1F)
+
+/** Active narration / success. Matches the Live bubble's green. */
+private val Success = Color(0xFF3DDC84)
+
+/** Paused, ready, preparing — the warm Voxora accent. */
+private val Warning = Color(0xFFE6B422)
+
+/** Stopped or failed. Matches the Live bubble's stop red. */
+private val Danger = Color(0xFFE85D5D)
+
+/**
+ * Semantic colours Material 3 does not model.
+ *
+ * `colorScheme` has no success or warning role, so screens were reaching for literal
+ * hex values. These are the named roles those literals meant, and they are the same
+ * values the Live bubble and the Live Dub dot already used, so nothing about the brand
+ * palette changes — a screen now asks for "the active colour" instead of a number.
+ *
+ * Exposed through a composition local rather than added to `colorScheme` so the roles
+ * stay explicit and a future light scheme cannot silently redefine "success".
+ */
+@Immutable
+data class VoxoraSemanticColors(
+    val success: Color,
+    val warning: Color,
+    val danger: Color,
+)
+
+private val LocalVoxoraSemanticColors = staticCompositionLocalOf {
+    VoxoraSemanticColors(success = Success, warning = Warning, danger = Danger)
+}
+
+/** Accessor for the semantic roles, e.g. `VoxoraColors.success`. */
+object VoxoraColors {
+    val success: Color
+        @Composable @ReadOnlyComposable get() = LocalVoxoraSemanticColors.current.success
+
+    val warning: Color
+        @Composable @ReadOnlyComposable get() = LocalVoxoraSemanticColors.current.warning
+
+    val danger: Color
+        @Composable @ReadOnlyComposable get() = LocalVoxoraSemanticColors.current.danger
+}
 
 /**
  * Warm dark palette. The container and outline roles below are the ones Material 3
@@ -39,7 +85,7 @@ private val DarkColors = darkColorScheme(
     surfaceContainerHighest = Color(0xFF242428),
     outline = Color(0xFF4E4A42),
     outlineVariant = Color(0xFF2E2C28),
-    error = Color(0xFFE85D5D),
+    error = Danger,
     onError = Color.White,
     errorContainer = Color(0xFF4A1F1F),
     onErrorContainer = Color(0xFFFFD9D9),
@@ -47,8 +93,16 @@ private val DarkColors = darkColorScheme(
 
 @Composable
 fun VoxoraTheme(content: @Composable () -> Unit) {
-    MaterialTheme(
-        colorScheme = DarkColors,
-        content = content,
-    )
+    androidx.compose.runtime.CompositionLocalProvider(
+        LocalVoxoraSemanticColors provides VoxoraSemanticColors(
+            success = Success,
+            warning = Warning,
+            danger = DarkColors.error,
+        ),
+    ) {
+        MaterialTheme(
+            colorScheme = DarkColors,
+            content = content,
+        )
+    }
 }
