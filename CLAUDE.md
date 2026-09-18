@@ -147,8 +147,13 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
 
 ### Last change (this session) — honest Google sign-in states, a Google-inspired theme, and a key that is never shown again
 
-Three focused commits on `feat/reader-segmented-spooling` (SHAs recorded below), then the docs
-commit. Scope was deliberately limited to Google sign-in UX, the theme system, and the API-key field.
+Four commits on `feat/reader-segmented-spooling`, then a CI-record commit. Scope was deliberately
+limited to Google sign-in UX, the theme system, and the API-key field.
+
+- `660f6c9 fix(ui): correct the Google-inspired light and dark theme system`
+- `ff2a96a feat(auth): implement Google account authorization flow`
+- `c35c949 fix(settings): hide saved Gemini API key`
+- `aedbae2 docs: record the Google sign-in, theme and API-key cycle`
 
 **DONE — the Google account card is a real sign-in surface again.** The authorization architecture
 was already the official one (`Identity.getAuthorizationClient(activity).authorize(...)` via
@@ -211,6 +216,12 @@ across 42 classes** (up from 426/39), adding `ApiKeyFieldStateTest`, `VoxoraPale
 `stringcheck.py` OK (values 293, values-fa 292, parity intact, only `default_web_client_id`
 intentionally untranslated); `themecheck.py` OK. The Compose, Play Services and Android layers are
 **not** compiled locally — CI is their only compile check.
+
+**CI (Actions, `Android CI` on push) — green at `aedbae2`.** Run
+[`35365742859`](https://github.com/mo3iiibest77-hub/Voxora-Android/actions/runs/35365742859): job
+`Unit tests` **success** (id `105667667046`), job `Assemble debug APK` **success** (id
+`105667667080`). That is the compile proof for the Compose, Play Services and Android layers this
+harness cannot build, and it is the only verification those layers have.
 
 **BLOCKED on external configuration (not on code):** `default_web_client_id` is still
 `REPLACE_WITH_GOOGLE_WEB_CLIENT_ID`, so `CloudOAuthConfig.isConfigured` is false,
