@@ -7,6 +7,7 @@ import com.google.android.gms.auth.api.identity.AuthorizationRequest
 import com.google.android.gms.auth.api.identity.AuthorizationResult
 import com.google.android.gms.auth.api.identity.Identity
 import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.common.api.Scope
 import com.voxora.app.R
 import com.voxora.app.util.VoxoraLog
 import com.voxora.core.cloud.CloudAuthFailure
@@ -74,7 +75,9 @@ class GoogleCloudAuthorizer(private val context: Context) {
             return
         }
         val request = AuthorizationRequest.builder()
-            .setRequestedScopes(CloudScopes.ALL)
+            // The Play Services builder wants `Scope` objects; `CloudScopes` stays a plain list of
+            // strings so the scope set remains pure-JVM and unit-testable.
+            .setRequestedScopes(CloudScopes.ALL.map { Scope(it) })
             .build()
         Identity.getAuthorizationClient(activity)
             .authorize(request)

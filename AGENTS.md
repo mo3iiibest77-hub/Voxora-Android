@@ -430,8 +430,14 @@ represents is explicit and three-level: **Google account → Cloud project → G
 
 - **`GoogleCloudAuthorizer`** requests an OAuth access token through Google Identity Services
   (`Identity.getAuthorizationClient(activity).authorize(request)`), asking for exactly
-  `CloudScopes.ALL` — `cloud-platform.read-only` and `monitoring.read`, both read-only. It never asks
-  for write access and never invents a scope.
+  `CloudScopes.ALL` — `cloud-platform.read-only`, `monitoring.read` and `userinfo.email`, all
+  read-only. It never asks for write access and never invents a scope.
+- **The account email comes from the OpenID Connect userinfo endpoint, not from the grant.**
+  `AuthorizationResult` exposes no account (and `toGoogleSignInAccount()` is deprecated), so
+  `GoogleCloudDirectory.accountEmail` reads `v1/userinfo` with the same access token. This is why
+  `userinfo.email` is requested: without it the app could not say *which* account is connected, which
+  is the top level of the hierarchy. An email Google does not return is passed through as `null`, and
+  `withAccount(null)` conservatively clears the previous account's project and key.
 - **Consent is a two-step flow.** When `AuthorizationResult.hasResolution()` is true the caller must
   launch the returned `PendingIntent` and then call `requestAuthorization` again; that second call is
   what yields the access token. `CloudAccountCard` owns that loop.
@@ -665,9 +671,9 @@ A task is NOT done until:
   - `UsageStatusVisualTest` (app) — only a healthy connection is active and only it pulses; refused or broken is an error; transient problems warn; an unconfigured build and an unchecked key are neutral; expected data gaps stay neutral while a refusal is an error and a network gap warns; every status and reason has a tone (see §5A).
   - `CloudSelectionTest` (core) — the account → project → key model: switching account drops the previous projects, selection, keys and active key; account B can never see account A's project; re-authorizing the same account keeps the selection; sign-out clears everything; a project or key that disappeared from a refresh is dropped; a key that was never listed cannot be selected; manual mode is available and never claims a link; signing in alone does not link a manual key (see §5A).
   - `CloudAuthStateTest` (core) — the token-expiry policy (no stated expiry, well in the future, expired, inside the skew window, overridden skew); only `Authorized` carries an account; only an in-flight authorization is busy; only a real grant counts as authorized; `Authorized` carries no token field; configuration missing is distinct from every other failure; and the scope set is read-only, unique and never contains a write scope (see §5A).
-  - `CloudParsersTest` (core) — project and key parsing (dropped when unaddressable, name falling back to the id), Monitoring request-count summation across points and both value spellings, a genuinely empty window being `0`, and a malformed body being `null` rather than `0`; quota limit selection and its absent cases (see §5A).
+  - `CloudParsersTest` (core) — project and key parsing (dropped when unaddressable, name falling back to the id), the userinfo `email` claim (present, absent, blank and malformed all handled without producing a blank account), Monitoring request-count summation across points and both value spellings, a genuinely empty window being `0`, and a malformed body being `null` rather than `0`; quota limit selection and its absent cases (see §5A).
   - `CloudUsageTest` (core) — every figure needs authorization before a grant; a refusal propagates to every figure; **an unavailable metric is never equal to a zero**; an observed count is reported while tokens, remaining quota and billing stay `NOT_OFFERED`; an explicit zero is a real zero; project usage is always sourced from Google, never from local observation (see §5A).
-  - `GoogleCloudHttpTest` (core) — the authorized reads against `MockWebServer`: the token in the `Authorization` header and **never in the URL**; `401` as re-authorization, `403` as no access; a `5xx` and an unparseable `200` as failures rather than empty lists; an unreachable host as a network problem; key metadata from the project keys endpoint; the two-call usage read; a quota refusal not discarding a real request count; and a refused monitoring read refusing the whole usage read (see §5A).
+  - `GoogleCloudHttpTest` (core) — the authorized reads against `MockWebServer`: the token in the `Authorization` header and **never in the URL**; `401` as re-authorization, `403` as no access; a `5xx` and an unparseable `200` as failures rather than empty lists; an unreachable host as a network problem; the userinfo read behind the account email; key metadata from the project keys endpoint; the two-call usage read; a quota refusal not discarding a real request count; and a refused monitoring read refusing the whole usage read (see §5A).
   - `CloudLoadStateTest` (core) — the presentation mapping: empty ≠ loaded, and denied, unauthorized, network and failure each stay distinct (see §5A).
   - `CloudAuthFailureClassifierTest` (app) — cancellation, network, no-account, provider-unavailable, permission-denied, unsupported and unknown classification by status code, type name and message (see §5A).
   - `ChunkQueueTest`, `ReaderSpoolTest` — chunking and spool contracts.
