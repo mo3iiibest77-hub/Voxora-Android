@@ -75,7 +75,7 @@ class ReaderViewModel @Inject constructor(
         languageLocale = locale
         languageJob?.cancel()
         languageJob = viewModelScope.launch(Dispatchers.Default) {
-            val options = readerLanguageOptions(locale, query)
+            val options = languageOptions(locale, query)
             val selected = ReaderLanguages.language(outputLang.value)
             ensureActive()
             mutableLanguageOptions.value = options
@@ -110,7 +110,8 @@ class ReaderViewModel @Inject constructor(
     fun load(uri: Uri) = runCommand { controller.load(uri) }
 
     fun play() = runCommand {
-        if (!ready.value || state.value.total == 0 || state.value.phase == ReaderPhase.EXTRACTING) return@runCommand
+        // Never start narration before the queue is ready; see ReaderGates.canPlay.
+        if (!ReaderGates.canPlay(ready.value, state.value.phase, state.value.total > 0)) return@runCommand
         try {
             ContextCompat.startForegroundService(
                 context,
@@ -129,9 +130,12 @@ class ReaderViewModel @Inject constructor(
 
     fun stop() = runCommand { controller.stop() }
 
-    private fun canConfigure(): Boolean = ready.value && state.value.phase !in setOf(
-        ReaderPhase.EXTRACTING, ReaderPhase.CONNECTING, ReaderPhase.REWRITING, ReaderPhase.SPEAKING, ReaderPhase.NEXT,
-    )
+    /**
+     * Mode and language stay editable while a document is being extracted. They are
+     * only preferences and never touch extraction, so freezing them was what made a
+     * restored PDF feel locked. Playback keeps its own, stricter gate.
+     */
+    private fun canConfigure(): Boolean = ReaderGates.canConfigure(ready.value, state.value.phase)
 
     private fun runCommand(command: suspend () -> Unit) {
         val previous = commandJob

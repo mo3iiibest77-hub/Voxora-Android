@@ -134,6 +134,8 @@
     <string name="reader_document_section">سند</string>
     <string name="reader_document_none_title">سندی بارگذاری نشده است</string>
     <string name="reader_document_none_body">برای شروع شنیدن، یک فایل PDF یا TXT انتخاب کنید.</string>
+    <string name="reader_document_loading_title">در حال خواندن سند…</string>
+    <string name="reader_document_loading_body">متن در پس‌زمینه استخراج می‌شود. همچنان می‌توانید حالت روایت، زبان روایت یا سند دیگری را انتخاب کنید.</string>
     <string name="reader_document_unknown">سند</string>
     <string name="reader_document_change">تغییر سند</string>
     <string name="reader_mode_section">حالت روایت</string>

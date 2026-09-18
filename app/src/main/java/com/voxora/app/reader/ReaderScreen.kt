@@ -163,9 +163,11 @@ private fun ReaderContent(
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
-    val extracting = state.phase == ReaderPhase.EXTRACTING
-    val playing = state.phase in ACTIVE_PHASES
-    val configuring = ready && !playing && !extracting
+    // Every gate comes from ReaderGates so the screen and the ViewModel can never
+    // disagree about what is available, and so the rules stay unit-testable.
+    val extracting = ReaderGates.isExtracting(state.phase)
+    val playing = ReaderGates.isNarrating(state.phase)
+    val configuring = ReaderGates.canConfigure(ready, state.phase)
     val hasDocument = state.total > 0
     val progress = progressOf(state)
 
@@ -184,7 +186,8 @@ private fun ReaderContent(
             DocumentCard(
                 documentName = state.documentName,
                 hasDocument = hasDocument,
-                enabled = ready && !extracting,
+                extracting = extracting,
+                enabled = ReaderGates.canPickDocument(ready),
                 onPick = onPick,
             )
         }
@@ -208,7 +211,6 @@ private fun ReaderContent(
                 state = state,
                 progress = progress,
                 playing = playing,
-                extracting = extracting,
                 ready = ready,
                 hasDocument = hasDocument,
                 onPlay = onPlay,
@@ -234,7 +236,7 @@ private fun ReaderContent(
                 SegmentCard(
                     text = text,
                     current = index == state.segment - 1,
-                    enabled = !extracting,
+                    enabled = ReaderGates.canNavigate(state.phase, hasDocument),
                     onClick = { onJumpToSegment(index) },
                 )
             }
@@ -282,6 +284,7 @@ private fun ReaderTopBar(
 private fun DocumentCard(
     documentName: String,
     hasDocument: Boolean,
+    extracting: Boolean,
     enabled: Boolean,
     onPick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -319,10 +322,12 @@ private fun DocumentCard(
                         color = colors.onSurfaceVariant,
                     )
                     Text(
-                        text = if (hasDocument) {
-                            documentName.ifBlank { stringResource(R.string.reader_document_unknown) }
-                        } else {
-                            stringResource(R.string.reader_document_none_title)
+                        text = when {
+                            // A restored document is being read: say so instead of
+                            // claiming there is no document, which read as a frozen screen.
+                            extracting && !hasDocument -> stringResource(R.string.reader_document_loading_title)
+                            hasDocument -> documentName.ifBlank { stringResource(R.string.reader_document_unknown) }
+                            else -> stringResource(R.string.reader_document_none_title)
                         },
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
@@ -332,7 +337,21 @@ private fun DocumentCard(
                     )
                 }
             }
-            if (!hasDocument) {
+            if (extracting) {
+                LinearProgressIndicator(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .clip(CircleShape),
+                    color = colors.primary,
+                    trackColor = colors.surfaceContainerHighest,
+                )
+                Text(
+                    text = stringResource(R.string.reader_document_loading_body),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                )
+            } else if (!hasDocument) {
                 Text(
                     text = stringResource(R.string.reader_document_none_body),
                     style = MaterialTheme.typography.bodyMedium,
@@ -500,7 +519,6 @@ private fun PlaybackCard(
     state: ReaderState,
     progress: Float,
     playing: Boolean,
-    extracting: Boolean,
     ready: Boolean,
     hasDocument: Boolean,
     onPlay: () -> Unit,
@@ -559,7 +577,7 @@ private fun PlaybackCard(
             }
             Button(
                 onClick = if (playing) onPause else onPlay,
-                enabled = ready && !extracting && hasDocument,
+                enabled = ReaderGates.canPlay(ready, state.phase, hasDocument),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
@@ -583,7 +601,7 @@ private fun PlaybackCard(
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedButton(
                     onClick = onStop,
-                    enabled = extracting || hasDocument,
+                    enabled = ReaderGates.canStop(state.phase, hasDocument),
                     modifier = Modifier
                         .weight(1f)
                         .height(46.dp),
@@ -599,7 +617,7 @@ private fun PlaybackCard(
                 }
                 OutlinedButton(
                     onClick = { onJumpToChunk(state.chunk - 2) },
-                    enabled = !extracting && state.chunk > 1,
+                    enabled = ReaderGates.canNavigate(state.phase, hasDocument) && state.chunk > 1,
                     modifier = Modifier
                         .weight(1f)
                         .height(46.dp),
@@ -609,7 +627,7 @@ private fun PlaybackCard(
                 }
                 OutlinedButton(
                     onClick = { onJumpToChunk(state.chunk) },
-                    enabled = !extracting && state.chunk < state.total,
+                    enabled = ReaderGates.canNavigate(state.phase, hasDocument) && state.chunk < state.total,
                     modifier = Modifier
                         .weight(1f)
                         .height(46.dp),
@@ -914,13 +932,6 @@ private fun LanguageSheetRow(
         }
     }
 }
-
-private val ACTIVE_PHASES = setOf(
-    ReaderPhase.CONNECTING,
-    ReaderPhase.REWRITING,
-    ReaderPhase.SPEAKING,
-    ReaderPhase.NEXT,
-)
 
 private fun statusLabelOf(phase: ReaderPhase): Int = when (phase) {
     ReaderPhase.IDLE -> R.string.reader_idle
