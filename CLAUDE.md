@@ -150,9 +150,11 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
   `f644d2f feat(reader): map language catalog to deterministic flags`,
   `b0d556d fix(reader): preserve pdf reading order`,
   `a74db6c fix(reader): define fluent and faithful narration semantics` — plus the
-  documentation commits that follow them. **13 commits ahead of `main` (`1f0a719`)**,
-  pushed to `origin`, and **not merged**. CI is green at `35120bf` (run #65); the
-  documentation-only commits after it are CI-verified separately.
+  reading-order fix `6d826e0 fix(reader): de-interleave pdf columns when a page
+  carries a running header` and the documentation commits. **15 commits ahead of
+  `main` (`1f0a719`)**, pushed to `origin`, and **not merged**. CI is green at
+  `707cc3c` (run #66); the reading-order fix lands on top of that and is
+  CI-verified separately.
 - `feat/ci-feature-branch` = `76f0c96` + `dcbf852 ci: run Android CI on feature
   branch`, with **PR #2 open to `main`** (still open; deliberately NOT merged).
 - IMPORTANT — how CI actually runs: the failing run `35279422099`
@@ -167,7 +169,89 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
   `GeminiReaderSession`, language catalog, document persistence, and a
   foreground `mediaPlayback` service. Live Dub is untouched.
 
-### Last change (this session) — Reader quality pass (three goals)
+### Last change (this session) — "chunk 1 is fine, every later chunk is scrambled"
+
+**Reported symptom.** On a large PDF (~210 chunks, ~9 segments each) chunk 1 was
+narrated correctly in Fluent, but from chunk 2 onward the **source text shown in
+the app was already scrambled**, so the segments were scrambled, Gemini received
+bad text, and the narration was scrambled. Jumping manually to chunk 2 / 3 / 27
+showed the same. Explicitly *not* an audio-only ordering problem.
+
+**Method.** Walked the whole pipeline (extraction → full text → `documentChunks` →
+chunk → `segments` → `ReaderController` → `produce` → `GeminiReaderSession.narrate`
+→ PCM/transcript → UI) looking for the **first** corrupted representation rather
+than the last. Chunking, segmenting, `segmentCache`, queue replacement and the
+chunk transition were ruled out with pure-JVM invariants on the real `ChunkQueue`.
+The first corruption is in extraction.
+
+**Exact root cause (verified against the real PDFBox engine).**
+`PdfReadingOrder` detected column gutters from a **page-wide union of every
+fragment's x-extent**. A single full-width element — a running header or page
+footer — therefore covered the gutter for the whole page, the page was classified
+as single-column, and the two columns were emitted **row-interleaved**
+(`Left one Right one Left two Right two …`). That reproduces the reported
+asymmetry exactly: the first page of a section usually has no running header and
+read correctly, while every later page carried one and was scrambled.
+`sortByPosition = true` was measured again and produces the *same* row-interleaved
+output, which is why the naive flip was never a fix.
+
+**Fix, confined to `PdfReadingOrder`.**
+- Gutters are now measured **per line**, so a minority of lines (headers/footers)
+  may cross a gutter without erasing it.
+- The page is read as a stack of **regions**: a gutter-crossing line is emitted in
+  place and the runs of ordinary lines between them are read column by column.
+- Regions are banded by the **page's** gutters, never by gutters re-derived from
+  the region: a short region (two lines under a running header) falls below
+  `MIN_LINES_FOR_COLUMNS` and would otherwise silently collapse back to
+  row-interleaved order.
+- `TextExtractor`, `ChunkQueue`, `ReaderController`, `GeminiReaderSession`, the
+  narration modes and the UI were **not** changed. Prefetching was left intact —
+  no evidence implicated it. Live Dub untouched.
+
+**Tests added/updated.**
+- `PdfReadingOrderTest` — added `aHeaderThatCrossesTheGutterDoesNotEraseTheColumnStructure`,
+  `aFullWidthFooterIsReadAfterBothColumns`, `aRunningHeaderOnLaterPagesNoLongerScramblesThosePages`,
+  `aHeaderNarrowerThanTheGutterIsReadFirstAndTheColumnsStayDeInterleaved`,
+  `aPageWithTooFewLinesHasNoColumnStructureToInfer`; removed
+  `aFullWidthHeaderFallsBackToSingleColumnOrdering`, which asserted the buggy
+  behaviour as if it were correct.
+- `ReaderPipelineOrderTest` (new, 9 tests) — post-extraction contract on the real
+  `ChunkQueue`: chunk and segment reconstruction, cross-chunk bleed, cache
+  isolation, chunk transition, and that the Faithful/Fluent instruction is
+  identical for every chunk and segment.
+- The tests were proven to catch the defect: run against the pre-fix
+  `PdfReadingOrder` at `707cc3c`, **4 of them fail**; against the fix, all pass.
+
+**Validation actually performed (no Gradle was run).** Compiled the changed sources
+with `kotlinc` against the pinned dependency jars and ran the JUnit classes directly
+with `-ea` (matching Gradle's test JVM): **47** (core contracts + PDF reading order),
+**9** (pipeline order), **43** (chunk/spool/controller) — all OK. The real-engine
+end-to-end probe also passes: 40-page single-column document (4800 words → 10
+chunks, chunk contiguity, `join(segments(chunk)) == chunk`), and the exact reported
+layout (page 1 without a running header, pages 2+ with one) now reads
+column-by-column on every page.
+
+**Known limitation, recorded honestly.** A gap that is *inside* a line but large
+and repeated across most lines (a tab-aligned label, a table-of-contents leader, a
+widely letter-spaced heading) can still be mistaken for a column gutter. That
+layout is genuinely ambiguous from geometry alone and was already mis-ordered
+before this rework. No threshold was tuned against a synthetic page for it, because
+that would trade a verified fix for a speculative one. Documented in `AGENTS.md` §5.
+
+**UI / stale-APK question, answered.** Verified rather than assumed: the redesign is
+on `feat/reader-segmented-spooling` (`925ee1d` is an ancestor of HEAD), HEAD is 15
+commits ahead of `main`, and CI run **#66** (`35287232792`, head `707cc3c`)
+succeeded including the `Assemble debug` and `Upload debug APK` steps. So the
+modern UI is both in the branch and in the published artifact; an installed app
+that "still looks old" is an APK from an earlier run, not missing code. No UI change
+was needed, and none was made.
+
+**Still requires real-device verification — NOT claimed fixed on-device.** Install
+the APK built from the commit above and confirm on the owner's actual large PDF
+that the source text for chunk 2 and later is in document order and that the
+narration follows it.
+
+### Previous change — Reader quality pass (three goals)
 
 **A. Faithful vs Fluent are now an explicit, tested contract.**
 - New `core/src/main/java/com/voxora/core/gemini/ReaderNarrationModes.kt` owns the
@@ -197,8 +281,10 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
   pure-geometry, pure-JVM `internal object` (fragment-level gutter detection, line
   grouping, column ordering, stable permutation). 13 tests in
   `PdfReadingOrderTest` cover the reversed case, already-ordered pages,
-  multi-column de-interleaving, column-major preservation, the full-width-header
-  fallback, that a word gap is not a gutter, and permutation/empty/single/determinism.
+  multi-column de-interleaving, column-major preservation, that a word gap is not a
+  gutter, and permutation/empty/single/determinism. The full-width-header case in
+  this first pass asserted the *wrong* behaviour (single-column fallback) and was
+  replaced by the running-header regression tests in the next change.
 - Limits documented in `AGENTS.md` §5: tables, sidebars, marginalia, rotated text,
   footnotes and overlapping columns may still be imperfect, and scanned PDFs cannot
   be recovered. No UI copy claims otherwise.
@@ -302,11 +388,14 @@ raw logs need admin rights, but a green `Run unit tests` step cannot hide a fail
   narration survives leaving the Reader destination.
 
 ### Next milestone (roadmap order):
-- **CI is green for this pass** (run #65, `35287036680`, at `35120bf`): `Unit tests`
-  and `Assemble debug APK` both succeeded. The remaining step is owner-side
-  real-device confirmation: the Home chooser, the back loop, Reader narration
-  surviving navigation, the redesigned Reader screen on a real device, and — most
-  importantly — whether the PDFs that used to look scrambled now read in order.
+- **CI is green** (run #66, `35287232792`, at `707cc3c`): `Unit tests` and
+  `Assemble debug APK` both succeeded. The reading-order fix (`6d826e0`) lands on
+  top of that commit and is CI-verified separately. The remaining step is
+  owner-side real-device confirmation: the Home chooser, the back loop, Reader
+  narration surviving navigation, the redesigned Reader screen on a real device,
+  and — most importantly — whether the owner's large PDF now shows chunk 2 and
+  later in document order and narrates them correctly. **Nothing here is claimed
+  fixed on-device.**
 - Roadmap/order mismatch persists: the repo is ahead on Reader (5–8) and behind on
   Home (1), Product Navigation (2) and the Design System (3). `Theme.kt` still uses
   gold `#D4AF37` and near-black `#0A0A0B`, not the `#FFD700` / `#0A0A0F` in
