@@ -106,17 +106,13 @@ class DubSyncController(
     /** Begins a run. Safe to call again; it resets the learned baseline. */
     fun start(nowNanos: Long) {
         started = true
-        baselineNanos = UNMEASURED
-        lastOffsetNanos = Long.MIN_VALUE
-        stableSinceNanos = -1L
+        // Correction bookkeeping is per-run; the measurement itself is reset below.
         pausedByUs = false
         pausedAtNanos = 0L
         lastCorrectionNanos = Long.MIN_VALUE
         correctionWindowStartNanos = nowNanos
         correctionsThisWindow = 0
         correctionCount = 0
-        lastDubContentNanos = -1L
-        lastDubAtNanos = -1L
         observedPlaying = true
         resetMeasurement(nowNanos)
     }
