@@ -1,28 +1,53 @@
 package com.voxora.app.ui
 
+import android.content.Intent
+import android.content.res.Configuration.UI_MODE_NIGHT_YES
+import android.net.Uri
+import android.provider.Settings
 import androidx.appcompat.app.AppCompatDelegate
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -30,20 +55,26 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.os.LocaleListCompat
 import com.voxora.app.R
 import com.voxora.app.auth.GoogleAuthHelper
+import com.voxora.app.ui.theme.VoxoraTheme
 import com.voxora.core.prefs.UserPrefs
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+
+private const val AI_STUDIO_URL = "https://aistudio.google.com/apikey"
 
 private val DUB_LANGS = listOf(
     "fa" to "Persian / فارسی",
@@ -72,12 +103,21 @@ private val APP_LANGS = listOf(
     "tr" to "Türkçe",
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Voxora Settings.
+ *
+ * Laid out with the same visual system as the Reader screen — one keyed
+ * `LazyColumn`, a consistent top bar, grouped section headers and rounded,
+ * outlined Material 3 cards — so both screens read as one product. Every control
+ * that existed before is still here: app language, Gemini API key, dubbing
+ * language, save, account sign-in, overlay permission and logs.
+ */
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
     onRequestOverlayPermission: () -> Unit = {},
     onOpenLogs: () -> Unit = {},
+    modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val prefs = remember { UserPrefs(context) }
@@ -87,8 +127,6 @@ fun SettingsScreen(
     var apiKey by remember { mutableStateOf("") }
     var lang by remember { mutableStateOf("fa") }
     var appLang by remember { mutableStateOf("en") }
-    var expanded by remember { mutableStateOf(false) }
-    var appLangExpanded by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf(false) }
     var signedIn by remember { mutableStateOf(false) }
     var displayName by remember { mutableStateOf("") }
@@ -103,6 +141,88 @@ fun SettingsScreen(
         email = prefs.userEmail.first()
     }
 
+    fun applyAppLocale(code: String) {
+        scope.launch {
+            prefs.setAppLanguage(code)
+            AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(code))
+        }
+    }
+
+    SettingsContent(
+        apiKey = apiKey,
+        onApiKeyChange = { apiKey = it; saved = false },
+        dubbingLanguage = lang,
+        onDubbingLanguageChange = { lang = it; saved = false },
+        appLanguage = appLang,
+        onAppLanguageChange = { appLang = it; applyAppLocale(it) },
+        signedIn = signedIn,
+        displayName = displayName,
+        email = email,
+        saved = saved,
+        onBack = onBack,
+        onSave = {
+            scope.launch {
+                prefs.setApiKey(apiKey)
+                prefs.setTargetLanguage(lang)
+                prefs.setAppLanguage(appLang)
+                AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(appLang))
+                saved = true
+            }
+        },
+        onOpenAiStudio = { uriHandler.openUri(AI_STUDIO_URL) },
+        onSignIn = {
+            scope.launch {
+                val result = auth.signIn()
+                if (result.ok) {
+                    signedIn = true
+                    displayName = result.name
+                    email = result.email
+                }
+            }
+        },
+        onSignOut = {
+            scope.launch {
+                auth.signOut()
+                signedIn = false
+                displayName = ""
+                email = ""
+            }
+        },
+        onOpenOverlay = {
+            onRequestOverlayPermission()
+            context.startActivity(
+                Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:${context.packageName}"),
+                ),
+            )
+        },
+        onOpenLogs = onOpenLogs,
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun SettingsContent(
+    apiKey: String,
+    onApiKeyChange: (String) -> Unit,
+    dubbingLanguage: String,
+    onDubbingLanguageChange: (String) -> Unit,
+    appLanguage: String,
+    onAppLanguageChange: (String) -> Unit,
+    signedIn: Boolean,
+    displayName: String,
+    email: String,
+    saved: Boolean,
+    onBack: () -> Unit,
+    onSave: () -> Unit,
+    onOpenAiStudio: () -> Unit,
+    onSignIn: () -> Unit,
+    onSignOut: () -> Unit,
+    onOpenOverlay: () -> Unit,
+    onOpenLogs: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val colors = MaterialTheme.colorScheme
     val fieldColors = OutlinedTextFieldDefaults.colors(
         focusedBorderColor = colors.primary,
@@ -111,192 +231,428 @@ fun SettingsScreen(
         cursorColor = colors.primary,
     )
 
-    fun applyAppLocale(code: String) {
-        scope.launch {
-            prefs.setAppLanguage(code)
-            AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(code))
-        }
-    }
-
-    Column(
-        modifier = Modifier
+    LazyColumn(
+        modifier = modifier
             .fillMaxSize()
             .background(colors.background)
-            .verticalScroll(rememberScrollState())
-            .padding(20.dp),
+            .safeDrawingPadding(),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
-        TextButton(onClick = onBack) {
-            Text("← " + stringResource(R.string.action_back), color = colors.primary)
-        }
-        Text(
-            stringResource(R.string.settings_title),
-            style = MaterialTheme.typography.headlineSmall,
-            color = colors.onBackground,
-            fontWeight = FontWeight.Bold,
-        )
-        Spacer(Modifier.height(20.dp))
-
-        Text(stringResource(R.string.settings_app_language), color = colors.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.height(6.dp))
-        Text(stringResource(R.string.settings_app_language_help), color = colors.onSurfaceVariant, fontSize = 12.sp)
-        Spacer(Modifier.height(8.dp))
-        ExposedDropdownMenuBox(expanded = appLangExpanded, onExpandedChange = { appLangExpanded = it }) {
-            OutlinedTextField(
-                value = APP_LANGS.find { it.first == appLang }?.second ?: appLang,
-                onValueChange = {},
-                readOnly = true,
-                modifier = Modifier.fillMaxWidth().menuAnchor(),
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(appLangExpanded) },
-                colors = fieldColors,
-                shape = RoundedCornerShape(12.dp),
-            )
-            ExposedDropdownMenu(expanded = appLangExpanded, onDismissRequest = { appLangExpanded = false }) {
-                APP_LANGS.forEach { (code, name) ->
-                    DropdownMenuItem(
-                        text = { Text(name) },
-                        onClick = {
-                            appLang = code
-                            appLangExpanded = false
-                            applyAppLocale(code)
-                        },
-                    )
-                }
-            }
+        item(key = "top-bar") {
+            SettingsTopBar(onBack = onBack)
         }
 
-        Spacer(Modifier.height(24.dp))
-        Text(stringResource(R.string.settings_account), color = colors.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.height(8.dp))
-        if (signedIn) {
-            Text("$displayName\n$email", color = colors.onBackground, fontSize = 14.sp)
-            Spacer(Modifier.height(8.dp))
-            OutlinedButton(
-                onClick = {
-                    scope.launch {
-                        auth.signOut()
-                        signedIn = false
-                        displayName = ""
-                        email = ""
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(stringResource(R.string.action_sign_out), color = colors.primary)
-            }
-        } else {
-            Button(
-                onClick = {
-                    scope.launch {
-                        val r = auth.signIn()
-                        if (r.ok) {
-                            signedIn = true
-                            displayName = r.name
-                            email = r.email
-                        }
-                    }
-                },
-                modifier = Modifier.fillMaxWidth().height(48.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = colors.onPrimary),
-                shape = RoundedCornerShape(12.dp),
-            ) {
-                Text(stringResource(R.string.settings_sign_in))
-            }
-            Spacer(Modifier.height(6.dp))
-            Text(stringResource(R.string.auth_optional_hint), color = colors.onSurfaceVariant, fontSize = 12.sp)
+        item(key = "appearance-header") {
+            SettingsSectionHeader(stringResource(R.string.settings_section_appearance))
         }
-
-        Spacer(Modifier.height(24.dp))
-        Text(stringResource(R.string.settings_api_key), color = colors.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.height(8.dp))
-        OutlinedTextField(
-            value = apiKey,
-            onValueChange = { apiKey = it; saved = false },
-            label = { Text(stringResource(R.string.settings_api_key)) },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true,
-            colors = fieldColors,
-            shape = RoundedCornerShape(12.dp),
-        )
-        Spacer(Modifier.height(8.dp))
-        TextButton(onClick = { uriHandler.openUri("https://aistudio.google.com/apikey") }) {
-            Text(stringResource(R.string.settings_open_ai_studio), color = colors.primary)
-        }
-
-        Spacer(Modifier.height(20.dp))
-        Text(stringResource(R.string.settings_target_language), color = colors.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.height(8.dp))
-        ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
-            OutlinedTextField(
-                value = DUB_LANGS.find { it.first == lang }?.second ?: lang,
-                onValueChange = {},
-                readOnly = true,
-                modifier = Modifier.fillMaxWidth().menuAnchor(),
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-                colors = fieldColors,
-                shape = RoundedCornerShape(12.dp),
-            )
-            ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                DUB_LANGS.forEach { (code, name) ->
-                    DropdownMenuItem(
-                        text = { Text(name) },
-                        onClick = { lang = code; expanded = false; saved = false },
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(24.dp))
-        Button(
-            onClick = {
-                scope.launch {
-                    prefs.setApiKey(apiKey)
-                    prefs.setTargetLanguage(lang)
-                    prefs.setAppLanguage(appLang)
-                    AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(appLang))
-                    saved = true
-                }
-            },
-            modifier = Modifier.fillMaxWidth().height(52.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = colors.primary, contentColor = colors.onPrimary),
-            shape = RoundedCornerShape(14.dp),
-        ) {
-            Text(stringResource(R.string.action_save), fontWeight = FontWeight.SemiBold)
-        }
-        if (saved) {
-            Spacer(Modifier.height(8.dp))
-            Text(stringResource(R.string.settings_saved), color = Color(0xFF3DDC84), fontSize = 13.sp)
-        }
-        Spacer(Modifier.height(16.dp))
-        Text(stringResource(R.string.settings_api_help), color = colors.onSurfaceVariant, fontSize = 12.sp)
-
-        Spacer(Modifier.height(28.dp))
-        Text(stringResource(R.string.settings_overlay), color = colors.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.height(8.dp))
-        Text(stringResource(R.string.settings_overlay_help), color = colors.onSurfaceVariant, fontSize = 12.sp)
-        Spacer(Modifier.height(8.dp))
-        OutlinedButton(
-            onClick = {
-                onRequestOverlayPermission()
-                val intent = android.content.Intent(
-                    android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    android.net.Uri.parse("package:${context.packageName}"),
+        item(key = "appearance") {
+            SettingsCard {
+                SettingsRowHeader(
+                    icon = Icons.Filled.Language,
+                    title = stringResource(R.string.settings_app_language),
+                    subtitle = stringResource(R.string.settings_app_language_help),
                 )
-                context.startActivity(intent)
-            },
-            modifier = Modifier.fillMaxWidth().height(48.dp),
-            shape = RoundedCornerShape(12.dp),
-        ) {
-            Text(stringResource(R.string.settings_overlay_open), color = colors.primary)
+                SettingsDropdown(
+                    label = stringResource(R.string.settings_app_language),
+                    value = APP_LANGS.find { it.first == appLanguage }?.second ?: appLanguage,
+                    options = APP_LANGS,
+                    onSelect = onAppLanguageChange,
+                    colors = fieldColors,
+                )
+            }
         }
 
-        Spacer(Modifier.height(28.dp))
-        OutlinedButton(
-            onClick = onOpenLogs,
-            modifier = Modifier.fillMaxWidth().height(48.dp),
-            shape = RoundedCornerShape(12.dp),
-        ) {
-            Text(stringResource(R.string.action_view_logs), color = colors.primary)
+        item(key = "gemini-header") {
+            SettingsSectionHeader(stringResource(R.string.settings_section_gemini))
         }
-        Spacer(Modifier.height(24.dp))
+        item(key = "gemini") {
+            SettingsCard {
+                SettingsRowHeader(
+                    icon = Icons.Filled.Key,
+                    title = stringResource(R.string.settings_api_key),
+                    subtitle = stringResource(R.string.settings_api_help),
+                )
+                OutlinedTextField(
+                    value = apiKey,
+                    onValueChange = onApiKeyChange,
+                    label = { Text(stringResource(R.string.settings_api_key_hint)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    colors = fieldColors,
+                    shape = RoundedCornerShape(14.dp),
+                )
+                OutlinedButton(
+                    onClick = onOpenAiStudio,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(46.dp),
+                    shape = RoundedCornerShape(14.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.OpenInNew,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.settings_open_ai_studio))
+                }
+            }
+        }
+
+        item(key = "dubbing-header") {
+            SettingsSectionHeader(stringResource(R.string.settings_section_dubbing))
+        }
+        item(key = "dubbing") {
+            SettingsCard {
+                SettingsRowHeader(
+                    icon = Icons.Filled.Translate,
+                    title = stringResource(R.string.settings_target_language),
+                    subtitle = stringResource(R.string.home_subtitle),
+                )
+                SettingsDropdown(
+                    label = stringResource(R.string.settings_target_language),
+                    value = DUB_LANGS.find { it.first == dubbingLanguage }?.second ?: dubbingLanguage,
+                    options = DUB_LANGS,
+                    onSelect = onDubbingLanguageChange,
+                    colors = fieldColors,
+                )
+            }
+        }
+
+        item(key = "save") {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Button(
+                    onClick = onSave,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colors.primary,
+                        contentColor = colors.onPrimary,
+                    ),
+                ) {
+                    Text(
+                        text = stringResource(R.string.action_save),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                if (saved) {
+                    Text(
+                        text = stringResource(R.string.settings_saved),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.primary,
+                    )
+                }
+            }
+        }
+
+        item(key = "account-header") {
+            SettingsSectionHeader(stringResource(R.string.settings_account))
+        }
+        item(key = "account") {
+            SettingsCard {
+                if (signedIn) {
+                    SettingsRowHeader(
+                        icon = Icons.Filled.Person,
+                        title = displayName.ifBlank { email },
+                        subtitle = email.takeIf { it.isNotBlank() && !it.equals(displayName, ignoreCase = true) },
+                    )
+                    OutlinedButton(
+                        onClick = onSignOut,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(46.dp),
+                        shape = RoundedCornerShape(14.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.Logout,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.action_sign_out))
+                    }
+                } else {
+                    SettingsRowHeader(
+                        icon = Icons.Filled.Person,
+                        title = stringResource(R.string.settings_sign_in),
+                        subtitle = stringResource(R.string.auth_optional_hint),
+                    )
+                    Button(
+                        onClick = onSignIn,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = colors.primary,
+                            contentColor = colors.onPrimary,
+                        ),
+                    ) {
+                        Text(
+                            text = stringResource(R.string.settings_sign_in),
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+            }
+        }
+
+        item(key = "overlay-header") {
+            SettingsSectionHeader(stringResource(R.string.settings_section_overlay))
+        }
+        item(key = "overlay") {
+            SettingsCard {
+                SettingsRowHeader(
+                    icon = Icons.Filled.Layers,
+                    title = stringResource(R.string.settings_overlay),
+                    subtitle = stringResource(R.string.settings_overlay_help),
+                )
+                OutlinedButton(
+                    onClick = onOpenOverlay,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(46.dp),
+                    shape = RoundedCornerShape(14.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.OpenInNew,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.settings_overlay_open))
+                }
+            }
+        }
+
+        item(key = "diagnostics-header") {
+            SettingsSectionHeader(stringResource(R.string.settings_section_diagnostics))
+        }
+        item(key = "diagnostics") {
+            SettingsCard {
+                OutlinedButton(
+                    onClick = onOpenLogs,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(46.dp),
+                    shape = RoundedCornerShape(14.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.BugReport,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(stringResource(R.string.action_view_logs))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SettingsTopBar(
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onBack) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                contentDescription = stringResource(R.string.action_back),
+                tint = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        Spacer(Modifier.width(4.dp))
+        Text(
+            text = stringResource(R.string.settings_title),
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+@Composable
+private fun SettingsSectionHeader(
+    title: String,
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text = title,
+        modifier = modifier.fillMaxWidth(),
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.onSurface,
+    )
+}
+
+@Composable
+private fun SettingsCard(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        color = colors.surfaceContainerHigh,
+        border = BorderStroke(1.dp, colors.outlineVariant),
+    ) {
+        Column(
+            modifier = Modifier.padding(18.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+            content = content,
+        )
+    }
+}
+
+@Composable
+private fun SettingsRowHeader(
+    icon: ImageVector,
+    title: String,
+    subtitle: String?,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(44.dp)
+                .clip(CircleShape)
+                .background(colors.primary.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(imageVector = icon, contentDescription = null, tint = colors.primary)
+        }
+        Spacer(Modifier.width(14.dp))
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (subtitle != null) {
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colors.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SettingsDropdown(
+    label: String,
+    value: String,
+    options: List<Pair<String, String>>,
+    onSelect: (String) -> Unit,
+    colors: androidx.compose.material3.TextFieldColors,
+    modifier: Modifier = Modifier,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(label) },
+            modifier = Modifier
+                .fillMaxWidth()
+                .menuAnchor(),
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+            colors = colors,
+            shape = RoundedCornerShape(14.dp),
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            options.forEach { (code, name) ->
+                DropdownMenuItem(
+                    text = { Text(name) },
+                    onClick = {
+                        expanded = false
+                        onSelect(code)
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Preview(showBackground = true, uiMode = UI_MODE_NIGHT_YES)
+@Composable
+private fun SettingsContentPreview(modifier: Modifier = Modifier) {
+    VoxoraTheme {
+        Surface(modifier = modifier) {
+            SettingsContent(
+                apiKey = "",
+                onApiKeyChange = {},
+                dubbingLanguage = "fa",
+                onDubbingLanguageChange = {},
+                appLanguage = "en",
+                onAppLanguageChange = {},
+                signedIn = false,
+                displayName = "",
+                email = "",
+                saved = false,
+                onBack = {},
+                onSave = {},
+                onOpenAiStudio = {},
+                onSignIn = {},
+                onSignOut = {},
+                onOpenOverlay = {},
+                onOpenLogs = {},
+            )
+        }
+    }
+}
+
+@Preview(showBackground = true, uiMode = UI_MODE_NIGHT_YES)
+@Composable
+private fun SettingsContentSignedInPreview(modifier: Modifier = Modifier) {
+    VoxoraTheme {
+        Surface(modifier = modifier) {
+            SettingsContent(
+                apiKey = "AIza…",
+                onApiKeyChange = {},
+                dubbingLanguage = "en",
+                onDubbingLanguageChange = {},
+                appLanguage = "fa",
+                onAppLanguageChange = {},
+                signedIn = true,
+                displayName = "Mo3i",
+                email = "owner@voxora.app",
+                saved = true,
+                onBack = {},
+                onSave = {},
+                onOpenAiStudio = {},
+                onSignIn = {},
+                onSignOut = {},
+                onOpenOverlay = {},
+                onOpenLogs = {},
+            )
+        }
     }
 }

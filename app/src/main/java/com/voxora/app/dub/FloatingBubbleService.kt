@@ -5,8 +5,10 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.PixelFormat
+import android.graphics.Shader
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Handler
@@ -29,6 +31,13 @@ import com.voxora.app.MainActivity
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.sin
+
+// Voxora brand palette (mirrors ui/theme/Theme.kt). Visual only — the bubble's
+// drag, tap-to-stop, double-tap and polling behaviour are unchanged.
+private val BRAND_GOLD = Color.parseColor("#D4AF37")
+private val BRAND_LIVE_GREEN = Color.parseColor("#3DDC84")
+private val BRAND_ERROR = Color.parseColor("#E85D5D")
+private val BRAND_BUBBLE_FILL = 0xF21C1C1F.toInt()
 
 /**
  * Circular Live bubble — drag works on entire widget including red Stop.
@@ -136,11 +145,11 @@ class FloatingBubbleService : Service() {
             text = "■"
             textSize = 16f
             gravity = Gravity.CENTER
-            setTextColor(0xFFFF6B6B.toInt())
+            setTextColor(BRAND_ERROR)
             layoutParams = LinearLayout.LayoutParams(disc - 8, disc - 8).apply {
                 marginEnd = (10 * d).toInt()
             }
-            background = oval(0xF0121212.toInt(), 0xFFFF6B6B.toInt())
+            background = oval(BRAND_BUBBLE_FILL, BRAND_ERROR)
             isClickable = false
             isFocusable = false
         }
@@ -153,7 +162,7 @@ class FloatingBubbleService : Service() {
     private fun buildLiveDisc(disc: Int): FrameLayout {
         val wrap = FrameLayout(this).apply {
             layoutParams = FrameLayout.LayoutParams(disc, disc)
-            background = oval(0xF0121212.toInt(), 0xFFE6B422.toInt())
+            background = oval(BRAND_BUBBLE_FILL, BRAND_GOLD)
         }
         val wave = WaveView(this).apply {
             layoutParams = FrameLayout.LayoutParams(disc, disc)
@@ -179,8 +188,8 @@ class FloatingBubbleService : Service() {
     private fun liveSpannable(): SpannableString {
         val raw = "● LiVe"
         val ss = SpannableString(raw)
-        val green = 0xFF3DDC97.toInt()
-        val gold = 0xFFE6B422.toInt()
+        val green = BRAND_LIVE_GREEN
+        val gold = BRAND_GOLD
         ss.setSpan(ForegroundColorSpan(green), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
         ss.setSpan(ForegroundColorSpan(green), 2, 4, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) // Li
         ss.setSpan(ForegroundColorSpan(gold), 4, 5, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE) // V
@@ -194,7 +203,7 @@ class FloatingBubbleService : Service() {
         return GradientDrawable().apply {
             shape = GradientDrawable.OVAL
             setColor(fill)
-            setStroke((2.5f * density).toInt().coerceAtLeast(2), stroke)
+            setStroke((1.5f * density).toInt().coerceAtLeast(2), stroke)
         }
     }
 
@@ -312,17 +321,25 @@ class FloatingBubbleService : Service() {
     private class WaveView(context: Context) : View(context) {
         var level: Float = 0f
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#E6B422")
             style = Paint.Style.FILL
-            alpha = 90
+            alpha = 210
         }
         private var phase = 0f
+        private var shaderWidth = 0
 
         override fun onDraw(canvas: Canvas) {
             super.onDraw(canvas)
             val w = width.toFloat()
             val h = height.toFloat()
             if (w <= 0 || h <= 0) return
+            if (width != shaderWidth) {
+                shaderWidth = width
+                paint.shader = LinearGradient(
+                    0f, 0f, w, 0f,
+                    BRAND_GOLD, BRAND_LIVE_GREEN,
+                    Shader.TileMode.CLAMP,
+                )
+            }
             val bars = 7
             val gap = w * 0.04f
             val barW = (w - gap * (bars + 1)) / bars

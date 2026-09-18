@@ -13,6 +13,11 @@
     <string name="action_retry">تلاش دوباره</string>
     <string name="action_view_logs">مشاهده لاگ‌ها</string>
     <string name="settings_title">تنظیمات</string>
+    <string name="settings_section_appearance">ظاهر</string>
+    <string name="settings_section_gemini">جمینا</string>
+    <string name="settings_section_dubbing">دوبله زنده</string>
+    <string name="settings_section_overlay">حباب شناور</string>
+    <string name="settings_section_diagnostics">عیب‌یابی</string>
     <string name="settings_account">حساب کاربری</string>
     <string name="settings_api_key">کلید API جمینا</string>
     <string name="settings_api_key_hint">کلید را از Google AI Studio وارد کن</string>

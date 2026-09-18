@@ -22,6 +22,11 @@
     <string name="action_hide_key">Hide API key</string>
     <string name="action_view_logs">View logs</string>
     <string name="settings_title">Settings</string>
+    <string name="settings_section_appearance">Appearance</string>
+    <string name="settings_section_gemini">Gemini</string>
+    <string name="settings_section_dubbing">Live Dub</string>
+    <string name="settings_section_overlay">Overlay</string>
+    <string name="settings_section_diagnostics">Diagnostics</string>
     <string name="settings_account">Account</string>
     <string name="settings_api_key">Gemini API key</string>
     <string name="settings_api_key_hint">Paste key from Google AI Studio</string>
