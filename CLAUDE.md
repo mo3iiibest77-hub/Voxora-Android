@@ -148,31 +148,28 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
 ### Actual repository state (inspected, not assumed):
 - `main`: `1f0a719 fix(reader): fix suspend output language persistence`.
 - `feat/reader-segmented-spooling` (the implementation branch) HEAD is
-  `e88f85a fix(reader): switch the display language at the start of a chunk`,
-  on top of `7d9a51b style(reader): present the document as a page with semantic
-  status` and `1b9eb4f fix(i18n): never describe languages in a locale Voxora does
-  not ship`, which sit on `f66d0dd docs: point the handoff state at the current HEAD
-  and its CI run`, `14bd894 docs: record the reader refresh, extraction gates and
-  language catalog`, the three code commits `1504669`/`882ab27`/`1c0df1e`, and the
-  earlier `06a3bb3`/`7f47805`/`a9b9336`. It carries the Reader quality pass —
+  `db831d2 feat(onboarding): introduce both products and the shared key`, on top of
+  `4d9608d feat(settings): harden the account card and add the API usage dashboard` and
+  `982786b feat(usage): add the Gemini key probe and observed-usage model`, which sit on
+  `70571cf`/`ee6d31b`/`e88f85a`/`7d9a51b`/`1b9eb4f`, `f66d0dd`, `14bd894`, the three code
+  commits `1504669`/`882ab27`/`1c0df1e`, and the earlier `06a3bb3`/`7f47805`/`a9b9336`. It
+  carries the Reader quality pass —
   `925ee1d feat(reader): redesign the reader screen`,
   `72527e7 feat(reader): expose the loaded document name`,
   `f644d2f feat(reader): map language catalog to deterministic flags`,
   `b0d556d fix(reader): preserve pdf reading order`,
   `a74db6c fix(reader): define fluent and faithful narration semantics` — plus the
   reading-order fix `6d826e0 fix(reader): de-interleave pdf columns when a page
-  carries a running header` and the documentation commits. **24 commits ahead of
+  carries a running header` and the documentation commits. **31 commits ahead of
   `main` (`1f0a719`)**, pushed to `origin`, and **not merged**. CI is green at
-  `7f47805` (run `35294468431`, both jobs) and at `707cc3c` (run #66); the
-  reading-order fix, the settings/overlay pass, the refresh/gates/catalog trio and
-  the page/language pass below are CI-verified separately.
+  `7f47805` (run `35294468431`, both jobs) and at `707cc3c` (run #66); every later
+  slice is CI-verified separately.
 - `feat/ci-feature-branch` = `76f0c96` + `dcbf852 ci: run Android CI on feature
   branch`, with **PR #2 open to `main`** (still open; deliberately NOT merged).
 - **PR #3 "Feat/reader segmented spooling"** (`feat/reader-segmented-spooling` →
-  `main`) is also **open and not merged**, created 2026-09-18T02:20:08Z (before the
-  page/language session). It tracks this branch, so its head moves with every push,
-  and it makes CI run twice per push (`push` + `pull_request`). Both runs are green
-  at `ee6d31b`. **Do not merge PR #2 or PR #3.**
+  `main`) is also **open and not merged**, created 2026-09-18T02:20:08Z. It tracks this
+  branch, so its head moves with every push, and it makes CI run twice per push
+  (`push` + `pull_request`). **Do not merge PR #2 or PR #3.**
 - IMPORTANT — how CI actually runs: the failing run `35279422099`
   (2026-09-17T21:56Z) was triggered by **`pull_request` from
   `feat/ci-feature-branch`**, not by a push. `android-ci.yml` triggers on pushes
@@ -186,10 +183,188 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
   foreground `mediaPlayback` service. Live Dub is untouched.
 - **No Chinese text exists anywhere in the app.** An exhaustive CJK scan of
   `app/src/main`, `core/src/main` and every `res/**/*.xml` returns zero hits. The
-  reported "Chinese labels" were a *locale* defect, not a string defect — see the
-  last change below.
+  reported "Chinese labels" were a *locale* defect, not a string defect.
+- **Google Sign-In is a local identity layer, not an account system**, and it is
+  **not configured in this build**: `default_web_client_id` still holds
+  `REPLACE_WITH_GOOGLE_WEB_CLIENT_ID`. Guest use with an API key is the working path.
 
-### Last change (this session) — Reader as a page, semantic status, language at chunk start
+### Last change (this session) — Gemini API usage, Google auth hardening, onboarding
+
+Three commits, all pushed to `feat/reader-segmented-spooling`:
+
+- `982786b feat(usage): add the Gemini key probe and observed-usage model`
+- `4d9608d feat(settings): harden the account card and add the API usage dashboard`
+- `db831d2 feat(onboarding): introduce both products and the shared key`
+
+**The governing decision: an API key cannot read project quota, so nothing pretends it can.**
+Gemini quota, billing and project identity belong to the Google Cloud **project**, not to an API
+key. Reading them needs OAuth credentials for the owning project, which this app does not hold.
+Rather than print a reassuring `0`, the new dashboard names each unavailable figure and says why.
+`ApiUsageSnapshot.projectQuota` and `.billing` are therefore always
+`UsageUnavailable.AUTH_REQUIRED`, and `accountLinkedToKey` is hard-coded `false` — nothing in this
+app can verify that a signed-in Google account owns the configured key, so the UI must not imply it.
+
+**DONE — a real, non-billable key check.** `GeminiKeyProbe` calls the documented `models.list`
+endpoint (`https://generativelanguage.googleapis.com/v1beta/models`). It is official, it accepts an
+API key, and it generates no content — so it consumes no tokens and cannot incur generation
+charges. A generative endpoint is deliberately never used to test a key. Two details matter:
+
+- the key travels in the **`x-goog-api-key` header, not a `?key=` query parameter**, so the secret
+  never appears in a URL — the part of a request most likely to reach a log, a crash report or a
+  proxy trace;
+- classification **prefers the body's `error.status` over the HTTP code**, because the code alone is
+  ambiguous: Google returns `400` for both a malformed request and an invalid key, and `403` for
+  both a blocked API and a permission problem. The result is connected / invalid key / unauthorized
+  / quota limited / network unavailable / service error / configuration incomplete / unknown. An
+  unparseable body falls back to the code; an unrecognisable answer is `UNKNOWN`, never a guess. A
+  blank, absent or placeholder key short-circuits to `configuration incomplete` **without any
+  network call**.
+
+**DONE — request-level usage, captured honestly.** `GeminiUsageMetadata.fromMessage` reads the
+optional `usageMetadata` that Live API server messages *may* carry. It is read from the **top level
+of the message, before the `serverContent` early-return** in `handleMessage`, because a usage-only
+message would otherwise be dropped. Both wire spellings of the output count are accepted (Gemini
+Live's `responseTokenCount`, Vertex's `candidatesTokenCount`). Crucially, `optInt` alone would have
+been wrong: it cannot tell "the server said zero" from "the server said nothing", so a helper keeps
+only values that were actually present — a field the server did not send stays `null`, and a message
+with nothing recognisable records nothing. The session exposes this through an `onUsage` hook
+matching the existing `onLog` style, and **nothing in the narration path reads usage back**, so
+recording cannot influence audio, ordering or timing.
+
+**DONE — a bounded ledger that cannot leak.** `GeminiUsageLedger` holds only Voxora's own request
+counts, whatever token usage the server reported, and short error categories. No key, no ID token,
+no prompt, no document text, no audio, no raw response. It is bounded to 90 days, batched to one
+disk write per ten records with a forced `flush()` at each run boundary, and a damaged, truncated or
+future-versioned payload degrades to an empty ledger rather than throwing — losing usage history
+must never block Settings. Failures record a **category only**, never the message, because an HTTP
+client can put the key-bearing request URL into an exception message;
+`ReaderController.usageCategoryFor` prefers the `NarrationFailure` string resource over the
+exception. Usage reported by a *failed* turn is discarded, since a turn that produced no audio
+produced no usable output.
+
+**DONE — Google auth hardened.** Three real defects were fixed, not just tidied:
+
+1. **The failure was discarded entirely.** `SettingsScreen` only acted on `result.ok`, so a build
+   with no Web client ID looked as though the button did nothing. Failures are now classified
+   (configuration missing / cancelled / no credential / provider unavailable / network /
+   unsupported credential / unknown) and each gets its own sentence, because the next action
+   differs.
+2. **`android.util.Log` was used directly**, violating AGENTS.md §9. It now goes through
+   `VoxoraLog` and carries only the classification and the exception's class name — never a message
+   verbatim, which a provider could populate with credential material. The ID token is never read
+   into a variable, persisted or logged.
+3. **No loading state and no re-entry guard.** A second tap could launch an overlapping credential
+   request and race two results onto the same card. Both buttons are now disabled while an
+   operation is in flight and a second tap is ignored.
+
+`AuthUiState` replaces the loose `signedIn`/`displayName`/`email` booleans with a sealed hierarchy,
+so **stale state after sign-out is unrepresentable rather than merely unlikely**: only `SignedIn`
+carries an identity. `signOut()` always reports `SignedOut` even when the provider call throws,
+because showing an account the user removed is worse than a failed cleanup. Configuration is not
+failure: while `default_web_client_id` holds the shipped placeholder, `signIn()` returns
+`CONFIGURATION_MISSING` **without touching the credential provider**, and guest use keeps working.
+
+**DONE — onboarding now matches the product.** The first-run flow described only Live Dub and never
+mentioned the Reader, which stopped being accurate when the Reader shipped. It is now four pages:
+Live Dub, the Reader, what the app can and cannot access, and the Gemini key. The privacy page states
+that the key, documents and audio go only to Google's Gemini API because Voxora has no server of its
+own, and that screen capture belongs to Live Dub alone. The key page says one key powers both
+features, that it is stored on the device, and that Google sign-in is optional. Hardcoded `sp` sizes
+were replaced with typography tokens and the screen gained the preview it was missing.
+
+**What was deliberately NOT done.** The Reader was left alone: the previous session verified its
+status mapping, error copy (every Reader error already names an actionable next step), language
+centralisation and background lifecycle, and §17 of the brief says not to redesign what works. No
+translation-before-audio pipeline was introduced, no artificial wait was added, and the display
+layer remains derived and one-way.
+
+**Tests added (121 new, 296 total).** `ApiKeyMaskTest` (8), `GeminiUsageMetadataTest` (11),
+`GeminiKeyClassifierTest` (13), `GeminiKeyProbeTest` (12), `GeminiUsageLedgerTest` (16),
+`UsageRecorderTest` (12), `ApiUsageSnapshotTest` (14), `UsageFailureCategoryTest` (9),
+`UsageStatusVisualTest` (10), `AuthUiStateTest` (13). All pure JVM; the probe tests use a **fake
+transport**, so nothing asserts a real quota, a real model count or a real error from Google.
+
+Five real defects were found by the tests while writing them, and fixed in the source rather than
+weakened in the test: the `UsageFailureCategory` ordering misread "Audio output is unavailable" as a
+network problem; it did not match a session failure in the *message*; `AuthFailureClassifier` did
+not recognise "timed out"; `ApiUsageScreen` called the suspend `prefs.signedIn.first()` inside a
+non-suspend `takeIf`; and my own retention-date arithmetic was wrong.
+
+**Validation actually performed (no Gradle was run).** Compiled the pure-JVM sources with
+`kotlinc 2.0.21` against the pinned dependency jars and ran the JUnit classes directly with `-ea`
+(matching Gradle's test JVM): **296 tests, OK across 26 classes** — the new suites plus every
+earlier Reader/core suite, which is what proves the `GeminiReaderSession` change did not regress the
+Reader. Additional static checks: a full `R.string.*` cross-check against both locales (now 227 keys
+in `values/`, 226 in `values-fa/`, with matching format args), an unused-import sweep of every
+changed file, and a protected-system audit confirming no file under `dub/**`, `GeminiLiveSession.kt`
+or `GeminiLiveConfig.kt` was touched.
+
+**CI status: GREEN — VERIFIED, after one real failure that CI caught and the local harness could not.**
+
+- **Run #80 (`35304003121`, event `push`, `db831d24`, 2026-09-18T03:39:08Z) — FAILED, both jobs.**
+  `Unit tests` failed at step 6 `Run unit tests` and `Assemble debug APK` at step 8
+  `Assemble debug`. The cause was a **single missing import** in the new `ApiUsageScreen.kt`:
+  `LaunchedEffect`. It produced four errors — the unresolved reference plus three cascading
+  "suspend function should be called only from a coroutine", because without `LaunchedEffect` the
+  lambda was not a suspend scope. The dev server has no Compose artifacts, so nothing local could
+  have caught it; this is the documented limitation of local validation, not a surprise.
+- **Fix:** `4176883 fix(settings): import LaunchedEffect in the usage screen`.
+- **Run #82 (`35304322802`, event `push`, `4176883`, 2026-09-18T03:4xZ) — SUCCESS.**
+  `Unit tests` 10/10 steps including `Run unit tests`; `Assemble debug APK` 14/14 steps including
+  `Assemble debug` and `Upload debug APK`.
+- **Run #83 (`35304324635`, event `pull_request`, `4176883`) — SUCCESS**, both jobs, the same 10/10
+  and 14/14. PR #3 tracks this branch, so both trigger paths run and both are green.
+
+`android-ci.yml` has no `continue-on-error`, so a green `Run unit tests` step is a genuine pass and
+a green `Assemble debug` step is a genuine compile check of the Compose changes the dev server
+cannot compile.
+
+**Validation actually performed locally (no Gradle was run).** `kotlinc 2.0.21` + JUnit `-ea`:
+**296 tests OK across 26 classes**. Plus: a Compose/AndroidX **import guard** (added after the CI
+failure above, and verified to flag that exact bug), a full `R.string.*` cross-check against both
+locales (227 keys in `values/`, 226 in `values-fa/`, matching format args), an unused-import sweep
+of every changed file, and a protected-system audit.
+
+**Real-device verification was NOT performed** — nothing in this change was tested on a physical
+device, and no device behaviour may be claimed.
+
+
+**IN PROGRESS:** nothing — all commits are implemented, tested, pushed and CI-verified.
+
+**BLOCKED:** nothing in the code. One item is blocked on **external configuration**, not on code:
+
+- **`default_web_client_id` is still `REPLACE_WITH_GOOGLE_WEB_CLIENT_ID`.** Google Sign-In cannot
+  work until the owner creates a Web client ID in Google Cloud Console (OAuth consent screen
+  configured, an **Android** OAuth client with package `com.voxora.app` and the debug/release
+  SHA-1 fingerprints registered, and a **Web** client whose ID goes into
+  `app/src/main/res/values/strings.xml` at `default_web_client_id`). The code handles the missing
+  value correctly and says so in the UI; it cannot be finished from inside the repository. Do not
+  invent a client ID.
+- **Project-level quota and billing remain unreadable by design.** Enabling them would require a
+  Google Cloud service account or OAuth credentials plus the Cloud Quotas / Service Usage / Billing
+  APIs, and a project identifier. That is a product/architecture decision, not a coding gap, and the
+  dashboard is built to represent it as `AUTH_REQUIRED` today and to accept a real provider later.
+
+**NEXT (do not start before the above is read):**
+- **Real-device check — not performed, and must not be claimed.** Everything below needs a device:
+  (1) the Reader page turn, the active halo, RTL swipe direction and the chunk-start language swap
+  from the previous session; (2) "Test connection" against a real key, confirming a good key reads
+  **Connected** and a deliberately broken one reads **Invalid key** rather than a generic failure;
+  (3) that the usage screen shows masked-key text and no full key anywhere; (4) that a narrated
+  chunk makes "Requests today" increase; (5) the four-page onboarding in both English and Persian,
+  including that the Reader page renders correctly under RTL; (6) sign-in, which will report
+  **configuration incomplete** until the client ID is supplied — that is the expected result, not a
+  bug.
+- If the owner supplies a real `default_web_client_id`, re-check sign-in on device and confirm the
+  success and cancellation paths both leave the card in a correct state.
+- A future authenticated quota provider should slot in behind `ApiUsageSnapshot`; the model already
+  has the vocabulary for it. Do not add a Cloud API call behind an API key — it cannot succeed.
+- The Reader's narration language picker still offers the full 99-code catalog. If the narration
+  model supports a narrower set, encode that as a **capability filter over `ReaderLanguages.all`**
+  with a documented source — never a second hand-typed list. This needs model information the
+  repository does not contain, so no filter was invented.
+
+### Previous change — Reader as a page, semantic status, language at chunk start
 
 Three commits, all pushed to `feat/reader-segmented-spooling`:
 
