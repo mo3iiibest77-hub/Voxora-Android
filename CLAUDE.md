@@ -145,13 +145,15 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
 > pair is `AGENTS.md` (project law / architecture record) and this `CLAUDE.md`
 > (handoff / cloud context). Update those two — do not add duplicate docs.
 
-### Last change (this session) — the text card turns alone, the first frame waits for text, Logs reads its own severity
+### Last change (this session) — Reader corrections, Logs severity/selection, the Gemini product model, and the background-playback surface
 
-Three code commits on `feat/reader-segmented-spooling`, then this documentation commit:
+Five code commits on `feat/reader-segmented-spooling`, then the documentation commits:
 
 - `d7ba68c fix(reader): move only the text card on a segment turn`
 - `ab726f7 fix(reader): gate the first audible frame on the selected-language text`
 - `f4ee4f1 fix(logs): read INFO as success and let one entry be selected`
+- `f5088a8 feat(settings): present Google access as the Gemini product, not Cloud Console`
+- `80a0244 feat(reader): add the background playback surface — bubble and controls`
 
 **DONE — only the text card moves on a segment turn.** The defect was that the gesture and its
 `graphicsLayer` sat on `ChunkPage`'s whole `Column`, so a swipe translated and faded the section
@@ -192,30 +194,69 @@ Copy-all payload and a single-entry copy cannot drift), and it takes primitives 
 Log content, the monospace font and the explicit LTR list region are unchanged; only the surrounding
 chrome is RTL and localized.
 
+**DONE — Settings presents the Gemini product, not a Cloud Console.** `f5088a8` reorders and
+relabels the account surface so the model a reader has is the model they see: sign in with Google →
+the account → the Gemini project → the key → usage. The account card now sits directly above the
+manual key field, because a manual key is a fallback for the same job rather than a separate
+feature, and it stays a first-class fallback that is never silently bound to the account. Copy
+follows: "Google & Gemini" and "Usage & limits" replace the console-flavoured section names, "Gemini
+project" replaces "Google Cloud project", and the failure/not-configured strings talk about signing
+in with Google rather than Cloud access or OAuth client ids. The project level explains once that a
+Gemini key belongs to a Google Cloud project, and the key level states the documented rule that
+**rate limits apply to the project, not to a single key**. The usage screen links to Google's own
+rate-limit page, because an API key cannot read project limits and Voxora must not estimate them.
+`ApiKeyMask.describeShape` was deleted: no production callers, and it encoded the pre-2026 `AIza`
+prefix assumption that the auth-key change invalidates. The account-switching, reauth, sign-out and
+no-token rules are unchanged and stay covered by `CloudSelectionTest`/`CloudAuthStateTest`.
+
+**DONE — the Reader has a background playback surface: a bubble and real transport controls.**
+`80a0244` adds both. The bubble is a new `reader/ReaderBubbleService` — deliberately not a reuse of
+`FloatingBubbleService`, because the Live bubble imports `DubService` and the reader package must
+never depend on `dub/`. It mirrors the Live contract (overlay permission, `TYPE_APPLICATION_OVERLAY`,
+`WindowManager` lifecycle in try/catch, whole-widget drag, tap-to-stop, double-tap-to-open, oval brand
+styling, safe teardown) with the flat `● READER` label — green dot and letters, a larger bold gold
+`R` — and a solid gold wave rather than the Live gradient. It is gated on a new `reader_bubble`
+preference (absent means on, matching Live), toggled from the Reader top bar; a stop from the bubble
+clears that same preference so a dismissal sticks. `ReaderService` shows and hides it off the phase,
+exactly as `DubService.syncBubble` does, and hides it in `onDestroy`. The notification gains
+previous / pause-or-resume / next / stop as `MediaStyle` actions with matching `MediaSession`
+callbacks and playback-state actions, and is rebuilt on every phase change. The load-bearing
+lifecycle change: **a pause no longer tears the foreground service down** — only a terminal phase
+does — because otherwise the notification would vanish the moment it was paused and Resume would
+have nowhere to live. Prev/next move exactly one segment through the existing `jumpToSegment`, which
+clamps to the chunk, so a step at either end is a no-op rather than a move into the next chunk; they
+are deliberately not routed through the service command queue, because cancelling the running play
+command would end background narration. The body states the phase and never the document. Live Dub,
+`mediaPlayback`, `USAGE_MEDIA` and the stale-run generation guard are untouched.
+
 **Tests actually run (no Gradle).** `kotlinc 2.0.21` + JUnit with `-ea`, matching Gradle's test JVM:
-**404 tests OK across 36 classes** (up from 379/33), adding `ReaderInitialPlaybackTest`,
-`LogSeverityTest` and `LogLineFormatTest`. The load-bearing new case is
+**404 tests OK across 36 classes** for the Reader/Logs half (up from 379/33), adding
+`ReaderInitialPlaybackTest`, `LogSeverityTest` and `LogLineFormatTest`. The load-bearing new case is
 `ReaderInitialPlaybackTest.theSourceFallbackIsNotMistakenForASelectedLanguageRendering`, which pairs
 `readingText` (non-blank, equals the source) with `text` (null) so a regression that gates on the
-visible page fails. Static checks: `checkimports.py` OK, `stringcheck.py` OK (values 262, values-fa
-261, parity intact, only `default_web_client_id` intentionally untranslated). The harness stub
-`VoxoraLog` gained the `Level` enum the two new Logs tests iterate.
+visible page fails. The Settings reframe removed the one `describeShape` test with the function, so
+the suite is **403 tests across 36 classes** at the final head. The background-playback surfaces add
+no new pure-JVM rule on purpose: they call the same `jumpToSegment`/`stop` the screen already uses,
+whose bounds `ReaderSegmentNavigationTest` pins, so a second step rule (and a second test) would be
+duplication. Static checks: `checkimports.py` OK, `stringcheck.py` OK (values 272, values-fa 271,
+parity intact, only `default_web_client_id` intentionally untranslated). The harness stub `VoxoraLog`
+gained the `Level` enum the two new Logs tests iterate. The Compose, Play Services and Android
+service layers are **not** compiled locally — CI is their only compile check.
 
 **Real-device verification was NOT performed.** The swipe feel, the card-only motion under RTL, the
-first-frame wait and the Logs selection are all device-verification items, and nothing in this cycle
-was tested on a physical device.
+first-frame wait, per-entry Logs selection, the Settings/Gemini layout, the floating bubble and the
+notification transport controls are all device-verification items, and nothing in this cycle was
+tested on a physical device.
 
 **BLOCKED on external configuration (not on code):** unchanged from the Cloud cycle below —
 `default_web_client_id` is still a placeholder, and the Cloud APIs must be enabled on the queried
 project. Cloud authorization cannot run end to end until the owner supplies the OAuth client.
 
-**NEXT (the second half of this cycle, not yet started):** reframe the Settings/Cloud surface from
-"Cloud account → Cloud project → Cloud API keys" to "Sign in with Google → Google account → Gemini /
-AI Studio access → key → usage", keeping the same structure (order and copy, not a rewrite); add the
-Reader floating bubble as a new `reader/` service with full parity to the Live bubble, toggled from
-the Reader top bar, leaving `FloatingBubbleService`/`DubService` untouched; and upgrade the
-`ReaderService` notification to previous / pause / next / stop, segment-scoped and disabled at a chunk
-boundary, rebuilt on phase change with MediaSession/MediaStyle actions.
+**NEXT:** the real-device list, plus: confirm the bubble appears while narrating and that its stop
+dismisses it until the top-bar toggle is used again; confirm the notification shows previous /
+pause / next / stop, that pause keeps the notification with Resume, and that previous/next stop at
+the chunk boundary rather than moving into the next chunk; and confirm the reframed Settings surface
+reads as Gemini rather than Cloud Console in both locales.
 
 ### Last change (previous session) — Persian localization, Reader segment swipe, Logs, Cloud authorization
 
@@ -349,8 +390,10 @@ confirm the previous account's project and key disappear immediately.
 ### Actual repository state (inspected, not assumed):
 - `main`: `1f0a719 fix(reader): fix suspend output language persistence`.
 - `feat/reader-segmented-spooling` (the implementation branch) HEAD is the documentation commit that
-  follows the last code change, `f4ee4f1 fix(logs): read INFO as success and let one entry be
-  selected`. This cycle's three code commits sit below it:
+  follows the last code change, `80a0244 feat(reader): add the background playback surface — bubble
+  and controls`. This cycle's five code commits sit below it:
+  `f5088a8 feat(settings): present Google access as the Gemini product, not Cloud Console`,
+  `f4ee4f1 fix(logs): read INFO as success and let one entry be selected`,
   `ab726f7 fix(reader): gate the first audible frame on the selected-language text` and
   `d7ba68c fix(reader): move only the text card on a segment turn`, on top of the previously
   CI-verified head `9dfc204 fix(auth): map the scope list to Play Services Scope objects`, then
@@ -374,14 +417,17 @@ confirm the previous account's project and key disappear immediately.
   `a74db6c fix(reader): define fluent and faithful narration semantics` — plus the
   reading-order fix `6d826e0 fix(reader): de-interleave pdf columns when a page
   carries a running header` and the documentation commits. **Pushed to `origin`,
-  and not merged.** The last CI-verified code head is `9dfc204`: `Android CI` runs #90 (push)
-  and #91 (pull_request) both succeeded there (debug APK + unit tests), and
-  runs #92/#93 are green for the documentation commit `a96d201`. The three commits of this cycle
-  (`d7ba68c`, `ab726f7`, `f4ee4f1`) and the documentation commit `82ddc11` are CI-verified at
-  `82ddc110e` — runs #96 (push) and #97 (pull_request), both jobs success on each, completed
-  2026-09-18T13:21Z. The runs before `9dfc204` failed on the three compile errors listed above
-  (#86–#89 at `089a71f`/`14e5403`). Older green points were `7f47805` (run `35294468431`, both jobs)
-  and `707cc3c` (run #66).
+  and not merged.** The Reader/Logs half of this cycle (`d7ba68c`, `ab726f7`, `f4ee4f1`) and the
+  documentation commit `82ddc11` are CI-verified at `82ddc110e` — runs #96 (push) and #97
+  (pull_request), both jobs success on each, completed 2026-09-18T13:21Z. The last code head
+  verified before that was `9dfc204`: runs #90 (push) and #91 (pull_request) both succeeded there,
+  and runs #92/#93 are green for the documentation commit `a96d201`. **The Settings reframe
+  (`f5088a8`) and the background-playback surface (`80a0244`) are not yet CI-verified at the time
+  this line was written** — they touch Compose, Play Services and the Android service layer, none of
+  which the local harness compiles, so check their push run before trusting the local suite. The runs
+  before `9dfc204` failed on the three compile errors listed above (#86–#89 at
+  `089a71f`/`14e5403`). Older green points were `7f47805` (run `35294468431`, both jobs) and
+  `707cc3c` (run #66).
 - `feat/ci-feature-branch` = `76f0c96` + `dcbf852 ci: run Android CI on feature
   branch`, with **PR #2 open to `main`** (still open; deliberately NOT merged).
 - **PR #3 "Feat/reader segmented spooling"** (`feat/reader-segmented-spooling` →

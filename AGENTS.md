@@ -58,7 +58,8 @@ Voxora-Android/
 │       ├── reader/                  ← Isolated background document narration
 │       │   ├── ReaderScreen.kt
 │       │   ├── ReaderViewModel.kt
-│       │   ├── ReaderService.kt      ← Android mediaPlayback foreground service
+│       │   ├── ReaderService.kt      ← Android mediaPlayback foreground service + transport controls
+│       │   ├── ReaderBubbleService.kt ← Reader floating bubble (separate from the Live bubble)
 │       │   ├── ReaderController.kt   ← Hilt singleton; document and narration state
 │       │   ├── ReaderPlayback.kt     ← Local PCM playback and audio focus
 │       │   ├── ReaderDisplayText.kt  ← Selected-language reading text, keyed by language
@@ -79,7 +80,7 @@ Voxora-Android/
 │       │   ├── ApiUsageScreen.kt     ← Key check + observed usage; never invents quota
 │       │   ├── UsageStatusVisual.kt  ← Pure-JVM usage tone mapping
 │       │   ├── LogSeverity.kt        ← Pure-JVM severity → semantic role mapping
-│       │   ├── CloudAccountCard.kt   ← Account → project → key hierarchy
+│       │   ├── CloudAccountCard.kt   ← Google account → Gemini project → key, in product language
 │       │   ├── LogsScreen.kt
 │       │   ├── OnboardingScreen.kt
 │       │   └── VoxoraNav.kt
@@ -317,7 +318,10 @@ There is exactly **one** language catalog: `core/.../gemini/ReaderLanguages.kt`.
 - `play` must suspend until narration completes, cancels, or fails. It must not launch detached narration and return early. Commands must be safe across ViewModel and service IO callers; old cleanup must not stop a newer generation.
 - `ReaderViewModel` observes the singleton and delegates load, pause, stop, and settings work off Main. Play starts `ReaderService` with `ContextCompat.startForegroundService` and the mode extra; it never calls `controller.play` directly.
 - `ReaderService` is a real `@AndroidEntryPoint` Android `Service`, not an injected pipeline class. Promote immediately with foreground type `mediaPlayback`, then run narration in its own IO coroutine scope.
-- Use a Reader-branded media notification with a Stop action and a content intent opening `MainActivity`. Stop calls `controller.stop()` and ends the service. Completion and errors remove foreground state and stop the service without clearing the loaded document.
+- Use a Reader-branded media notification with previous / pause-or-resume / next / stop actions and a content intent opening `MainActivity`. It is a `MediaStyle` notification backed by the service's `MediaSession`; the body states the phase and **never the document**, because a lock screen must not leak what the reader is listening to. Stop calls `controller.stop()` and ends the service. Completion and errors remove foreground state and stop the service without clearing the loaded document.
+- **A pause must not tear the foreground service down.** Only a *terminal* phase (`IDLE`, `STOPPED`, `COMPLETE`, `ERROR`) ends the service; `PAUSED` leaves it, the session and the notification alive, which is what makes Resume possible from the notification. Ending the service on pause would remove the very control the user needs next. The notification is rebuilt on every phase change, so pause flips the action to Resume and the body to "Narration paused."
+- **Notification previous/next move exactly one segment and are bounded by the current chunk.** They go through `ReaderController.jumpToSegment`, which clamps to the chunk's units, so a step at either end is a truthful no-op rather than a move into the neighbouring chunk — the chunk stays reachable only from the app. They are deliberately **not** routed through the service's command queue: that queue cancels the running command, which would end background narration. The running play loop already re-runs its pipeline when the navigation revision changes, so a synchronous jump is all that is needed. The bounds themselves are the ones pinned by `ReaderSegmentNavigationTest`; do not add a second step rule.
+- **The Reader has its own floating bubble, and it is a separate service.** `ReaderBubbleService` lives in `reader/` because `FloatingBubbleService` imports `DubService` and the reader package must never depend on `dub/`. It mirrors the Live bubble's contract — overlay-permission check, `TYPE_APPLICATION_OVERLAY`, `WindowManager` add/remove in a try/catch, whole-widget drag, tap to reveal the stop disc, double-tap to open the app, an oval in the brand palette, teardown that never leaks a window — with the flat `● READER` label (green dot and letters, a larger bold gold `R`) and a **solid** gold wave rather than the Live gradient. It is gated on the `reader_bubble` preference (absent means on, matching Live), shown and hidden from `ReaderService` off the phase exactly as `DubService.syncBubble` does, and hidden in `onDestroy`. The Reader top bar owns the toggle; a stop from the bubble clears the same preference, so a dismissal persists until the toggle turns it back on. **Do not fold the two bubbles into one class and do not touch the Live bubble while working on this one.**
 - Repeated starts must be serialized (`cancelAndJoin` the previous run before a new one); a stale job must never remove the notification or stop a newer service run. Destruction cancels service coroutines and pauses only a still-active owned playback run, never a normally completed document.
 - The service owns a local `MediaSession` with `setPlaybackToLocal` and `USAGE_MEDIA`/speech attributes, including pause and stop callbacks. Never use remote volume providers; hardware volume keys control ordinary media volume.
 - Back navigation, composition disposal, Activity `ON_STOP`, and ViewModel clearing must not pause or close the singleton. Narration continues when switching apps or turning off the screen while the foreground service is alive; process death does not automatically resume narration.
@@ -326,7 +330,7 @@ There is exactly **one** language catalog: `core/.../gemini/ReaderLanguages.kt`.
 ### Reader UI
 `ReaderScreen` is a single `LazyColumn` whose keyed items follow the listening workflow. This order is the information architecture — do not reshuffle it into a flat settings list:
 
-1. top bar with back
+1. top bar with back and the floating-bubble toggle (see "Ownership and background lifecycle")
 2. **document identity** — display name (or "no document loaded") + pick/change button
 3. **reading mode** — one card per mode, each with a visible one-line description of what it does
 4. **narration language** — a tappable row showing flag + selected language, opening a searchable `ModalBottomSheet`
@@ -426,13 +430,26 @@ Both Settings language pickers are built from the one catalog (see "One language
 - **Tones are semantic, not alarming.** `UsageStatusVisual` maps each state to `OK` / `WARNING` / `ERROR` / `NEUTRAL` onto `VoxoraColors`. An unconfigured key, a source needing credentials, and a figure the API does not expose are all **expected** gaps and stay neutral; only a refusal or a network problem is coloured. Do not turn "we cannot read this" into a red error.
 - The usage screen is its own destination reached from Settings, using the existing `VoxoraScreen` enum — do not add a second navigation framework for it.
 
-### Google account — an authorized Cloud connection, not a local profile
+### Google account — the Gemini product model, not a Cloud Console
 
-The account system is **Google Cloud authorization**. An ID token identifies the user but authorises
-no Cloud read, so it could never discover a project or a key; it is no longer the Settings entry
-point, and the Credential Manager identity layer was removed with it. The relationship the app
-represents is explicit and three-level: **Google account → Cloud project → Gemini API key**.
+The account system is **Google authorization**, presented in the product's own language: **sign in
+with Google → the Google account → Gemini / Google AI Studio access → the key → usage**. The
+official Cloud APIs underneath are unchanged, but the surface must not read like the Google Cloud
+Console. An ID token identifies the user but authorises no read, so it could never discover a
+project or a key; it is no longer the Settings entry point, and the Credential Manager identity
+layer was removed with it. Settings leads with the account card and keeps the manual key directly
+under it, because a manual key is a fallback for the same job, not a different feature.
 
+- **The project level is named for what it is to the user.** A Gemini API key belongs to a Google
+  Cloud project, so the card says "Gemini project" and explains that relationship once, in help
+  text; it never presents a Cloud Console, and its failure and not-configured copy talks about
+  signing in with Google rather than about Cloud access or OAuth client ids.
+- **Rate limits are per project, not per key — say so, and link out.** The documented rule is that
+  limits apply to the project, so a second key cannot buy a second quota and a real limit can only
+  be read in AI Studio. The key card states the rule and the usage screen links to Google's
+  rate-limit page; Voxora never estimates a limit and never renders one as `0`. Key creation is
+  likewise AI Studio's job — `list`/`get` return no secret, so the app links out rather than
+  implying it can recover a key.
 - **`GoogleCloudAuthorizer`** requests an OAuth access token through Google Identity Services
   (`Identity.getAuthorizationClient(activity).authorize(request)`), asking for exactly
   `CloudScopes.ALL` — `cloud-platform.read-only`, `monitoring.read` and `userinfo.email`, all
@@ -690,6 +707,7 @@ A task is NOT done until:
   - `LogSeverityTest` (app) — the severity → role mapping behind the Logs colours: INFO → success, WARN → warning, ERROR → danger, DEBUG → neutral, every severity the product emits has a role, DEBUG is the only neutral one, an unrecognised severity is neutral and **never** success, and the lookup is case-insensitive (see §9).
   - `LogLineFormatTest` (app) — the one line shape every copy path shares: timestamp then level then `[tag]` then message, millisecond precision, every level padded to the same width so the tag starts in one column, the message appended verbatim (a log line is evidence), and empty fields still producing the shape. Pins the default `TimeZone` to UTC and restores it, so the expected string does not depend on where the suite runs (see §9).
   - `ChunkQueueTest`, `ReaderSpoolTest` — chunking and spool contracts.
+- **The background-playback surfaces add no new pure-JVM rule, deliberately.** The notification's previous/next and the bubble's stop call the same `ReaderController.jumpToSegment` / `stop` the screen already uses, and their bounds are the ones `ReaderSegmentNavigationTest` pins; the bubble preference is a plain boolean with a DataStore default. Adding a second step rule (and a second test) would be duplication, so the honest statement is that these surfaces are compile-checked by CI and device-verification items, not that they carry a new unit contract.
 - Do not weaken or delete these tests to make a change pass. If a contract genuinely changes, update the contract text in `AGENTS.md` and the test in the same commit.
 - A regression test is only worth having if it fails against the bug. The four header/footer/line-floor cases in `PdfReadingOrderTest` were verified to fail against the pre-fix implementation at `707cc3c` and pass against the fix; keep that property when editing them.
 - `:core` owns its own test dependencies (`junit`, `org.json`) in `core/build.gradle.kts` — do not assume the `:app` test classpath applies to a library module.
@@ -715,5 +733,6 @@ A task is NOT done until:
 ---
 
 *Last updated: auto-generated by Claude for Voxora project — the segment-card-only turn, the
-initial-playback gate that waits for the selected-language text, and the severity/selection pass
-over the Logs viewer.*
+initial-playback gate that waits for the selected-language text, the severity/selection pass over
+the Logs viewer, the Gemini product model in Settings, and the Reader's floating bubble and
+notification transport controls.*
