@@ -17,6 +17,7 @@
     <string name="logs_share">اشتراک‌گذاری</string>
     <string name="logs_clear">پاک کردن</string>
     <string name="logs_entry_count">تعداد لاگ‌ها: %1$d</string>
+    <string name="logs_select_hint">برای انتخاب و کپی یک لاگ، انگشتت را روی همان خط نگه دار.</string>
     <string name="logs_empty">هنوز لاگی ثبت نشده.</string>
     <string name="logs_copied">لاگ‌ها کپی شد</string>
     <string name="logs_share_chooser">اشتراک‌گذاری لاگ‌ها</string>

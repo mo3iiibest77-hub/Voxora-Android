@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
@@ -83,6 +84,12 @@ import com.voxora.app.util.VoxoraLog
  * plus an icon, and the row clipped or wrapped. The actions now live in the header as icon
  * buttons, each carrying its localized label as its accessibility description, so nothing is
  * narrower than the language needs and screen readers still announce words rather than shapes.
+ *
+ * ## Selecting one entry
+ * Each line is its own `SelectionContainer`, so a long press selects within that entry and Copy
+ * takes just that entry — a single failure can be lifted out without dragging the whole buffer
+ * along. The header's Copy-all, Share and Clear stay, because "send everything" is a different
+ * job from "send this one line".
  */
 @Composable
 fun LogsScreen(
@@ -206,11 +213,22 @@ private fun LogsContent(
             )
         }
 
-        Text(
-            text = stringResource(R.string.logs_entry_count, entries.size),
-            style = MaterialTheme.typography.labelMedium,
-            color = colors.onSurfaceVariant,
-        )
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = stringResource(R.string.logs_entry_count, entries.size),
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.onSurfaceVariant,
+            )
+            if (hasEntries) {
+                // Long-press selection is not discoverable on its own, and this screen exists so
+                // someone can hand one specific line to support.
+                Text(
+                    text = stringResource(R.string.logs_select_hint),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.onSurfaceVariant,
+                )
+            }
+        }
 
         Surface(
             modifier = Modifier
@@ -243,13 +261,19 @@ private fun LogsContent(
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
                         items(entries) { entry ->
-                            Text(
-                                text = entry.formatted(),
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                                color = severityColor(entry.level),
-                                modifier = Modifier.fillMaxWidth(),
-                            )
+                            // One selection container per entry, so a long press selects inside
+                            // that line and Copy takes exactly that entry. Wrapping the whole list
+                            // instead would let a selection run across lines the user never meant
+                            // to touch, which is the opposite of "copy this one error".
+                            SelectionContainer {
+                                Text(
+                                    text = entry.formatted(),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = severityColor(entry.level),
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+                            }
                         }
                     }
                 }
@@ -293,16 +317,17 @@ private fun LogAction(
 /**
  * Severity colour.
  *
- * Material 3 models no severity role, so these read the product's semantic roles and the theme's
- * text roles instead of literal hex: a failure is the same red as a stopped Reader, a warning is
- * the warm accent, and info/debug are ordinary and dimmed body text.
+ * The severity-to-role decision lives in [LogSeverity], not here: Material 3 models no severity
+ * role, so the screen maps the role onto the product's semantic colours and the theme's text
+ * roles. A failure is the same red as a stopped Reader, a warning is the warm accent, and info is
+ * the same green the product uses for "working", while debug stays ordinary dimmed body text.
  */
 @Composable
-private fun severityColor(level: VoxoraLog.Level): Color = when (level) {
-    VoxoraLog.Level.ERROR -> VoxoraColors.danger
-    VoxoraLog.Level.WARN -> VoxoraColors.warning
-    VoxoraLog.Level.INFO -> MaterialTheme.colorScheme.onSurface
-    VoxoraLog.Level.DEBUG -> MaterialTheme.colorScheme.onSurfaceVariant
+private fun severityColor(level: VoxoraLog.Level): Color = when (LogSeverity.tone(level.name)) {
+    LogSeverityTone.SUCCESS -> VoxoraColors.success
+    LogSeverityTone.WARNING -> VoxoraColors.warning
+    LogSeverityTone.DANGER -> VoxoraColors.danger
+    LogSeverityTone.NEUTRAL -> MaterialTheme.colorScheme.onSurfaceVariant
 }
 
 @Preview(showBackground = true, uiMode = UI_MODE_NIGHT_YES)

@@ -1,9 +1,6 @@
 package com.voxora.app.util
 
 import android.util.Log
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -23,10 +20,11 @@ object VoxoraLog {
         val tag: String,
         val message: String,
     ) {
-        fun formatted(): String {
-            val ts = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date(timeMs))
-            return "$ts ${level.name.padEnd(5)} [$tag] $message"
-        }
+        /**
+         * The entry as one line. Delegates to [LogLineFormat] so the copy-all text, the share
+         * text and a single entry copied from the list are all produced by the same rule.
+         */
+        fun formatted(): String = LogLineFormat.format(timeMs, level.name, tag, message)
     }
 
     private val entries = CopyOnWriteArrayList<Entry>()
