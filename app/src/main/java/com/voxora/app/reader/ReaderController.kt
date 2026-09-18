@@ -281,13 +281,17 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
             }
         }
         try {
+            var current = prepare(position.chunk, position.segment, MAX_UNIT_ATTEMPTS)
+            var next = prefetch(position.chunk + 1)
+            // The run's first unit must already have its selected-language text before a single
+            // frame is audible, so the wait happens here — before the output track is started, so
+            // the app does not sit holding audio focus in silence while that unit is synthesised.
+            awaitInitialRendering(current, position.segment, language, run, position.revision)
             try {
                 output.start()
             } catch (e: Exception) {
                 throw NarrationFailure(R.string.reader_audio_unavailable)
             }
-            var current = prepare(position.chunk, position.segment, MAX_UNIT_ATTEMPTS)
-            var next = prefetch(position.chunk + 1)
             while (true) {
                 currentCoroutineContext().ensureActive()
                 try {
@@ -332,6 +336,55 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
                 // A run boundary is the natural point to force the batched usage record to disk,
                 // so a finished narration is fully accounted for even if the process dies later.
                 usageRecorder.flush()
+            }
+        }
+    }
+
+    /**
+     * Waits until the unit a run starts on has a selected-language rendering.
+     *
+     * This is the only place the narration path waits for text, and it waits for exactly one
+     * unit. Every later unit keeps streaming as the producer writes it, so the Reader never
+     * blocks on the whole document and nothing large is translated up front.
+     *
+     * The reading text *is* the Gemini transcript, so this wait is what buys the ordering the
+     * product needs: the producer finishes this unit and records its rendering, and only then
+     * does playback start — from the audio the spool buffered while the unit was produced.
+     *
+     * Every read happens under [lock]. The producer ends the unit and records the rendering in
+     * one critical section, but it publishes the spool snapshot *before* recording, so observing
+     * the snapshot alone would not make the rendering visible; taking the lock is what
+     * establishes the happens-before edge, and it also keeps the plain map inside
+     * [ReaderDisplayText] from being read while it is written.
+     *
+     * Failure is terminal rather than something to wait out, and it does not drain partial audio:
+     * a unit whose transcript never arrived has no selected-language text, so playing it would be
+     * precisely the "audio first, text later" behaviour this gate exists to prevent.
+     */
+    private suspend fun awaitInitialRendering(
+        slot: Slot,
+        unit: Int,
+        language: String,
+        run: Long,
+        revision: Long,
+    ) {
+        while (true) {
+            currentCoroutineContext().ensureActive()
+            val rendering: String?
+            val failed: Boolean
+            synchronized(lock) {
+                checkOwned(run, revision)
+                val snapshot = slot.spool.state.value
+                rendering = displayText.text(language, slot.index, unit)
+                failed = snapshot.ends.any { it.index == unit } ||
+                    snapshot.failure?.unit == unit ||
+                    snapshot.complete ||
+                    slot.producer?.isCompleted == true
+            }
+            when (ReaderInitialPlayback.gate(rendering, failed)) {
+                ReaderInitialPlayback.Gate.READY -> return
+                ReaderInitialPlayback.Gate.FAILED -> throw NarrationFailure(R.string.reader_retry_unit)
+                ReaderInitialPlayback.Gate.AWAIT -> delay(10)
             }
         }
     }
@@ -454,7 +507,15 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
         try {
             for (unit in slot.spool.firstUnit until slot.units.size) {
                 val marker = AudibleUnit(unit, output.writtenFrames)
-                synchronized(lock) { audible.addLast(marker) }
+                synchronized(lock) {
+                    // A unit the producer has already finished carries its transcript with it.
+                    // Seeding it here means the first audible progress report is published with
+                    // the real narration line instead of an empty one — which is exactly the case
+                    // for the gated first unit, whose transcript is known before playback starts.
+                    slot.spool.state.value.ends.firstOrNull { it.index == unit }
+                        ?.let { marker.transcript = it.transcript }
+                    audible.addLast(marker)
+                }
                 while (true) {
                     currentCoroutineContext().ensureActive()
                     progress()
