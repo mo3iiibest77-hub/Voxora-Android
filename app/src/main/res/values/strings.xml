@@ -21,6 +21,14 @@
     <string name="action_show_key">Show API key</string>
     <string name="action_hide_key">Hide API key</string>
     <string name="action_view_logs">View logs</string>
+    <string name="logs_title">Logs</string>
+    <string name="logs_copy">Copy</string>
+    <string name="logs_share">Share</string>
+    <string name="logs_clear">Clear</string>
+    <string name="logs_entry_count">Log entries: %1$d</string>
+    <string name="logs_empty">No log entries yet.</string>
+    <string name="logs_copied">Logs copied</string>
+    <string name="logs_share_chooser">Share logs</string>
     <string name="settings_title">Settings</string>
     <string name="settings_section_appearance">Appearance</string>
     <string name="settings_section_gemini">Gemini</string>
