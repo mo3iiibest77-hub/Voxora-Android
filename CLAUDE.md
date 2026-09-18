@@ -148,19 +148,21 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
 ### Actual repository state (inspected, not assumed):
 - `main`: `1f0a719 fix(reader): fix suspend output language persistence`.
 - `feat/reader-segmented-spooling` (the implementation branch) HEAD is
-  `7f47805 feat(reader): synchronize display language with narration language`, on
-  top of `a9b9336 fix(settings): align settings and overlay UI with reader design`.
-  It carries the Reader quality pass — `925ee1d feat(reader): redesign the reader screen`,
+  `1504669 refactor(i18n): drive every language picker from one catalog`, on top of
+  `882ab27 fix(reader): keep the reader usable while a document is extracting`,
+  `1c0df1e fix(reader): refresh reading text as soon as a unit is narrated` and the
+  earlier `06a3bb3`/`7f47805`/`a9b9336`. It carries the Reader quality pass —
+  `925ee1d feat(reader): redesign the reader screen`,
   `72527e7 feat(reader): expose the loaded document name`,
   `f644d2f feat(reader): map language catalog to deterministic flags`,
   `b0d556d fix(reader): preserve pdf reading order`,
   `a74db6c fix(reader): define fluent and faithful narration semantics` — plus the
   reading-order fix `6d826e0 fix(reader): de-interleave pdf columns when a page
-  carries a running header` and the documentation commits. **17 commits ahead of
+  carries a running header` and the documentation commits. **21 commits ahead of
   `main` (`1f0a719`)**, pushed to `origin`, and **not merged**. CI is green at
   `7f47805` (run `35294468431`, both jobs) and at `707cc3c` (run #66); the
-  reading-order fix and the two commits above land on top of that and are
-  CI-verified separately.
+  reading-order fix, the settings/overlay pass and the three commits above land on
+  top of that and are CI-verified separately.
 - `feat/ci-feature-branch` = `76f0c96` + `dcbf852 ci: run Android CI on feature
   branch`, with **PR #2 open to `main`** (still open; deliberately NOT merged).
 - IMPORTANT — how CI actually runs: the failing run `35279422099`
@@ -175,7 +177,141 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
   `GeminiReaderSession`, language catalog, document persistence, and a
   foreground `mediaPlayback` service. Live Dub is untouched.
 
-### Last change (this session) — Settings/overlay visual pass + display-language sync
+### Last change (this session) — Reader refresh, extraction gates, one language catalog
+
+Three commits, all pushed to `feat/reader-segmented-spooling`:
+
+- `1c0df1e fix(reader): refresh reading text as soon as a unit is narrated`
+- `882ab27 fix(reader): keep the reader usable while a document is extracting`
+- `1504669 refactor(i18n): drive every language picker from one catalog`
+
+**DONE — 1. The reading text follows the narration in real time.**
+The reported defect was a Persian PDF with English selected: the audio was English
+but the visible text stayed Persian. The transcript was never wrong — `narrate()`
+already returns it in the selected language, and `produce()` already stored it in
+`ReaderDisplayText`. The bug was that `produce()` stored it **without republishing**,
+so `ReaderScreen` kept the previously published list (the extracted source) until
+some unrelated event republished: the next chunk transition, or an audible-progress
+tick. That is why the text appeared to lag the narration by a chunk.
+
+The fix is one guarded republish inside the existing ownership check, using a new
+pure-JVM rule `ReaderDisplayText.shouldRepublish(language, chunk, displayedLanguage,
+displayedChunk)`. It republishes only when the rendering belongs to **both** the chunk
+on screen and the language being displayed, because production runs ahead of playback:
+republishing unconditionally would drag the UI onto a prefetched chunk or back onto a
+language the reader has already left. Prefetched chunks are still cached, so they are
+ready the moment the reader arrives. Language-cache isolation and the canonical
+extracted document are untouched.
+
+`publish()` also now preserves `state.error` when it republishes the `ERROR` phase.
+Republishing became routine, and dropping the message would have erased the failure
+reason the user needs to see; any other phase transition still clears it.
+
+**DONE — 2. The Reader no longer looks locked while a document is extracting.**
+Restoring the last PDF and extracting a large one both hold `EXTRACTING` for a while.
+During that window the document card claimed "no document loaded" and the reading
+mode, narration language and file picker were all disabled — back navigation worked,
+but the screen read as frozen.
+
+Every gate now lives in one pure-JVM object, `reader/ReaderGates.kt`, which both
+`ReaderScreen` and `ReaderViewModel` call so they cannot disagree. Mode and language
+are only preferences and never touch extraction, so they now freeze only while
+narration is actually running. Picking another document stays available during
+extraction because `ReaderController.startLoad` already serializes loads
+(`cancelAndJoin` behind a generation bump) — it is a supported cancellation, not a
+race. Playback still refuses to start before the queue is ready, and chunk/segment
+navigation still needs a document. The document card now shows an indeterminate bar
+with a "reading document" title and body, in English and Persian.
+
+`ReaderPhase`/`ReaderState` moved into their own file (`reader/ReaderState.kt`, no
+`android.*`) so `ReaderGates` is testable on a plain JVM. No call sites changed.
+
+**DONE — 3. One language catalog.**
+`SettingsScreen.kt` held two hand-typed lists — 14 dubbing languages and 7 app
+languages — while `ReaderLanguages.all` already described 99. Both are deleted. The
+dubbing dropdown now calls the very same `languageOptions(locale, query)` the Reader's
+narration sheet uses, so the two are identical in count, order, labels and flags by
+construction. The app-language dropdown reads the new `core/.../i18n/AppLocales.kt`,
+which lists the locales actually packaged in the APK and must stay in step with
+`resourceConfigurations`; it names each entry in its own language so a user who cannot
+read the current UI language can still find theirs. Both resolve names and flags
+through `ReaderLanguages`, so a language is never described two ways.
+
+The three preferences stay separate — app UI locale, Reader narration language
+(`readerOutputLang`) and Live Dub target language (`targetLanguage`) answer different
+questions and have different defaults. Only the catalog was unified, never the
+preference. `ReaderLanguages.languageOrNull` was added for callers that must not
+invent a language for an unknown code.
+
+**Objective 4 (Live Dub) — untouched and safe.** No file under `app/.../dub/**`,
+`GeminiLiveSession.kt` or `GeminiLiveConfig.kt` was modified. `DubService` still reads
+`prefs.targetLanguage` and passes it to `translationConfig.targetLanguageCode`. The
+only change that touches Dub at all is that its dropdown now offers the full catalog
+instead of 14 codes; an unsupported code already surfaces as `GeminiStatus.Error`
+through the existing path (`GeminiLiveSession.handleMessage` → `DubService.setErrorAndStop`),
+so this cannot break the pipeline.
+
+**Objective 5 (Google Sign-In) — out of scope, untouched.**
+**Objective 6 (PDF reading order) — untouched.** `PdfReadingOrder.kt` and
+`TextExtractor.kt` were not modified; `PdfReadingOrderTest` and `ReaderPipelineOrderTest`
+stay green.
+
+**Tests added (32 new, 134 total).**
+`ReaderDisplayRefreshTest` (9) — immediate republish for the displayed chunk and
+language, no republish for a prefetched chunk or an abandoned language, no refresh on
+a rejected rendering, per-unit appearance with the chunk's shape preserved, language
+switching, unchanged canonical source, moving between chunks.
+`ReaderStartupGatesTest` (8) — settings and the file picker available during
+extraction, playback never before the queue is ready, navigation needs a document,
+**no phase is ever fully locked**, configuration freezes only while narrating.
+`LanguageCatalogTest` (8) — full-catalog coverage without duplicates, labels/flags from
+the catalog, deterministic order, search that filters without reordering, endonym and
+secondary-label rules, the app-locale subset, unknown-code normalization.
+`AppLocalesTest` (7) — uniqueness, membership in the one catalog, no silently dropped
+locale, display name and flag present, strict subset of the Gemini output catalog.
+
+Each new contract was proven to catch its defect by mutation: making `shouldRepublish`
+return `true` unconditionally fails 3 tests; restoring the old "EXTRACTING locks the
+settings" behaviour fails 3; allowing playback before the queue is ready fails 1;
+adding a shipped locale that is not in the catalog fails 4.
+
+**Validation actually performed (no Gradle was run).** Compiled the pure-JVM
+Reader/core sources with `kotlinc 2.0.21` against the pinned dependency jars and ran
+the JUnit classes directly with `-ea` (matching Gradle's test JVM): **134 tests, OK**
+across 12 classes. `SettingsScreen.kt`, `ReaderScreen.kt`, `ReaderViewModel.kt` and the
+other Android-dependent files cannot be compiled on the dev server, so the debug-APK
+job is their real check.
+
+**CI status: GREEN — VERIFIED.** Pushing `1504669` triggered `Android CI` run
+**`35297963994`** (run **#70**, event `push`, branch `feat/reader-segmented-spooling`,
+created 2026-09-18T02:05:29Z): `Unit tests` success (including the `Run unit tests`
+step, which runs `gradle :core:testDebugUnitTest :app:testDebugUnitTest`) and
+`Assemble debug APK` success (including `Assemble debug` and `Upload debug APK`). The
+workflow has no `continue-on-error`, so a green `Run unit tests` step is a genuine
+pass and a green `Assemble debug` step is a genuine compile check of the Compose
+changes.
+
+**IN PROGRESS:** nothing — all three objectives are implemented, tested and
+CI-verified on this branch.
+
+**BLOCKED:** nothing.
+
+**NEXT (do not start before the above is read):**
+- The Live Dub target-language list is now the full 99-code catalog. Gemini Live
+  Translate may support a narrower set. If it does, encode that as a **capability
+  filter over `ReaderLanguages.all` with a documented source** — never as a second
+  hand-typed list, which is exactly what this session removed.
+- Real-device check for Objective 1: Persian PDF + English narration should swap each
+  unit's visible text as it is spoken, without waiting for the chunk to end.
+- Real-device check for Objective 2: restore a large PDF and confirm the card shows
+  the progress bar, mode/language/file picker stay usable, and Play stays disabled
+  until the document is ready.
+- The Reader still shows the extracted source for units not yet narrated in the
+  selected language. That is the documented contract, not a bug — do not "fix" it by
+  translating ahead, and do not claim in UI copy that the document is translated up
+  front.
+
+### Previous change — Settings/overlay visual pass + display-language sync
 
 Two commits, both pushed to `feat/reader-segmented-spooling`:
 
