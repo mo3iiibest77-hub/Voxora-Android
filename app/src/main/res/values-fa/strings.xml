@@ -208,9 +208,7 @@
     <string name="reader_language_change">تغییر زبان</string>
     <string name="reader_page_chunk">بخش %1$d از %2$d</string>
     <string name="reader_page_section">صفحهٔ خواندن</string>
-    <string name="reader_page_hint">هر بخش یک صفحه است. برای جابه‌جایی در سند، چپ یا راست بکشید یا از فلش‌ها استفاده کنید. برای شروع از هر پاراگراف، روی آن بزنید.</string>
-    <string name="reader_page_previous">صفحهٔ قبلی</string>
-    <string name="reader_page_next">صفحهٔ بعدی</string>
+    <string name="reader_page_hint">هر صفحه یک قطعه از روایت است. برای جابه‌جایی بین قطعه‌های همین بخش، چپ یا راست بکشید یا از فلش‌ها استفاده کنید. دکمه‌های پایین بخش را عوض می‌کنند.</string>
     <string name="reader_page_preparing">در حال آماده‌سازی متن %1$s</string>
     <string name="reader_segment_preparing">در حال آماده‌سازی</string>
     <string name="reader_segment_now">در حال روایت</string>

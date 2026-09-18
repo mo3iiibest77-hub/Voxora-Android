@@ -94,6 +94,7 @@ import com.voxora.app.ui.theme.VoxoraTheme
 import com.voxora.core.gemini.ReaderNarrationModes
 import com.voxora.core.i18n.AppLocales
 import kotlin.math.abs
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 /**
@@ -185,8 +186,8 @@ private fun ReaderContent(
     onPlay: () -> Unit,
     onPause: () -> Unit,
     onStop: () -> Unit,
-    onJumpToChunk: (Int) -> Unit,
-    onJumpToSegment: (Int) -> Unit,
+    onJumpToChunk: (Int) -> Boolean,
+    onJumpToSegment: (Int) -> Boolean,
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
@@ -734,23 +735,29 @@ private fun ActiveHalo(
 }
 
 /**
- * The reading page: exactly one chunk, turned like a page.
+ * The reading page: exactly one narration unit of the current chunk.
  *
- * Only the current chunk is composed — a 210-chunk document still renders one page — and
- * page turns go through the controller's existing `jumpToChunk`, so there is no second
- * navigation state machine and no per-frame work proportional to the document.
+ * The page shows the unit the reader is on, and the horizontal swipe moves to the next or
+ * previous unit **inside this chunk**. A swipe never changes the chunk: the rule the gesture
+ * uses ([ReaderPager.swipeStep]) is bounded by the chunk's unit count, so it cannot express
+ * a chunk move at all. Changing chunks is the explicit Previous/Next controls at the bottom
+ * of the page, which call the controller's existing `jumpToChunk`. Chunk navigation and
+ * segment navigation are therefore two independent things, and only one of them is a swipe.
  *
- * Horizontal drags turn the page; the drag direction is interpreted logically, so a
- * Persian (RTL) reader dragging towards the next page still advances. Vertical drags are
- * left to the surrounding list, so the screen still scrolls normally.
+ * A release that does not cross the threshold animates the card back to **exactly** zero
+ * offset; a release that does cross it animates the current unit out towards the side the
+ * finger was already moving, changes the segment index exactly once through
+ * `jumpToSegment`, and brings the arriving unit in from the opposite side. The offset is
+ * state rather than a one-shot effect, so no stale displacement can survive recomposition,
+ * and the turn guard makes rapid repeated swipes resolve one at a time.
  */
 @Composable
 private fun ChunkPage(
     state: ReaderState,
     languageLabel: String,
     languageFlag: String,
-    onJumpToChunk: (Int) -> Unit,
-    onJumpToSegment: (Int) -> Unit,
+    onJumpToChunk: (Int) -> Boolean,
+    onJumpToSegment: (Int) -> Boolean,
     modifier: Modifier = Modifier,
 ) {
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
@@ -759,68 +766,160 @@ private fun ChunkPage(
     val travel = with(density) { PAGE_ENTER_TRAVEL_DP.dp.toPx() }
     val maxDrag = with(density) { PAGE_MAX_DRAG_DP.dp.toPx() }
 
-    val index = state.chunk - 1
-    val total = state.total
+    val chunkIndex = state.chunk - 1
+    val chunkTotal = state.total
+    val segmentIndex = ReaderPager.segmentIndex(state.segment, state.segmentTotal)
+    // Derived together with the index so an inconsistent state can never become an invalid
+    // list access: no index, no text, no card.
+    val segmentText = segmentIndex?.let(state.segments::getOrNull)
+    val canNavigate = ReaderGates.canNavigate(state.phase, chunkTotal > 0)
+    val narrating = ReaderGates.isNarrating(state.phase)
 
     var drag by remember { mutableFloatStateOf(0f) }
+    var presence by remember { mutableFloatStateOf(1f) }
     var turning by remember { mutableStateOf(false) }
     var forward by remember { mutableStateOf(true) }
-    val exit = remember { Animatable(1f) }
+    // The settle-back animation, kept so a new gesture cancels it instead of racing it. Two
+    // writers on the same offset would otherwise leave the card jittering mid-return.
+    var settleJob by remember { mutableStateOf<Job?>(null) }
     val scope = rememberCoroutineScope()
 
-    // Clearing the turn guard is also the safety net for a chunk the pipeline advanced
-    // on its own (narration reaching the next chunk) while a turn was in flight.
-    LaunchedEffect(state.chunk) { turning = false }
-
-    fun requestTurn(turn: PageTurn) {
-        if (turning) return
-        val target = ReaderPager.target(index, turn, total) ?: return
-        forward = turn == PageTurn.NEXT
-        turning = true
+    // Whenever the displayed unit changes — by a swipe, by the explicit controls, or because
+    // the narration advanced on its own — the page must be at rest with no offset left over.
+    // Resetting here rather than immediately after the jump is also what makes the swap
+    // seamless: the outgoing unit has already receded and faded by the time the arriving one
+    // is composed, so it is never flashed back at full opacity.
+    LaunchedEffect(state.chunk, state.segment) {
         drag = 0f
+        presence = 1f
+        turning = false
+    }
+
+    /** Returns the card to exactly its resting position, never a partially shifted one. */
+    suspend fun settle(from: Float) {
+        if (from == 0f) {
+            drag = 0f
+            return
+        }
+        animate(from, 0f, animationSpec = tween(durationMillis = PAGE_RETURN_MS)) { value, _ ->
+            drag = value
+        }
+        // The resting offset is exact, not merely where the interpolation happened to stop.
+        drag = 0f
+    }
+
+    /**
+     * A completed swipe: the current unit recedes and fades towards the side the finger was
+     * already moving, then the controller is asked for exactly one segment step. The arriving
+     * unit is composed by [LaunchedEffect] above at zero offset and slides in from the
+     * opposite side.
+     */
+    fun requestSegmentTurn(step: SegmentStep) {
+        if (turning) return
+        settleJob?.cancel()
+        settleJob = null
+        forward = step.turn == PageTurn.NEXT
+        turning = true
+        val enterFrom = ReaderPager.enterOffset(forward, rtl) * travel
+        val released = drag
         scope.launch {
-            // The page the reader is leaving recedes before the new one arrives.
-            exit.animateTo(0f, tween(durationMillis = PAGE_EXIT_MS))
-            onJumpToChunk(target)
-            // The controller publishes synchronously and the arriving page is composed at
-            // zero presence, so restoring here only affects the new page. It also covers
-            // the controller refusing the move: this is then still the current page and
-            // must not be left invisible.
-            exit.snapTo(1f)
-            turning = false
+            launch {
+                animate(
+                    released,
+                    -enterFrom,
+                    animationSpec = tween(durationMillis = PAGE_EXIT_MS),
+                ) { value, _ -> drag = value }
+            }
+            animate(presence, 0f, animationSpec = tween(durationMillis = PAGE_EXIT_MS)) { value, _ ->
+                presence = value
+            }
+            if (!onJumpToSegment(step.target)) {
+                // The controller refused the step, so nothing moved. Bring the page back to
+                // rest instead of leaving it faded out and off to the side.
+                launch {
+                    animate(
+                        -enterFrom,
+                        0f,
+                        animationSpec = tween(durationMillis = PAGE_RETURN_MS),
+                    ) { value, _ -> drag = value }
+                }
+                animate(presence, 1f, animationSpec = tween(durationMillis = PAGE_ENTER_MS)) { value, _ ->
+                    presence = value
+                }
+                drag = 0f
+                presence = 1f
+                turning = false
+            }
         }
     }
 
-    val gesture = Modifier.pointerInput(index, total, rtl) {
+    /** An explicit chunk move: the page recedes and the arriving chunk fades in at rest. */
+    fun requestChunkTurn(target: Int, next: Boolean) {
+        if (turning) return
+        settleJob?.cancel()
+        settleJob = null
+        forward = next
+        turning = true
+        scope.launch {
+            animate(presence, 0f, animationSpec = tween(durationMillis = PAGE_EXIT_MS)) { value, _ ->
+                presence = value
+            }
+            drag = 0f
+            if (!onJumpToChunk(target)) {
+                animate(presence, 1f, animationSpec = tween(durationMillis = PAGE_ENTER_MS)) { value, _ ->
+                    presence = value
+                }
+                turning = false
+            }
+        }
+    }
+
+    val gesture = Modifier.pointerInput(segmentIndex, state.segmentTotal, rtl, canNavigate) {
+        if (!canNavigate) return@pointerInput
         detectHorizontalDragGestures(
+            onDragStart = {
+                // A new gesture takes over the offset; the return animation must not keep
+                // writing to it.
+                settleJob?.cancel()
+                settleJob = null
+            },
             onDragEnd = {
                 val released = drag
                 drag = 0f
-                val turn = ReaderPager.turnFor(released, rtl, threshold)
-                if (turn != null) {
-                    requestTurn(turn)
+                // Segment-scoped by construction: the rule is bounded by this chunk's unit
+                // count, so no gesture can carry the reader into another chunk.
+                val step = ReaderPager.swipeStep(
+                    current = segmentIndex ?: 0,
+                    deltaX = released,
+                    rtl = rtl,
+                    threshold = threshold,
+                    segmentTotal = state.segmentTotal,
+                )
+                if (step != null) {
+                    requestSegmentTurn(step)
                 } else {
-                    scope.launch { animate(0f, released) { value, _ -> drag = value } }
+                    settleJob = scope.launch { settle(released) }
                 }
             },
             onDragCancel = {
                 val released = drag
                 drag = 0f
-                scope.launch { animate(0f, released) { value, _ -> drag = value } }
+                settleJob = scope.launch { settle(released) }
             },
         ) { change, delta ->
-            change.consume()
-            drag = (drag + delta).coerceIn(-maxDrag, maxDrag)
+            if (!turning) {
+                change.consume()
+                drag = (drag + delta).coerceIn(-maxDrag, maxDrag)
+            }
         }
     }
 
-    key(index) {
-        // Fresh per page: the incoming page is composed at zero presence from its very
-        // first frame, so a turn never flashes the new text at full opacity first.
+    key(segmentIndex) {
+        // Fresh per unit: the arriving unit is composed at zero presence from its very first
+        // frame, so a turn never flashes the new text at full opacity first.
         val enter = remember { Animatable(0f) }
         LaunchedEffect(Unit) { enter.animateTo(1f, tween(durationMillis = PAGE_ENTER_MS)) }
 
-        val presence = enter.value * exit.value
         val dragFade = 1f - (abs(drag) / maxDrag) * 0.5f
         val direction = ReaderPager.enterOffset(forward, rtl)
 
@@ -829,7 +928,7 @@ private fun ChunkPage(
                 .fillMaxWidth()
                 .graphicsLayer {
                     translationX = drag + direction * travel * (1f - enter.value)
-                    alpha = (presence * dragFade).coerceIn(0f, 1f)
+                    alpha = (presence * enter.value * dragFade).coerceIn(0f, 1f)
                 }
                 .then(gesture),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -840,7 +939,7 @@ private fun ChunkPage(
             )
             ChunkHeader(
                 chunk = state.chunk,
-                total = total,
+                total = chunkTotal,
                 segment = state.segment,
                 segmentTotal = state.segmentTotal,
                 languageFlag = languageFlag,
@@ -851,20 +950,48 @@ private fun ChunkPage(
                     unitCount = state.segmentTotal,
                 ),
             )
-            state.segments.forEachIndexed { unit, text ->
+            if (segmentIndex != null && segmentText != null) {
                 SegmentCard(
-                    text = text,
-                    current = unit == state.segment - 1,
-                    preparing = ReaderPageText.isPreparing(state.phase, state.pendingSegments, unit),
-                    enabled = ReaderGates.canNavigate(state.phase, total > 0),
-                    onClick = { onJumpToSegment(unit) },
+                    text = segmentText,
+                    narrating = narrating,
+                    preparing = ReaderPageText.isPreparing(
+                        phase = state.phase,
+                        pending = state.pendingSegments,
+                        index = segmentIndex,
+                    ),
                 )
             }
+            SegmentTurnRow(
+                position = state.segment,
+                total = state.segmentTotal,
+                canPrevious = segmentIndex != null &&
+                    ReaderPager.target(segmentIndex, PageTurn.PREVIOUS, state.segmentTotal) != null,
+                canNext = segmentIndex != null &&
+                    ReaderPager.target(segmentIndex, PageTurn.NEXT, state.segmentTotal) != null,
+                enabled = canNavigate && !turning,
+                onPrevious = {
+                    val index = segmentIndex
+                    val target = index?.let { ReaderPager.target(it, PageTurn.PREVIOUS, state.segmentTotal) }
+                    if (target != null) requestSegmentTurn(SegmentStep(PageTurn.PREVIOUS, target))
+                },
+                onNext = {
+                    val index = segmentIndex
+                    val target = index?.let { ReaderPager.target(it, PageTurn.NEXT, state.segmentTotal) }
+                    if (target != null) requestSegmentTurn(SegmentStep(PageTurn.NEXT, target))
+                },
+            )
             PageTurnRow(
-                canPrevious = ReaderPager.target(index, PageTurn.PREVIOUS, total) != null,
-                canNext = ReaderPager.target(index, PageTurn.NEXT, total) != null,
-                onPrevious = { requestTurn(PageTurn.PREVIOUS) },
-                onNext = { requestTurn(PageTurn.NEXT) },
+                canPrevious = ReaderPager.target(chunkIndex, PageTurn.PREVIOUS, chunkTotal) != null,
+                canNext = ReaderPager.target(chunkIndex, PageTurn.NEXT, chunkTotal) != null,
+                enabled = canNavigate && !turning,
+                onPrevious = {
+                    ReaderPager.target(chunkIndex, PageTurn.PREVIOUS, chunkTotal)
+                        ?.let { requestChunkTurn(it, next = false) }
+                },
+                onNext = {
+                    ReaderPager.target(chunkIndex, PageTurn.NEXT, chunkTotal)
+                        ?.let { requestChunkTurn(it, next = true) }
+                },
             )
         }
     }
@@ -960,17 +1087,75 @@ private fun ChunkHeader(
 }
 
 /**
- * Page-turn controls.
+ * **Segment** controls: one unit backwards, the position, one unit forwards.
  *
- * No numeric indicator here: the page header already states the chunk and total, and a
- * bare "12 / 210" reorders unpredictably under RTL bidi, which is exactly the kind of
- * mirrored-layout bug this screen must not have. The arrows are auto-mirrored, so
- * "previous" points the way the reader expects in both layout directions.
+ * The swipe already does this; these exist so the same step is reachable without a gesture
+ * and so a screen reader can announce it. They are bounded by the current chunk exactly like
+ * the swipe, so they can never change the chunk either.
+ *
+ * The arrows are auto-mirrored, so "previous" points the way the reader expects in both
+ * layout directions. The position sits between them in the layout's own order, which is why
+ * it is a formatted sentence rather than a bare "3 / 8" — a bare pair of numbers reorders
+ * unpredictably under RTL bidi.
+ */
+@Composable
+private fun SegmentTurnRow(
+    position: Int,
+    total: Int,
+    canPrevious: Boolean,
+    canNext: Boolean,
+    enabled: Boolean,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        IconButton(
+            onClick = onPrevious,
+            enabled = enabled && canPrevious,
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                contentDescription = stringResource(R.string.reader_prev_segment),
+                tint = if (enabled && canPrevious) colors.primary else colors.outline,
+            )
+        }
+        Text(
+            text = stringResource(R.string.reader_segment_progress, position, total),
+            style = MaterialTheme.typography.labelLarge,
+            color = colors.onSurfaceVariant,
+        )
+        IconButton(
+            onClick = onNext,
+            enabled = enabled && canNext,
+        ) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = stringResource(R.string.reader_next_segment),
+                tint = if (enabled && canNext) colors.primary else colors.outline,
+            )
+        }
+    }
+}
+
+/**
+ * **Chunk** controls: the only thing in the Reader that moves between chunks.
+ *
+ * Kept visually distinct from the segment row above it because the two do different things:
+ * the segment row steps inside this chunk, these move the document position. The icons are
+ * decorative — each button carries its own visible label, so announcing them twice would be
+ * noise.
  */
 @Composable
 private fun PageTurnRow(
     canPrevious: Boolean,
     canNext: Boolean,
+    enabled: Boolean,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
     modifier: Modifier = Modifier,
@@ -982,7 +1167,7 @@ private fun PageTurnRow(
     ) {
         OutlinedButton(
             onClick = onPrevious,
-            enabled = canPrevious,
+            enabled = enabled && canPrevious,
             modifier = Modifier
                 .weight(1f)
                 .height(46.dp),
@@ -990,7 +1175,7 @@ private fun PageTurnRow(
         ) {
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                contentDescription = stringResource(R.string.reader_page_previous),
+                contentDescription = null,
                 modifier = Modifier.size(20.dp),
             )
             Spacer(Modifier.width(6.dp))
@@ -998,7 +1183,7 @@ private fun PageTurnRow(
         }
         OutlinedButton(
             onClick = onNext,
-            enabled = canNext,
+            enabled = enabled && canNext,
             modifier = Modifier
                 .weight(1f)
                 .height(46.dp),
@@ -1008,36 +1193,41 @@ private fun PageTurnRow(
             Spacer(Modifier.width(6.dp))
             Icon(
                 imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = stringResource(R.string.reader_page_next),
+                contentDescription = null,
                 modifier = Modifier.size(20.dp),
             )
         }
     }
 }
 
+/**
+ * The narration unit currently on the page.
+ *
+ * Exactly one of these is composed, because the page shows one unit — the swipe moves to the
+ * next one rather than scrolling a list. It is a plain surface rather than a clickable one:
+ * there is nothing left to select within a single unit.
+ */
 @Composable
 private fun SegmentCard(
     text: String,
-    current: Boolean,
+    narrating: Boolean,
     preparing: Boolean,
-    enabled: Boolean,
-    onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
     Surface(
-        onClick = onClick,
-        enabled = enabled,
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        color = if (current) colors.primaryContainer else colors.surfaceContainer,
-        border = BorderStroke(1.dp, if (current) colors.primary else colors.outlineVariant),
+        color = colors.primaryContainer,
+        border = BorderStroke(1.dp, colors.primary),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (current) {
+            // "Now narrating" is a claim about the audio, so it is only shown while the audio
+            // is actually running. A reader who has not pressed Play is still browsing.
+            if (narrating) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
@@ -1073,11 +1263,7 @@ private fun SegmentCard(
                 style = MaterialTheme.typography.bodyLarge,
                 // A unit still being rendered is presented as provisional rather than as
                 // settled selected-language text.
-                color = when {
-                    current -> colors.onPrimaryContainer
-                    preparing -> colors.onSurfaceVariant
-                    else -> colors.onSurface
-                },
+                color = if (preparing) colors.onSurfaceVariant else colors.onPrimaryContainer,
             )
         }
     }
@@ -1306,6 +1492,8 @@ private fun LanguageSheetRow(
 
 private const val PAGE_ENTER_MS = 240
 private const val PAGE_EXIT_MS = 130
+/** Settling a sub-threshold drag back to rest. Short, and it always ends at exactly zero. */
+private const val PAGE_RETURN_MS = 180
 private const val ACTIVE_BREATH_MS = 1500
 private const val PAGE_TURN_THRESHOLD_DP = 56
 private const val PAGE_ENTER_TRAVEL_DP = 40
@@ -1371,8 +1559,8 @@ private fun ReaderScreenPreview(modifier: Modifier = Modifier) {
                 onPlay = {},
                 onPause = {},
                 onStop = {},
-                onJumpToChunk = {},
-                onJumpToSegment = {},
+                onJumpToChunk = { true },
+                onJumpToSegment = { true },
             )
         }
     }
@@ -1412,8 +1600,8 @@ private fun ReaderScreenPreparingPreview(modifier: Modifier = Modifier) {
                 onPlay = {},
                 onPause = {},
                 onStop = {},
-                onJumpToChunk = {},
-                onJumpToSegment = {},
+                onJumpToChunk = { true },
+                onJumpToSegment = { true },
             )
         }
     }
@@ -1439,8 +1627,8 @@ private fun ReaderScreenEmptyPreview(modifier: Modifier = Modifier) {
                 onPlay = {},
                 onPause = {},
                 onStop = {},
-                onJumpToChunk = {},
-                onJumpToSegment = {},
+                onJumpToChunk = { true },
+                onJumpToSegment = { true },
             )
         }
     }

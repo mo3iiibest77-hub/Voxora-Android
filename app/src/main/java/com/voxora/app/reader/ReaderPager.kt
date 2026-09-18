@@ -2,32 +2,46 @@ package com.voxora.app.reader
 
 import kotlin.math.abs
 
-/** A page turn the user asked for. */
+/** One bounded step in a direction, requested by a gesture or by an explicit control. */
 internal enum class PageTurn { NEXT, PREVIOUS }
 
+/** The segment a released swipe lands on, together with the direction it moved in. */
+internal data class SegmentStep(val turn: PageTurn, val target: Int)
+
 /**
- * The Reader's page model: one chunk on screen, turned like a page.
+ * The Reader's position model: one narration unit on screen at a time, stepped one unit.
  *
- * The document is never rendered as one long list. Exactly one chunk is the reading
- * surface — [visible] is the whole set of chunks the UI may compose — and turning a page
- * only ever moves one step and only through the controller's existing `jumpToChunk`, so
- * there is no second navigation state machine and no unbounded work for a 200-chunk PDF.
+ * The Reader has **two independent navigation concepts**, and this model exists to keep
+ * them from being conflated:
  *
- * **Direction is logical, not physical.** In a left-to-right layout the next page sits to
- * the right, so dragging the page leftwards advances. In a right-to-left layout (Persian,
- * Arabic) the next page sits to the left, so the same gesture is mirrored. [turnFor]
- * performs that mapping from the raw drag delta, and [enterOffset] gives the side the
- * incoming page slides in from, so a Persian reader can never get reversed chunk order.
+ * - **chunk navigation** is the explicit Previous/Next controls. It moves the document
+ *   position by one chunk and is the only thing allowed to cross a chunk boundary.
+ * - **segment navigation** is the horizontal swipe. It moves by exactly one narration
+ *   unit *inside the current chunk*, so a document with 129 chunks and 8 units each is
+ *   swiped unit by unit, never chunk by chunk.
  *
- * Pure JVM (no `android.*`) so navigation and RTL behaviour are unit-testable.
+ * [swipeStep] is the whole swipe rule and it can only ever produce a **segment** step:
+ * it is bounded by the current chunk's unit count, so no gesture can carry the reader into
+ * another chunk. [target] is the bounded single-step rule both concepts share; it returns
+ * `null` at either end instead of wrapping or clamping, because a step that cannot happen
+ * must do nothing at all rather than move and snap back.
+ *
+ * **Direction is logical, not physical.** In a left-to-right layout the next unit sits to
+ * the right, so dragging leftwards advances. In a right-to-left layout (Persian, Arabic)
+ * the next unit sits to the left, so the same gesture is mirrored. [turnFor] performs that
+ * mapping and [enterOffset] gives the side the incoming unit slides in from, so a Persian
+ * reader can never get reversed order.
+ *
+ * Pure JVM (no `android.*`) so navigation, the swipe rule and RTL behaviour are all
+ * unit-testable.
  */
 internal object ReaderPager {
 
     /**
-     * The chunk a turn would land on, or null when the turn would leave the document.
+     * The index one step would land on, or null when the step would leave [0, total).
      *
-     * Returning null rather than clamping is deliberate: a page turn that cannot happen
-     * must do nothing at all, so the page never appears to move and then snap back.
+     * Shared by chunk and segment navigation; the caller decides which range it is bounded
+     * by. Returning null rather than clamping is deliberate — see the type comment.
      */
     fun target(current: Int, turn: PageTurn, total: Int): Int? {
         if (total <= 0) return null
@@ -39,15 +53,38 @@ internal object ReaderPager {
     }
 
     /**
-     * The chunk the page surface renders, or null when there is nothing to show.
+     * What a released horizontal swipe does: the segment step it lands on, or null when the
+     * drag was too short or the reader is already at the first/last unit of this chunk.
      *
-     * This is the entire set of chunks the UI is allowed to compose for the document.
+     * Bounded by [segmentTotal] on purpose. A swipe at the last unit returns null and the
+     * page stays put; it must never roll into the next chunk, because that is chunk
+     * navigation and belongs to the explicit controls.
      */
-    fun visible(current: Int, total: Int): Int? = current.takeIf { it in 0 until total }
+    fun swipeStep(
+        current: Int,
+        deltaX: Float,
+        rtl: Boolean,
+        threshold: Float,
+        segmentTotal: Int,
+    ): SegmentStep? {
+        val turn = turnFor(deltaX, rtl, threshold) ?: return null
+        val target = target(current, turn, segmentTotal) ?: return null
+        return SegmentStep(turn, target)
+    }
 
     /**
-     * Maps a horizontal drag to the page turn it means, or null when the drag is too
-     * small to count as a turn.
+     * Zero-based index of the unit currently on the page, or null when [segment] (the
+     * one-based value carried by [ReaderState]) is outside [segmentTotal].
+     *
+     * Deriving the index here instead of in the composable is what keeps an out-of-range
+     * state from being turned into an invalid list access.
+     */
+    fun segmentIndex(segment: Int, segmentTotal: Int): Int? =
+        (segment - 1).takeIf { it in 0 until segmentTotal }
+
+    /**
+     * Maps a horizontal drag to the step it means, or null when the drag is too small to
+     * count as a step.
      */
     fun turnFor(deltaX: Float, rtl: Boolean, threshold: Float): PageTurn? {
         if (threshold <= 0f) return null
@@ -57,7 +94,7 @@ internal object ReaderPager {
     }
 
     /**
-     * Unit direction the incoming page slides in from, in the current layout direction:
+     * Unit direction the incoming unit slides in from, in the current layout direction:
      * `1f` means it enters from the trailing edge, `-1f` from the leading edge.
      */
     fun enterOffset(forward: Boolean, rtl: Boolean): Float {

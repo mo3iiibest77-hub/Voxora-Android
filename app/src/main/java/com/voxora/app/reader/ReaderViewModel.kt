@@ -103,9 +103,22 @@ class ReaderViewModel @Inject constructor(
         controller.setOutputLanguage(language)
     }
 
-    fun jumpToChunk(index: Int) = runCommand { controller.jumpToChunk(index) }
+    /**
+     * Chunk and segment navigation publish **synchronously** on the caller's thread.
+     *
+     * The page animation depends on that. `ReaderController.jumpToChunk` / `jumpToSegment`
+     * mutate the queue position and publish the new [ReaderState] inside one `synchronized`
+     * block, so by the time these return the arriving unit is already the current one and the
+     * page can compose it at zero presence. Routing them through the IO command queue made
+     * the publish asynchronous, which let the outgoing unit flash back at full opacity before
+     * the new one arrived — the page-turn flicker.
+     *
+     * The navigation path is pure state plus a job cancellation, so Main is safe for it. The
+     * genuinely slow work (extraction, narration) still runs on IO.
+     */
+    fun jumpToChunk(index: Int): Boolean = controller.jumpToChunk(index)
 
-    fun jumpToSegment(index: Int) = runCommand { controller.jumpToSegment(index) }
+    fun jumpToSegment(index: Int): Boolean = controller.jumpToSegment(index)
 
     fun load(uri: Uri) = runCommand { controller.load(uri) }
 

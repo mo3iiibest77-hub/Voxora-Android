@@ -5,17 +5,20 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
- * Contract for the Reader's page model.
+ * Contract for the Reader's shared position model.
  *
- * The Reader presents one chunk at a time and turns pages. These tests pin the two
- * properties that make that safe on a 200-chunk PDF and correct in Persian:
+ * [ReaderPager.target] is the bounded single-step rule used by both chunk and segment
+ * navigation, and [ReaderPager.turnFor] / [ReaderPager.enterOffset] are the direction
+ * rules. These tests pin the two properties that make that safe on a 200-chunk PDF and
+ * correct in Persian:
  *
- * - navigation is bounded and single-step, and exactly one chunk is ever the page, so no
- *   amount of turning can render the whole document or skip past its ends;
+ * - a step is bounded and single, so no amount of turning can skip past either end;
  * - "next" and "previous" are logical, not physical. The same finger movement means
  *   opposite things in a left-to-right and a right-to-left layout, and each layout maps
  *   its own gesture to the same logical turn, so a Persian reader cannot get reversed
- *   chunk order.
+ *   order.
+ *
+ * The segment-versus-chunk separation itself is pinned by [ReaderSegmentNavigationTest].
  */
 class ReaderPagerTest {
 
@@ -35,14 +38,6 @@ class ReaderPagerTest {
     fun thereIsNothingToTurnWithoutADocument() {
         assertNull(ReaderPager.target(current = 0, turn = PageTurn.NEXT, total = 0))
         assertNull(ReaderPager.target(current = 0, turn = PageTurn.PREVIOUS, total = 0))
-    }
-
-    @Test
-    fun onlyTheCurrentChunkIsEverThePage() {
-        assertEquals(4, ReaderPager.visible(current = 4, total = 10))
-        assertNull(ReaderPager.visible(current = 10, total = 10))
-        assertNull(ReaderPager.visible(current = -1, total = 10))
-        assertNull(ReaderPager.visible(current = 0, total = 0))
     }
 
     @Test

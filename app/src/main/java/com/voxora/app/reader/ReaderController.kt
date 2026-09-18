@@ -529,18 +529,40 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
         publish(if (queue.size == 0) ReaderPhase.IDLE else ReaderPhase.STOPPED)
     }
 
-    fun jumpToChunk(index: Int) = synchronized(lock) {
-        if (queue.size == 0 || state.value.phase == ReaderPhase.EXTRACTING) return@synchronized
-        queue.jumpTo(index)
+    /**
+     * Whole-chunk navigation: the explicit Previous/Next controls.
+     *
+     * @return true when the position actually moved. The page animation needs to know: a
+     * refused move must return the card to rest rather than leave it faded out, and the
+     * controller is the only layer that can say whether the move happened.
+     */
+    fun jumpToChunk(index: Int): Boolean = synchronized(lock) {
+        if (queue.size == 0 || state.value.phase == ReaderPhase.EXTRACTING) return@synchronized false
+        val target = index.coerceIn(0, maxOf(0, queue.size - 1))
+        if (target == queue.index) return@synchronized false
+        queue.jumpTo(target)
         segmentIndex = 0
         navigate()
+        true
     }
 
-    fun jumpToSegment(index: Int) = synchronized(lock) {
+    /**
+     * Segment navigation: the horizontal swipe and the segment arrows.
+     *
+     * Bounded by the **current chunk's** units, so it can never move the document to another
+     * chunk — that is [jumpToChunk]'s job. An out-of-range index is clamped rather than
+     * rejected, so a stale gesture can never produce an invalid segment index.
+     *
+     * @return true when the position actually moved; see [jumpToChunk].
+     */
+    fun jumpToSegment(index: Int): Boolean = synchronized(lock) {
         val segments = queue.segments(queue.index)
-        if (segments.isEmpty() || state.value.phase == ReaderPhase.EXTRACTING) return@synchronized
-        segmentIndex = index.coerceIn(0, segments.lastIndex)
+        if (segments.isEmpty() || state.value.phase == ReaderPhase.EXTRACTING) return@synchronized false
+        val target = index.coerceIn(0, segments.lastIndex)
+        if (target == segmentIndex) return@synchronized false
+        segmentIndex = target
         navigate()
+        true
     }
 
     private fun navigate() {
