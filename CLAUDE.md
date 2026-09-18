@@ -377,11 +377,11 @@ confirm the previous account's project and key disappear immediately.
   and not merged.** The last CI-verified code head is `9dfc204`: `Android CI` runs #90 (push)
   and #91 (pull_request) both succeeded there (debug APK + unit tests), and
   runs #92/#93 are green for the documentation commit `a96d201`. The three commits of this cycle
-  (`d7ba68c`, `ab726f7`, `f4ee4f1`) are **not yet CI-verified** at the time this line was written —
-  check Actions for their push run before trusting the local suite as their compile check. The runs
-  before `9dfc204` failed on the three compile errors listed above (#86–#89 at
-  `089a71f`/`14e5403`). Older green points were `7f47805` (run `35294468431`, both jobs) and
-  `707cc3c` (run #66).
+  (`d7ba68c`, `ab726f7`, `f4ee4f1`) and the documentation commit `82ddc11` are CI-verified at
+  `82ddc110e` — runs #96 (push) and #97 (pull_request), both jobs success on each, completed
+  2026-09-18T13:21Z. The runs before `9dfc204` failed on the three compile errors listed above
+  (#86–#89 at `089a71f`/`14e5403`). Older green points were `7f47805` (run `35294468431`, both jobs)
+  and `707cc3c` (run #66).
 - `feat/ci-feature-branch` = `76f0c96` + `dcbf852 ci: run Android CI on feature
   branch`, with **PR #2 open to `main`** (still open; deliberately NOT merged).
 - **PR #3 "Feat/reader segmented spooling"** (`feat/reader-segmented-spooling` →
