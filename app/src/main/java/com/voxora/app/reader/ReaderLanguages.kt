@@ -18,7 +18,18 @@ data class ReaderLanguageOption(
     val secondaryLabel: String? get() = englishName.takeIf { !it.equals(label, ignoreCase = true) }
 }
 
-internal fun readerLanguageOptions(locale: Locale, query: String): List<ReaderLanguageOption> {
+/**
+ * The one selectable-language list for every Gemini *output* language in the app.
+ *
+ * The Reader's narration picker and the Settings "Dubbing language" picker both call
+ * this, so the two can never drift apart in count, order, label or flag: they are the
+ * same list over `ReaderLanguages.all`, which is the single language catalog. A third
+ * hardcoded list is exactly what this replaces.
+ *
+ * This is not the app's own UI locale, which is bounded by the translations actually
+ * packaged in the APK — see `AppLocales.shipped`.
+ */
+internal fun languageOptions(locale: Locale, query: String): List<ReaderLanguageOption> {
     val search = query.trim()
     return ReaderLanguages.all.map { language ->
         val label = language.displayName(locale)

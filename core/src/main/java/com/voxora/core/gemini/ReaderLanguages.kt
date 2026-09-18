@@ -126,5 +126,15 @@ object ReaderLanguages {
 
     fun isValid(code: String): Boolean = code in byCode
 
+    /**
+     * Catalog entry for [code], or null when the catalog does not describe it.
+     *
+     * Unlike [language], this never falls back to [DEFAULT], so callers that must not
+     * invent a language for an unknown code (for example a picker listing a fixed set)
+     * can tell "not in the catalog" apart from "the default".
+     */
+    fun languageOrNull(code: String?): ReaderLanguage? =
+        all.firstOrNull { it.code.equals(code, ignoreCase = true) }
+
     fun language(code: String): ReaderLanguage = byCode.getValue(normalize(code))
 }

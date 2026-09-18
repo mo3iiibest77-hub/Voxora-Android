@@ -59,6 +59,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
@@ -69,39 +70,47 @@ import androidx.compose.ui.unit.dp
 import androidx.core.os.LocaleListCompat
 import com.voxora.app.R
 import com.voxora.app.auth.GoogleAuthHelper
+import com.voxora.app.reader.languageOptions
 import com.voxora.app.ui.theme.VoxoraTheme
+import com.voxora.core.i18n.AppLocales
 import com.voxora.core.prefs.UserPrefs
+import java.util.Locale
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 private const val AI_STUDIO_URL = "https://aistudio.google.com/apikey"
 
-private val DUB_LANGS = listOf(
-    "fa" to "Persian / فارسی",
-    "en" to "English",
-    "ar" to "Arabic / العربية",
-    "es" to "Spanish",
-    "fr" to "French",
-    "de" to "German",
-    "tr" to "Turkish",
-    "ru" to "Russian",
-    "zh" to "Chinese",
-    "ja" to "Japanese",
-    "ko" to "Korean",
-    "hi" to "Hindi",
-    "pt" to "Portuguese",
-    "id" to "Indonesian",
-)
+/**
+ * One row of a Settings language picker.
+ *
+ * There is no language list in this file. Both pickers resolve their entries from the
+ * single catalog — the dubbing picker through the very same function the Reader's
+ * narration picker uses, and the app-language picker through `AppLocales.shipped` —
+ * so count, order, labels and flags cannot drift between screens.
+ */
+private data class LanguageChoice(val code: String, val flag: String, val label: String)
 
-private val APP_LANGS = listOf(
-    "en" to "English",
-    "fa" to "فارسی",
-    "ar" to "العربية",
-    "es" to "Español",
-    "fr" to "Français",
-    "de" to "Deutsch",
-    "tr" to "Türkçe",
-)
+/** Identical to the Reader's narration picker: same catalog, order, labels and flags. */
+private fun geminiLanguageChoices(locale: Locale): List<LanguageChoice> =
+    languageOptions(locale, "").map { LanguageChoice(it.code, it.flagEmoji, it.label) }
+
+/**
+ * The app's own UI locales — only the translations packaged in the APK, so the user
+ * cannot select an interface language Voxora does not actually speak. Named in the
+ * language itself, because someone who cannot read the current UI language still has
+ * to recognise their own.
+ */
+private fun appLanguageChoices(): List<LanguageChoice> =
+    AppLocales.languages.map { language ->
+        LanguageChoice(
+            code = language.code,
+            flag = language.flagEmoji,
+            label = language.displayName(Locale.forLanguageTag(language.code)),
+        )
+    }
+
+private fun List<LanguageChoice>.labelOf(code: String): String =
+    firstOrNull { it.code == code }?.label ?: code
 
 /**
  * Voxora Settings.
@@ -224,6 +233,11 @@ private fun SettingsContent(
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
+    val locale = LocalConfiguration.current.locales[0]
+    // Resolved once per locale: both pickers read the one catalog, so a language is
+    // never labelled or flagged differently here than in the Reader.
+    val geminiLanguages = remember(locale) { geminiLanguageChoices(locale) }
+    val appLanguages = remember { appLanguageChoices() }
     val fieldColors = OutlinedTextFieldDefaults.colors(
         focusedBorderColor = colors.primary,
         unfocusedBorderColor = colors.outline,
@@ -255,8 +269,8 @@ private fun SettingsContent(
                 )
                 SettingsDropdown(
                     label = stringResource(R.string.settings_app_language),
-                    value = APP_LANGS.find { it.first == appLanguage }?.second ?: appLanguage,
-                    options = APP_LANGS,
+                    value = appLanguages.labelOf(appLanguage),
+                    options = appLanguages,
                     onSelect = onAppLanguageChange,
                     colors = fieldColors,
                 )
@@ -312,8 +326,8 @@ private fun SettingsContent(
                 )
                 SettingsDropdown(
                     label = stringResource(R.string.settings_target_language),
-                    value = DUB_LANGS.find { it.first == dubbingLanguage }?.second ?: dubbingLanguage,
-                    options = DUB_LANGS,
+                    value = geminiLanguages.labelOf(dubbingLanguage),
+                    options = geminiLanguages,
                     onSelect = onDubbingLanguageChange,
                     colors = fieldColors,
                 )
@@ -564,7 +578,7 @@ private fun SettingsRowHeader(
 private fun SettingsDropdown(
     label: String,
     value: String,
-    options: List<Pair<String, String>>,
+    options: List<LanguageChoice>,
     onSelect: (String) -> Unit,
     colors: androidx.compose.material3.TextFieldColors,
     modifier: Modifier = Modifier,
@@ -588,12 +602,12 @@ private fun SettingsDropdown(
             shape = RoundedCornerShape(14.dp),
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            options.forEach { (code, name) ->
+            options.forEach { choice ->
                 DropdownMenuItem(
-                    text = { Text(name) },
+                    text = { Text("${choice.flag}  ${choice.label}") },
                     onClick = {
                         expanded = false
-                        onSelect(code)
+                        onSelect(choice.code)
                     },
                 )
             }
