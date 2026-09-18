@@ -5,12 +5,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Contract for the persisted appearance preference.
+ * Contract for the persisted theme preference.
  *
  * The stored value is a short id rather than the enum's ordinal, so reordering the enum can never
  * silently change a user's choice. Normalization is total: an absent, blank, differently-cased or
- * unrecognised value resolves to the default instead of throwing, because a damaged preference
- * must not stop the app from starting.
+ * unrecognised value resolves to the default instead of throwing, because a damaged preference must
+ * not stop the app from starting. Values written by the previous `system`/`light`/`dark` model are
+ * migrated rather than discarded.
  */
 class ThemeModeTest {
 
@@ -35,10 +36,15 @@ class ThemeModeTest {
     }
 
     @Test
+    fun thereAreExactlyThreeSelectableThemes() {
+        assertEquals(3, ThemeMode.all.size)
+    }
+
+    @Test
     fun parsingIsCaseAndWhitespaceInsensitive() {
-        assertEquals(ThemeMode.DARK, ThemeMode.normalize("DARK"))
-        assertEquals(ThemeMode.LIGHT, ThemeMode.normalize("  light  "))
-        assertEquals(ThemeMode.SYSTEM, ThemeMode.normalize("System"))
+        assertEquals(ThemeMode.ORIGINAL_DARK, ThemeMode.normalize("ORIGINAL_DARK"))
+        assertEquals(ThemeMode.LIGHT_TEST_1, ThemeMode.normalize("  Light_Test_1  "))
+        assertEquals(ThemeMode.LIGHT_TEST_2, ThemeMode.normalize("light_test_2"))
     }
 
     @Test
@@ -51,7 +57,26 @@ class ThemeModeTest {
     }
 
     @Test
-    fun theDefaultIsSystemSoAnInstallFollowsTheDevice() {
-        assertEquals(ThemeMode.SYSTEM, ThemeMode.DEFAULT)
+    fun theDefaultIsTheOriginalVoxoraDarkTheme() {
+        assertEquals(ThemeMode.ORIGINAL_DARK, ThemeMode.DEFAULT)
+    }
+
+    @Test
+    fun theDefaultIsNotOneOfTheLightTests() {
+        assertTrue(ThemeMode.DEFAULT != ThemeMode.LIGHT_TEST_1)
+        assertTrue(ThemeMode.DEFAULT != ThemeMode.LIGHT_TEST_2)
+    }
+
+    @Test
+    fun legacySystemAndDarkValuesMigrateToTheOriginalDarkTheme() {
+        assertEquals(ThemeMode.ORIGINAL_DARK, ThemeMode.normalize("system"))
+        assertEquals(ThemeMode.ORIGINAL_DARK, ThemeMode.normalize("dark"))
+        assertEquals(ThemeMode.ORIGINAL_DARK, ThemeMode.normalize("SYSTEM"))
+    }
+
+    @Test
+    fun theLegacyLightValueMigratesToALightThemeRatherThanToDark() {
+        assertEquals(ThemeMode.LIGHT_TEST_1, ThemeMode.normalize("light"))
+        assertEquals(ThemeMode.LIGHT_TEST_1, ThemeMode.normalize("LIGHT"))
     }
 }

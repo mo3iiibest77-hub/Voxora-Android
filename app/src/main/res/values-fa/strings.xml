@@ -93,10 +93,10 @@
     <string name="settings_target_language">زبان دوبله</string>
     <string name="settings_app_language">زبان برنامه</string>
     <string name="settings_theme_mode">پوسته</string>
-    <string name="settings_theme_help">ظاهر Voxora را انتخاب کن. گزینهٔ سیستم از تنظیم دستگاه پیروی می‌کند.</string>
-    <string name="settings_theme_system">سیستم</string>
-    <string name="settings_theme_light">روشن</string>
-    <string name="settings_theme_dark">تاریک</string>
+    <string name="settings_theme_help">ظاهر Voxora را انتخاب کن. پوسته‌های روشن برای مقایسه‌اند.</string>
+    <string name="settings_theme_original_dark">تاریک اصلی</string>
+    <string name="settings_theme_light_test_1">روشن آزمایشی ۱</string>
+    <string name="settings_theme_light_test_2">روشن آزمایشی ۲</string>
     <string name="settings_sign_in">ورود با حساب Google</string>
     <string name="settings_saved">ذخیره شد</string>
     <string name="settings_api_help">کلید رایگان را از Google AI Studio بگیر و همین‌جا وارد کن. ورود با حساب Google اختیاری است و جای کلید API را نمی‌گیرد.</string>

@@ -696,7 +696,7 @@ private fun SettingsRowHeader(
 }
 
 /**
- * The theme choice: System / Light / Dark.
+ * The theme choice: Original Dark / Light Test 1 / Light Test 2.
  *
  * Three visible options rather than a dropdown, because the appearance is the one setting whose
  * effect should be obvious from the Settings screen itself. Each option is a normal selectable
@@ -740,9 +740,9 @@ private fun ThemeSelector(
 }
 
 private fun themeLabelOf(mode: ThemeMode): Int = when (mode) {
-    ThemeMode.SYSTEM -> R.string.settings_theme_system
-    ThemeMode.LIGHT -> R.string.settings_theme_light
-    ThemeMode.DARK -> R.string.settings_theme_dark
+    ThemeMode.ORIGINAL_DARK -> R.string.settings_theme_original_dark
+    ThemeMode.LIGHT_TEST_1 -> R.string.settings_theme_light_test_1
+    ThemeMode.LIGHT_TEST_2 -> R.string.settings_theme_light_test_2
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -837,7 +837,7 @@ private fun SettingsContentSignedInPreview(modifier: Modifier = Modifier) {
                 onDubbingLanguageChange = {},
                 appLanguage = "fa",
                 onAppLanguageChange = {},
-                themeMode = ThemeMode.LIGHT,
+                themeMode = ThemeMode.LIGHT_TEST_1,
                 onThemeModeChange = {},
                 saved = true,
                 onBack = {},

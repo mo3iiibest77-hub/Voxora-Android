@@ -128,41 +128,51 @@ Voxora-Android/
 
 ## 3. THEME — ALWAYS FOLLOW THIS
 
-There are **two** appearances and one role map. `app/src/main/java/com/voxora/app/ui/theme/VoxoraPalette.kt` holds the raw ARGB values (pure Kotlin, no Compose, so it is unit-tested); `app/src/main/java/com/voxora/app/ui/theme/Theme.kt` is the only place a value becomes a `Color`, and those two files are the **only** files allowed to contain colour literals. A static guard (`themecheck.py` in the local harness) fails the build if any other Kotlin file has one.
+There are **three** complete appearances and one role map. Each theme owns its own palette file — `app/src/main/java/com/voxora/app/ui/theme/OriginalDarkPalette.kt`, `LightTest1Palette.kt` and `LightTest2Palette.kt` — holding raw ARGB values (pure Kotlin, no Compose, so they are unit-tested). `app/src/main/java/com/voxora/app/ui/theme/Theme.kt` is the only place a value becomes a `Color`, and those four files are the **only** files allowed to contain colour literals. A static guard (`themecheck.py` in the local harness) fails the build if any other Kotlin file has one.
 
 ```kotlin
-// Accents — Google's familiar families used as SEMANTIC roles, never decoration.
-Blue   (light #1967D2 / dark #8AB4F8)  primary action, selected state
-Green  (light #137333 / dark #81C995)  success
-Yellow (light #8A5200 / dark #FDD663)  warning; the Reader's "paused" tone
-Red    (light #B3261E / dark #F28B82)  error / danger
-Gold   (light #8A6A16 / dark #E6B422)  `tertiary` only — the brand accent
+// ORIGINAL VOXORA DARK — the primary identity and the default. Verified against Git:
+// 4228f1b "feat: Voxora dark gold Material3 theme", plus the container/status ramp from f25cc5b.
+Gold      #D4AF37  primary, and the tint of every tonal surface
+GoldDim   #B8962E  secondary (the muted gold); `tertiary` is derived from the same family
+NearBlack #0A0A0B  background / surfaceContainerLowest
+SurfaceDark #141416 surface      Card #1C1C1F surfaceVariant / surfaceContainerHigh
+onSurface #F5F0E6  onSurfaceVariant #C4BBA8  explanation #A79E8C  neutral #8E8A7E
+success #3DDC84  warning #E6B422  danger/error #E85D5D
 
-// Light neutrals: clean white page, cool grey ramp, no brown and no tan.
-background #FFFFFF  surface #FFFFFF  surfaceContainerHigh #F1F3F4 (cards)
-onSurface #1F1F1F   onSurfaceVariant #444746  outlineVariant #DADCE0
+// LIGHT TEST 1 — "Voxora Light — Nova inspired". Its own complete palette.
+background #F8F9FC  surface #FFFFFF  surfaceVariant #F1F3F8  outlineVariant #E1E5EE
+primary #4F46E5  secondary(cyan) #0891B2  tertiary(violet) #7C3AED  accent purple #9333EA
+onSurface #171923  onSurfaceVariant #596174  explanation #64748B
+gradient #22D3EE → #818CF8 → #A855F7
 
-// Dark neutrals: the original near-black direction, de-warmed.
-background #0A0A0B  surface #141416  surfaceContainerHigh #1C1C1F
-onSurface #E3E3E3   onSurfaceVariant #C4C7C5  outlineVariant #3C4043
+// LIGHT TEST 2 — "Nova-style Light". Its own complete palette, NOT Light Test 1 + overrides.
+background #F8FAFC  surface #FFFFFF  surfaceVariant #F1F5F9  outlineVariant #E2E8F0
+primary(indigo) #6366F1  secondary(cyan dark) #0891B2  tertiary(violet) #8B5CF6  purple #A855F7
+onSurface #111827  onSurfaceVariant #475569  explanation #64748B
+gradient #22D3EE → #6366F1 → #A855F7
 
-// Semantic roles Material 3 does not model (VoxoraColors.*)
-success / warning / danger / neutral / explanation / disabled
+// Status roles are declared per palette; the two light tests share the same semantics
+// (success #16A34A / warning #D97706 / error #DC2626) but state them in their own file.
+// Roles Material 3 does not model (VoxoraColors.*): success / warning / danger / neutral /
+// explanation / disabled.
 ```
 
 **Theme selection:**
-- The user's choice is `core/.../prefs/ThemeMode.kt` — `SYSTEM` (default), `LIGHT`, `DARK` — persisted through `UserPrefs`/DataStore (`themeMode`). `MainActivity` collects it and passes it to `VoxoraTheme(mode = …)`; `SettingsScreen` exposes a `ThemeSelector` that writes it. Never hold the selection in a composable's own `remember`, and never read `isSystemInDarkTheme()` anywhere except inside `VoxoraTheme`'s `SYSTEM` branch.
-- **`ThemeMode.DEFAULT` is `SYSTEM`, and that must not change.** An install that has never opened the control follows the device; dark stays the product's primary direction and light is opt-in. A third mode must be added to the enum and the selector together; `ThemeMode.normalize` is total (unknown/blank → `DEFAULT`), so a corrupt preference can never leave the app themeless. Pinned by `ThemeModeTest`.
-- **Light is a real appearance, not an inverted dark one.** Every role is a chosen value with deliberate contrast: near-black content on white, a mid-grey secondary, a lighter help grey, and the blue carrying action. Gold must never fill a card, a background or a large surface — it is `tertiary` and the Live waveform, nothing more.
+- The user's choice is `core/.../prefs/ThemeMode.kt` — `ORIGINAL_DARK` (default), `LIGHT_TEST_1`, `LIGHT_TEST_2` — persisted through `UserPrefs`/DataStore (`themeMode`, stored as the enum's stable `id` so reordering the enum cannot change a choice). `MainActivity` collects it and passes it to `VoxoraTheme(mode = …)`; `SettingsScreen` exposes a `ThemeSelector` that writes it. Never hold the selection in a composable's own `remember`, and never read `isSystemInDarkTheme()` anywhere.
+- **`ThemeMode.DEFAULT` is `ORIGINAL_DARK`, and that must not change.** The original Voxora dark theme is the product's primary identity and the baseline appearance; neither light test may become the default, and the Google-style palette must not come back. `ThemeMode.normalize` is total (unknown/blank → `DEFAULT`) and migrates the previous `system`/`dark`/`light` ids (`system`/`dark` → dark, `light` → the first light test), so a corrupt or old preference can never leave the app themeless or silently drop a light user into dark. Pinned by `ThemeModeTest`.
+- **The three themes are independent by construction.** Each light test is a complete palette in its own file, not "the other light theme with overrides", and they share no constant or mutable state. Removing a light test later means deleting its palette file, its scheme + semantics block in `Theme.kt`, its `ThemeMode` entry and its string — the dark theme and the remaining light theme are untouched. Never introduce a shared mutable palette or a base-plus-overrides hierarchy between the light tests.
+- **Dark is the original Voxora gold identity — not a Google or Nova look.** Gold is `primary`, `secondary` and the tint of the tonal surfaces; the text is warm light; there is no cyan, indigo or purple. Cyan/indigo/violet belong to the two light tests only.
+- **Light is a real appearance, not an inverted dark one.** Every role is a chosen value with deliberate contrast: near-black content on white, a mid-grey secondary, a lighter help grey, and the indigo carrying action.
 
 **Compose rules:**
 - Always use `MaterialTheme.colorScheme.*` tokens — never hardcode hex in composables. The only accepted literal in a composable is `Color.Transparent` (a framework constant, not a brand colour).
 - **The semantic roles are the contract.** `Theme.kt` exposes `VoxoraSemanticColors` through `VoxoraColors.success` / `.warning` / `.danger` / `.neutral` / `.explanation` / `.disabled` (a `staticCompositionLocalOf`, read via `@Composable @ReadOnlyComposable`). Ask for the role, never a number. The hierarchy is **screen title → section title → primary content (`onSurface`) → secondary content (`onSurfaceVariant`) → explanation (`VoxoraColors.explanation`) → status / action**. A screen must not invent a role or pick an alpha on `onSurface` to mean "less important".
 - **`ReaderStatusVisual` decides which tone a phase gets**, and the composable only asks for it: **speaking and playing are green, paused is yellow and never green, stopped and failed are red, connecting and preparing are neutral and must not falsely show green.** The same pattern holds for `UsageStatusVisual` and `LogSeverity` — a pure-JVM mapper owns the decision so no composable picks a colour inline.
-- **One explanation role.** Every help, hint, caption or "why this is unavailable" line uses `VoxoraColors.explanation`. Do not reach for `onSurfaceVariant` for one note and `outline` for the next; a single token is what makes the hierarchy consistent across Reader, Settings, usage and account surfaces. This role is deliberately *less* prominent than secondary content in both appearances, and it is a neutral grey — never a warm gold or tan, which is what made explanatory text read as a brand accent.
+- **One explanation role.** Every help, hint, caption or "why this is unavailable" line uses `VoxoraColors.explanation`. Do not reach for `onSurfaceVariant` for one note and `outline` for the next; a single token is what makes the hierarchy consistent across Reader, Settings, usage and account surfaces. This role is deliberately *less* prominent than secondary content in every theme. In the restored dark theme it is the historical warm grey `#A79E8C`; in both light tests it is the neutral `#64748B`. Never make it a brand gold or an accent, and never make it an action or a status colour — that is what made explanatory text read as a brand accent.
 - **`neutral` is a status, not a failure.** Idle, connecting and an expected data gap are neutral; only a refusal or a network problem is `danger`. Never dress "we cannot show this" as an error.
 - `VoxoraBrand` (`waveGold`, `waveGreen`) is decorative only — the Live bubble waveform. It is **not** a text or surface colour and must never be used for status.
-- **Every text role clears WCAG AA on the surface it sits on.** `VoxoraPaletteTest` computes the contrast ratios and fails if a role drops below 4.5:1 on its card or page background (disabled content is exempt but must stay visible). Adding a colour means adding it to that test's reach.
+- **Every text role clears WCAG AA on the surface it sits on.** `OriginalDarkPaletteTest` and `LightTestPalettesTest` compute the contrast ratios and fail if a role drops below 4.5:1 on its card or page background (disabled content is exempt but must stay visible). Adding a colour means adding it to the reach of the test for its theme.
 - An active-state pulse must modify alpha, glow or scale of the semantic colour. Never introduce a separate neon colour for animation, and never run an infinite animation for a phase that is not active.
 - Use `MaterialTheme.typography.*` — never hardcode `sp` sizes directly
 - Shapes: `RoundedCornerShape(12.dp)` for cards, `CircleShape` for FABs/bubbles
@@ -744,7 +754,8 @@ A task is NOT done until:
   - `CloudAuthStateTest` (core) — the token-expiry policy (no stated expiry, well in the future, expired, inside the skew window, overridden skew); only `Authorized` carries an account; only an in-flight authorization is busy; only a real grant counts as authorized; `Authorized` carries no token field; **the four user-facing states are mutually exclusive** (so a card branching on `isAuthorized`/`isBusy` can never light up two branches); configuration missing is distinct from every other failure; and the scope set is read-only, unique and never contains a write scope (see §5A).
   - `CloudOAuthConfigTest` (core) — "is Google sign-in configured in this build?": the shipped `REPLACE_…` placeholder is not configured, the check is case-insensitive and trims, an absent/blank value is not configured, and any non-placeholder value counts as present because only Google can judge validity (see §5A).
   - `ApiKeyFieldStateTest` (app) — the Settings key field never receives the stored secret: a configured install carries no key text and an empty field, the resting state never prefills, saving clears the draft and returns to the configured state, removing returns to an empty entry field, Replace opens an empty field and drops any abandoned draft, Cancel drops the draft, a blank draft is never saveable, and the only string the state can hold is what the user typed (see §5A).
-  - `VoxoraPaletteTest` (app) — the colour system: the four accent families are distinct and differ between appearances, blue is not a status colour, the brand gold is not a status colour, help text is never an action or a status colour, help text is less prominent than secondary content in both appearances, every role is fully opaque, a card is distinguishable from its page in both appearances, and **every text role clears WCAG AA (4.5:1) on the card and page it sits on** (see §3).
+  - `OriginalDarkPaletteTest` (app) — the restored dark identity is pinned to the verified historical values (`Gold #D4AF37`, `GoldDim #B8962E`, `NearBlack #0A0A0B`, `SurfaceDark #141416`, `Card #1C1C1F`, the warm text roles and the historical status tones): the palette contains **no Google colour language** and none of the de-warmed neutrals the broken pass introduced, every value is fully opaque, the surface ramp is monotonic, the card is distinguishable from the page, help text is dimmer than secondary content, the status roles are distinct from each other and from content, and **every text role clears WCAG AA (4.5:1) on the card and page it sits on** (see §3).
+  - `LightTestPalettesTest` (app) — the two light candidates are complete, independent themes: each declares its specified surfaces, accents, text/status tokens and gradient exactly; the two disagree on every signature token (so neither is the other with overrides); neither is the dark theme or the Google palette; the dark theme is genuinely dark and both light backgrounds genuinely light; every value is fully opaque; the cards differ from their pages; help text is less prominent than secondary content; and **every text role clears WCAG AA (4.5:1) on the card and page it sits on** (see §3).
   - `CloudParsersTest` (core) — project and key parsing (dropped when unaddressable, name falling back to the id), the userinfo `email` claim (present, absent, blank and malformed all handled without producing a blank account), Monitoring request-count summation across points and both value spellings, a genuinely empty window being `0`, and a malformed body being `null` rather than `0`; quota limit selection and its absent cases (see §5A).
   - `CloudUsageTest` (core) — every figure needs authorization before a grant; a refusal propagates to every figure; **an unavailable metric is never equal to a zero**; an observed count is reported while tokens, remaining quota and billing stay `NOT_OFFERED`; an explicit zero is a real zero; project usage is always sourced from Google, never from local observation (see §5A).
   - `GoogleCloudHttpTest` (core) — the authorized reads against `MockWebServer`: the token in the `Authorization` header and **never in the URL**; `401` as re-authorization, `403` as no access; a `5xx` and an unparseable `200` as failures rather than empty lists; an unreachable host as a network problem; the userinfo read behind the account email; key metadata from the project keys endpoint; the two-call usage read; a quota refusal not discarding a real request count; and a refused monitoring read refusing the whole usage read (see §5A).
@@ -775,11 +786,11 @@ A task is NOT done until:
 - Local pre-CI validation without Gradle is allowed and encouraged: compile the changed pure-JVM/Android sources with `kotlinc` against the pinned dependency jars and run the JUnit classes directly with `-ea`. This never substitutes for CI — the branch must still go green in Actions. The `1504669` pass was validated locally this way: `kotlinc 2.0.21` plus JUnit `-ea` gave **134 tests OK** across `ReaderDisplayLanguageTest`, `ReaderDisplayRefreshTest`, `ReaderStartupGatesTest`, `LanguageCatalogTest`, `AppLocalesTest`, `ReaderPipelineOrderTest`, `ChunkQueueTest`, `PdfReadingOrderTest`, `ReaderSpoolTest`, `ReaderNarrationModesTest`, `ReaderLanguageFlagsTest` and `GeminiReaderSessionTest`. Two harness details matter and cost a round each when forgotten: `internal` declarations need `-Xfriend-paths=<main-out>` on the test compile, and `ReaderSpool`'s `VoxoraLog` dependency needs a plain-JVM stub because the real one touches `android.util.Log`.
 - Prefer pure-JVM, deterministic tests with `TemporaryFolder` for file-backed code; avoid Robolectric unless an Android API genuinely cannot be avoided.
 - **The local harness cannot compile Compose, so run an import guard before pushing.** A missing `import androidx.compose.runtime.LaunchedEffect` reached CI once and failed **both** jobs; because the dev server has no Compose artifacts, nothing local caught it. It also produced four errors for one mistake — the unresolved reference plus three cascading "suspend function should be called only from a coroutine", since without `LaunchedEffect` the lambda is not a suspend scope. Before pushing, check that no file uses a Compose or AndroidX symbol it has not imported. Read CI job logs with `GET /repos/…/actions/jobs/<job_id>/logs` (works, HTTP 200) rather than the run-level archive endpoint (403); the useful line is `e: file:///…/File.kt:97:5 Unresolved reference 'X'.`
-- **Three local checks worth running on every change, all cheap and all caught real bugs:** a `R.string.*` cross-check of every Kotlin reference against `values/` and `values-fa/` (it caught a `reader_page_chunk` key that no locale declared); an unused-import sweep of changed files; and a **colour-literal guard** that fails if `Color(0x…)` or a named `Color.White`/`Color.Black`/… appears anywhere outside `ui/theme/Theme.kt` and `ui/theme/VoxoraPalette.kt` (`Color.Transparent` is allowed). The harness cannot compile Compose, so the guard is what stops a stray hex from reaching CI.
+- **Three local checks worth running on every change, all cheap and all caught real bugs:** a `R.string.*` cross-check of every Kotlin reference against `values/` and `values-fa/` (it caught a `reader_page_chunk` key that no locale declared); an unused-import sweep of changed files; and a **colour-literal guard** that fails if `Color(0x…)` or a named `Color.White`/`Color.Black`/… appears anywhere outside `ui/theme/Theme.kt` and the three `ui/theme/*Palette.kt` files (`Color.Transparent` is allowed). The harness cannot compile Compose, so the guard is what stops a stray hex from reaching CI.
 
 ---
 
-*Last updated: auto-generated by Claude for Voxora project — the segment-card-only turn, the
-initial-playback gate that waits for the selected-language text, the severity/selection pass over
-the Logs viewer, the Gemini product model in Settings, and the Reader's floating bubble and
-notification transport controls.*
+*Last updated: auto-generated by Claude for Voxora project — the original Voxora dark gold theme
+restored from the verified historical baseline (`4228f1b` + `f25cc5b`), two independent light test
+themes added behind a persisted selector with dark as the default, and the Gemini product model in
+Settings, the Reader's floating bubble and its notification transport controls.*

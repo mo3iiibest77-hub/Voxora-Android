@@ -145,7 +145,67 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
 > pair is `AGENTS.md` (project law / architecture record) and this `CLAUDE.md`
 > (handoff / cloud context). Update those two — do not add duplicate docs.
 
-### Last change (this session) — honest Google sign-in states, a Google-inspired theme, and a key that is never shown again
+### Last change (this session) — the original Voxora dark theme restored, two independent light tests, and a persisted selector
+
+**DONE — three selectable, independent themes; the original dark theme is the default and the identity.**
+The dark theme that shipped after `660f6c9` was a Google-inspired palette (blue primary, de-warmed
+neutrals) and was **not** the original Voxora dark theme. It has been restored from the verified
+historical baseline, and two light candidates were added so the owner can compare them on a device:
+
+- **Original Dark** — the product's primary identity and `ThemeMode.DEFAULT`. Values verified against
+  `4228f1b` (*"feat: Voxora dark gold Material3 theme"*) plus the container/status ramp from `f25cc5b`:
+  gold `#D4AF37` (`primary` and `secondary` identity), muted gold `#B8962E`, near-black page
+  `#0A0A0B`, surface `#141416`, card `#1C1C1F`, warm text `#F5F0E6` / `#C4BBA8`, explanation
+  `#A79E8C`, status `#3DDC84` / `#E6B422` / `#E85D5D`. No Google and no Nova colour language.
+- **Light Test 1 — "Voxora Light — Nova inspired"** — page `#F8F9FC`, white cards, indigo `#4F46E5`
+  primary, cyan `#0891B2`, violet `#7C3AED`, purple `#9333EA`, gradient `#22D3EE → #818CF8 → #A855F7`.
+- **Light Test 2 — "Nova-style Light"** — page `#F8FAFC`, indigo `#6366F1` primary, cyan `#22D3EE`
+  (`#0891B2` for the readable secondary), violet `#8B5CF6`, purple `#A855F7`, gradient
+  `#22D3EE → #6366F1 → #A855F7`.
+
+Each theme is a **complete, independent palette** in its own file (`OriginalDarkPalette.kt`,
+`LightTest1Palette.kt`, `LightTest2Palette.kt`); they share no constant or mutable state and neither
+light theme is an override of the other. Removing either light test later means deleting its palette
+file, its scheme + semantics block in `Theme.kt`, its `ThemeMode` entry and its string — the dark
+theme and the other light theme are untouched. `Theme.kt` remains the only place a value becomes a
+`Color`; the four theme files are the only files allowed colour literals, guarded by `themecheck.py`.
+
+**Theme selection and persistence.** `ThemeMode` is now `ORIGINAL_DARK` (default), `LIGHT_TEST_1`,
+`LIGHT_TEST_2`, persisted through the existing `UserPrefs`/DataStore `theme_mode` key (stored as the
+enum's stable `id`, so reordering the enum cannot change a choice). `MainActivity` collects it and
+drives `VoxoraTheme(mode = …)`; the existing Settings `ThemeSelector` writes it and now labels the three
+options "Original Dark" / "Light Test 1" / "Light Test 2" (Persian: تاریک اصلی / روشن آزمایشی ۱ /
+روشن آزمایشی ۲). The choice survives app restart. `ThemeMode.normalize` is total and migrates the old
+`system`/`dark`/`light` ids (`system`/`dark` → Original Dark, `light` → Light Test 1), so an existing
+install keeps a sensible appearance instead of losing its choice. The UI, layout, components and
+hierarchy are unchanged — only the colour system and the selector labels.
+
+**No Live Dub, no `dub/**`, and no Gemini Live infrastructure was touched.** The Live bubble's
+gold/stop-red values already matched the restored dark palette, so its appearance is unchanged.
+
+**Locally verified (no Gradle).** `kotlinc 2.0.21` + JUnit 4.13.2 with `-ea`: **478 tests OK across 43
+classes**, including the new `OriginalDarkPaletteTest` (pins the historical dark values and rejects
+Google/de-warmed leakage) and `LightTestPalettesTest` (pins each light test's tokens and proves the two
+are independent). Static checks: `themecheck.py` OK, `checkimports.py` OK, `stringcheck.py` OK (values
+293, values-fa 292, parity intact; only `default_web_client_id` intentionally untranslated). The
+Compose, Play Services and Android layers are **not** compiled locally — CI is their only compile check.
+
+**CI (Actions) — not yet recorded for this commit.** The push triggers `Android CI` on
+`feat/reader-segmented-spooling`; the result must be read back from Actions and recorded in a
+follow-up docs commit. Do not treat the theme change as compile-verified until then.
+
+**Real-device verification was NOT performed.** The three themes' actual appearance, the selector
+under Persian/RTL, and each light palette's contrast are device-verification items; the owner will
+install the APK and compare.
+
+**BLOCKED:** nothing in this feature is blocked on code. The previously-noted external item (the
+Google OAuth Web client ID for `default_web_client_id`) is unchanged and unrelated to the theme work.
+
+**NEXT:** install the CI-built debug APK, compare Original Dark / Light Test 1 / Light Test 2 on a
+device, and decide which light test survives. The losing one is then removed with the recipe above,
+without touching the dark theme or the winner.
+
+### Last change (previous session) — honest Google sign-in states, a Google-inspired theme (now superseded), and a key that is never shown again
 
 Four commits on `feat/reader-segmented-spooling`, then a CI-record commit. Scope was deliberately
 limited to Google sign-in UX, the theme system, and the API-key field.
@@ -172,7 +232,8 @@ is not implemented". Now:
 No fake login, no WebView, no scraping, no invented endpoint. The manual API key still works with no
 sign-in at all.
 
-**DONE — a Google-inspired colour system, and the brown/gold light theme is gone.** The previous
+**DONE (superseded by the theme-restore cycle above; kept as history) — a Google-inspired colour
+system, and the brown/gold light theme is gone.** The previous
 light theme was built on warm off-whites and a deep gold `primary`, and — the real culprit — the
 `explanation` role itself was a warm tan (`#A79E8C` / `#6E685B`), so every help sentence read as
 gold. The palette now lives in `ui/theme/VoxoraPalette.kt` (pure Kotlin, no Compose, so it is

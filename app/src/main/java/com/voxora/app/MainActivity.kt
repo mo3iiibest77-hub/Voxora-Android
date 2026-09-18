@@ -63,7 +63,7 @@ class MainActivity : AppCompatActivity() {
         enableEdgeToEdge()
         setContent {
             // The appearance is a persisted user choice, so the whole app re-composes when it
-            // changes; the default follows the device setting.
+            // changes; the default is the original Voxora dark theme.
             val themeMode by prefs.themeMode.collectAsState(initial = ThemeMode.DEFAULT)
             VoxoraTheme(mode = themeMode) {
                 Surface(modifier = Modifier.fillMaxSize()) {

@@ -54,9 +54,10 @@ class UserPrefs(private val context: Context) {
     /**
      * The user's chosen appearance.
      *
-     * Defaults to [ThemeMode.SYSTEM], so an install that has never opened the control follows the
-     * device setting rather than being pinned to one appearance. An unrecognised stored value
-     * normalizes to the default instead of throwing.
+     * Defaults to [ThemeMode.DEFAULT], which is the original Voxora dark theme — the product's
+     * primary identity. An unrecognised stored value normalizes to the default instead of throwing,
+     * and values written by the previous `system`/`light`/`dark` model are migrated rather than
+     * discarded.
      */
     val themeMode: Flow<ThemeMode> =
         context.dataStore.data.map { ThemeMode.normalize(it[keyThemeMode]) }
