@@ -18,11 +18,17 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -43,7 +49,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.voxora.app.R
 import com.voxora.app.dub.DubService
@@ -114,12 +119,25 @@ private fun DubContent(
         modifier = modifier
             .fillMaxSize()
             .background(colors.background)
-            .padding(horizontal = 24.dp, vertical = 32.dp),
+            .safeDrawingPadding()
+            .padding(horizontal = 24.dp, vertical = 16.dp),
     ) {
-        Row(modifier = Modifier.fillMaxWidth()) {
-            TextButton(onClick = onBack) {
-                Text("← " + stringResource(R.string.action_back), color = colors.primary)
+        // Auto-mirrored so the arrow points the correct way under RTL instead of staying LTR.
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.action_back),
+                    tint = colors.onSurface,
+                )
             }
+            Spacer(Modifier.width(4.dp))
+            Text(
+                text = stringResource(R.string.dub_title),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.onSurface,
+            )
         }
         Column(
             modifier = Modifier
@@ -136,19 +154,18 @@ private fun DubContent(
                         .background(colors.primary.copy(alpha = 0.15f)),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text("V", color = colors.primary, fontSize = 32.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "V",
+                        color = colors.primary,
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
                 }
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    text = stringResource(R.string.dub_title),
-                    color = colors.primary,
-                    fontSize = 28.sp,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
                     text = stringResource(R.string.tagline),
                     color = colors.onSurfaceVariant,
-                    fontSize = 14.sp,
+                    style = MaterialTheme.typography.bodyMedium,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.padding(top = 8.dp),
                 )
@@ -170,7 +187,11 @@ private fun DubContent(
                             .background(dotColor),
                     )
                     Spacer(Modifier.size(8.dp))
-                    Text(statusLabel, color = colors.onSurface, fontSize = 14.sp)
+                    Text(
+                        text = statusLabel,
+                        color = colors.onSurface,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
                 }
 
                 if (isLive) {
@@ -197,10 +218,14 @@ private fun DubContent(
                             stringResource(R.string.error_banner_title),
                             color = colors.error,
                             fontWeight = FontWeight.SemiBold,
-                            fontSize = 14.sp,
+                            style = MaterialTheme.typography.bodyMedium,
                         )
                         Spacer(Modifier.height(6.dp))
-                        Text(status.message, color = colors.onSurface, fontSize = 13.sp)
+                        Text(
+                            status.message,
+                            color = colors.onSurface,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
                         Spacer(Modifier.height(12.dp))
                         Row(
                             Modifier.fillMaxWidth(),
@@ -214,7 +239,11 @@ private fun DubContent(
                                 modifier = Modifier.weight(1f),
                                 shape = RoundedCornerShape(10.dp),
                             ) {
-                                Text(stringResource(R.string.action_settings), color = colors.primary, fontSize = 12.sp)
+                                Text(
+                                    stringResource(R.string.action_settings),
+                                    color = colors.primary,
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
                             }
                             Button(
                                 onClick = {
@@ -228,7 +257,10 @@ private fun DubContent(
                                 ),
                                 shape = RoundedCornerShape(10.dp),
                             ) {
-                                Text(stringResource(R.string.action_retry), fontSize = 12.sp)
+                                Text(
+                                    stringResource(R.string.action_retry),
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
                             }
                         }
                     }
@@ -238,14 +270,14 @@ private fun DubContent(
                 Text(
                     text = stringResource(R.string.home_title),
                     color = colors.onSurface,
-                    fontSize = 20.sp,
+                    style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Medium,
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = stringResource(R.string.home_subtitle),
                     color = colors.onSurfaceVariant,
-                    fontSize = 14.sp,
+                    style = MaterialTheme.typography.bodyMedium,
                     textAlign = TextAlign.Center,
                 )
                 Spacer(Modifier.height(24.dp))
@@ -278,14 +310,14 @@ private fun DubContent(
                 Text(
                     text = stringResource(R.string.phase1_hint),
                     color = colors.onSurfaceVariant,
-                    fontSize = 12.sp,
+                    style = MaterialTheme.typography.bodySmall,
                     textAlign = TextAlign.Center,
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
                     text = stringResource(R.string.latency_hint),
                     color = colors.onSurfaceVariant.copy(alpha = 0.85f),
-                    fontSize = 11.sp,
+                    style = MaterialTheme.typography.labelSmall,
                     textAlign = TextAlign.Center,
                 )
             }
