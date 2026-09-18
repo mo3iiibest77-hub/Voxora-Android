@@ -330,12 +330,18 @@ class DubService : Service() {
                 }
                 _syncState.value = sync.state
                 val latencyMs = sync.baselineLatencyNanos / 1_000_000
+                // The gap between what has been handed to the output and what the device has
+                // presented is the output buffer's own contribution to the delay. It is reported
+                // separately from the timeline's backlog so the two cannot be confused: one is
+                // the buffer the platform is holding, the other is audio the app is holding.
+                val bufferMs = (playback.writtenNanos() - played) / 1_000_000
                 val stateChanged = sync.state != lastSyncState
                 lastSyncState = sync.state
                 timeline.maybeLog(
                     now,
                     context = "state=${sync.state} latency=${latencyMs}ms " +
                         "backlog=${playbackTimeline.backlogNanos / 1_000_000}ms " +
+                        "buffer=${bufferMs.coerceAtLeast(0)}ms " +
                         "tolerance=${playbackTimeline.toleranceNanos / 1_000_000}ms " +
                         "drops=${playbackTimeline.dropCount} " +
                         "underruns=${playbackTimeline.underrunCount}",

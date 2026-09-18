@@ -299,7 +299,9 @@ solved: the constants are bounded and measured, not tuned against real Gemini be
   `AudioTrack` buffer at `minBuf * 8` floored at a full second of audio — a second of added lip-sync
   delay; it is now `minBuf * 2` floored at ~125 ms. (3) The dub's content clock was the write cursor,
   so audio sitting unplayed in the output buffer counted as progress and the pipeline could not see its
-  own backlog; it is now the playhead, and `dubguard.py` fails if `writtenNanos()` is fed back in.
+  own backlog; it is now the playhead, and `dubguard.py` fails if the write cursor is fed back in as
+  the content clock. The write cursor survives only as a diagnostic: the gap between it and the
+  playhead *is* the output buffer's contribution to the delay, logged separately as `buffer`.
 - **Gemini's `DROP_OLDEST` is no longer silent.** `tryEmit` cannot report a drop, so
   `GeminiLiveSession.emittedAudioChunks` is compared with what the consumer actually received and the
   difference is reported as `DROPPED n` in the instrumentation line.
