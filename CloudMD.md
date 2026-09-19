@@ -1,13 +1,12 @@
 # CloudMD.md — Voxora long-term project state
 
 **Branch:** `feat/reader-segmented-spooling`
-**Last updated:** 2026-09-19, at commit `de8961294090842e5758bdc715e2e607ba0350ce` (`de89612`).
+**Last updated:** 2026-09-19, at commit `8293a981e67032fb054321838d0f845d64431a67` (`8293a98`).
 
 This file is the concise, durable state of the project: what is finished, what is in flight, what is
 blocked, and the single next action. It is **not** a plan and it is not a wish list — an item is only
 under DONE once the repository and CI prove it. `AGENTS.md` is the architecture record; `AgentMD.md`
-holds the standing UI/i18n rules plus the current implementation record. This file did not exist on
-this branch before this commit, so nothing here is a claim about earlier state.
+holds the standing UI/i18n rules plus the current implementation record.
 
 ---
 
@@ -23,39 +22,41 @@ this branch before this commit, so nothing here is a claim about earlier state.
 - **The canonical Persian standard** is a permanent, project-wide rule (`AGENTS.md` §10,
   `AgentMD.md` §2), enforced by `bidi_fa.py` and `stringcheck.py`.
 - **Reader voice selection, persistent library, chunk-level resume and Book Intelligence**
-  (`de89612`, this commit). Two semantic voices mapped to Gemini prebuilt voices with the voice
-  threaded through every session; imported books persisted as records plus an app-owned copy of the
-  document; multi-book library with independent progress; resume saved at safe transitions and Stop
-  no longer resetting the queue; automatic identification against Google Books and Open Library with
-  a conservative matcher and a source-backed "About This Book" section. 642 pure-JVM tests pass
-  locally; the Android-side layers type-check against `android.jar` with stubs; all six guards pass;
-  Live Dub untouched. **CI verification of this commit is the immediate next action and is not yet
-  recorded — see BLOCKED.**
+  (`de89612`, CI-verified at `8293a98`). Two semantic voices mapped to Gemini prebuilt voices with
+  the voice threaded through every session; imported books persisted as records plus an app-owned
+  copy of the document; multi-book library with independent progress; resume saved at safe
+  transitions and Stop no longer resetting the queue; automatic identification against Google Books
+  and Open Library with a conservative matcher and a source-backed "About This Book" section. 642
+  pure-JVM tests pass locally; the Android-side layers type-check against `android.jar` with stubs;
+  all six guards pass; Live Dub untouched. **Android CI is green** on `8293a98`: `Unit tests` and
+  `Assemble debug APK` both `success` on the push run `35439870596` and the PR run `35439873171`.
+- **The three build defects that first blocked that cycle are fixed** (`22a1b69`, `8293a98`): a
+  merged PDFBox import line in `TextExtractor.kt`, plus a missing `VoxoraColors` import and a
+  missing `BookSignals` import. All three were committed-tree-only faults that the local harness
+  could not see; see `AgentMD.md` §5 for why, and for the `checkimports.py` extension that now
+  catches the missing-import class locally.
 
 ## IN PROGRESS
 
-- Nothing. The Reader cycle above is implemented and locally validated; it is waiting only on its CI
-  result.
+- Nothing. The Reader cycle above is implemented, locally validated and CI-verified.
 
 ## BLOCKED
 
-- **CI result for `de89612` is not yet read.** The commit is committed locally; the push and the
-  Android CI run for it are the next action. Until that run reports `Unit tests` and
-  `Assemble debug APK` both green, the Reader UI's compilation is unproven — the local harness cannot
-  compile Compose.
 - **Real-device verification is unavailable from this environment.** Everything about how the
   features *feel* (voice character, cover loading, RTL library layout, resume across a real process
-  death, the rate trim's audibility) is an owner-only item.
+  death, the rate trim's audibility) is an owner-only item. This is now the single open item for the
+  Reader cycle — CI proves it compiles and the pure-JVM suite proves its logic, not how it looks or
+  sounds.
 - **Live catalogue behaviour is unverified.** Google Books and Open Library contracts are pinned
   against `MockWebServer`; no real request was made, so live coverage, rate limits and real match
   quality are unknown.
 
 ## NEXT
 
-Read the Android CI run for `de89612` via the GitHub REST API and confirm both jobs are `success`.
-If `Assemble debug` fails, the fault is in a Compose file the local harness cannot compile
-(`ReaderScreen.kt`, `ReaderVoiceSection.kt`, `BookIntelCard.kt`, `ReaderLibrarySection.kt`,
-`ReaderCoverImage.kt`) — fix it before starting anything else.
+Owner device verification of the `8293a98` debug APK: confirm the Female/Male narrator choice is
+audibly distinct and survives a restart, that a cover loads, that the library reads correctly under
+RTL, and that a book reopens at its saved chunk after a real process death. No further Reader code
+work is pending.
 
 ---
 
@@ -66,6 +67,13 @@ If `Assemble debug` fails, the fault is in a Compose file the local harness cann
   `validate-reader-android.sh` for the Android Reader layers, `validate-sync.sh`/`validate-dubservice.sh`
   for Live Dub, plus the six guard scripts).
 - **The harness cannot compile Compose.** A green local run is necessary, not sufficient.
+- **The harness has two known blind spots**, both of which let a real compile error reach CI once:
+  `validate-reader-android.sh` substitutes a stub for `TextExtractor.kt` (no PDFBox jar), and it does
+  not cover the Compose files at all. `checkimports.py` was extended with a `WATCHED_PROJECT` list to
+  catch the missing-project-import case in both blind spots, but nothing local compiles Compose.
+- **CI job logs need a token.** The REST job-log endpoint returns 403 unauthenticated; `gh` is not
+  logged in. `~/.git-credentials` holds a token that works for both the run/job API and the log
+  download (follow the 302 to the signed URL, without the `Authorization` header).
 - **Live Dub and the Reader share nothing but the API key and the language catalog.** Enforced by
   `dubguard.py` and `ReaderDubIsolationTest`.
 - **`PROJECT_CONTEXT.md` is stale** (it still describes the v0.6.1 experimental lipsync overlay, which

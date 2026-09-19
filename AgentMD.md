@@ -140,8 +140,9 @@ looks and reads.
 This section is a **record**, not a rule. The standing rules are §1–§4 above; the Reader's
 architecture contract is `AGENTS.md` §5.
 
-**Commit.** `de8961294090842e5758bdc715e2e607ba0350ce` (`de89612`), branch
-`feat/reader-segmented-spooling`.
+**Commits.** `de89612` (implementation) and `cb07e2a` (its documentation record), then two build
+fixes: `22a1b69` and `8293a98`. Branch `feat/reader-segmented-spooling`. CI is green on `8293a98`
+— see "CI result" below.
 
 ### What was requested
 
@@ -191,6 +192,40 @@ BookIntelCard, ReaderCoverImage, ReaderRecency}.kt`; modified `reader/{ReaderCon
 ReaderViewModel, ReaderScreen, TextExtractor}.kt`, `res/values*/strings.xml`.
 Docs: `AGENTS.md` §5/§13/§14.
 
+### Build defects found after the first push, and how they were fixed
+
+The first push (`cb07e2a`) failed **both** CI jobs. Three defects, all in the committed tree only —
+the local harness had passed against a working tree that already carried the first fix:
+
+| # | Defect | Fix | Commit |
+|---|---|---|---|
+| 1 | `TextExtractor.kt` had two imports collapsed onto one line (`…PDFBoxResourceLoaderimport com.tom_roush…PDDocument`), an invalid Kotlin statement | split back into two imports | `22a1b69` |
+| 2 | `ReaderVoiceSection.kt:68` used `VoxoraColors.explanation` with no import → `Unresolved reference 'VoxoraColors'` | added `import com.voxora.app.ui.theme.VoxoraColors` | `8293a98` |
+| 3 | `TextExtractor.kt:41` typed `ExtractedDocument.signals` as `BookSignals` with no import → `Unresolved reference 'BookSignals'` | added `import com.voxora.core.reader.BookSignals` | `8293a98` |
+
+Defects 2 and 3 are why **both** jobs failed: `Assemble debug APK` compiles `app` main sources, and
+`Unit tests` compiles them too, so one unresolved reference fails both. The exact errors were read
+from the job logs (`:app:compileDebugKotlin FAILED`), not guessed.
+
+**Why the local harness missed them.** Two structural gaps, now understood and recorded rather than
+assumed away:
+
+- `validate-reader-android.sh` type-checks the Android Reader layers against a **`TextExtractor`
+  stub** (`stub2/TextExtractorStub.kt`), because the harness has no PDFBox jar. The real
+  `TextExtractor.kt` was therefore never compiled locally — defect 3 lived in exactly that blind
+  spot.
+- The script does not cover the Compose files at all, so defect 2 was outside it too.
+- `checkimports.py` watched only Compose/AndroidX symbols. A **project** symbol such as
+  `VoxoraColors` was invisible to it, even though a project symbol is never resolved by a language
+  default.
+
+`checkimports.py` was extended in the local harness with a `WATCHED_PROJECT` list (`VoxoraColors`,
+`VoxoraTheme`, `VoxoraLog`, and the `core.reader`/`ReaderVoice` types), checked on **any** bare
+mention — member access included — after stripping comments and string literals so a KDoc `[VoxoraLog]`
+is not misread as a use. It was verified both ways: it now reports clean on the fixed tree and
+reports exactly `VoxoraColors` + `BookSignals` when run against the `de89612` files, i.e. it would
+have caught both defects before the first push.
+
 ### Tests actually run
 
 | What | How | Result |
@@ -199,6 +234,9 @@ Docs: `AGENTS.md` §5/§13/§14.
 | Android-side Reader layers | `/tmp/rr/validate-reader-android.sh` (android.jar + AndroidX/Hilt/DataStore stubs) | **OK** |
 | Guards | `themecheck`, `themeguard`, `checkimports`, `stringcheck`, `bidi_fa`, `dubguard` | all **OK** |
 | Live Dub untouched | `git status` filtered for `dub/`, `GeminiLive*`, `SystemCapture`, `DubPlayback`, `FloatingBubble*`, `DelayedScreenOverlay` | **no changes** |
+| Extended import guard | `checkimports.py` with `WATCHED_PROJECT`, run against the `de89612` files | **caught both missing imports** |
+| Android CI, push run `35439870596` on `8293a98` | GitHub Actions, read via the REST API | `Unit tests` **success**, `Assemble debug APK` **success** |
+| Android CI, PR run `35439873171` on `8293a98` | GitHub Actions, read via the REST API | `Unit tests` **success**, `Assemble debug APK` **success** |
 
 New test classes: `ReaderVoiceTest`, `ReaderBookTest`, `ReaderLibraryTest`, `ReaderBookCodecTest`,
 `BookSignalsReaderTest`, `BookMatchTest`, `BookIntelTest`, `GoogleBooksSourceTest`,
@@ -211,15 +249,30 @@ The harness caught one real defect before push: `library.remove(...)` was being 
 
 ### CI result
 
-**Not yet verified at the time this record was written.** The commit is pushed and the Android CI
-run is checked before the task is reported complete; see the final report for the run id and the
-per-job conclusions. Do not read this section as a green build until it says so.
+**Green.** Commit `8293a98` (the two import fixes on top of `de89612` / `cb07e2a`) passes both jobs
+in both runs:
+
+| Run | Event | `Unit tests` | `Assemble debug APK` |
+|---|---|---|---|
+| `35439870596` | push | success | success |
+| `35439873171` | pull_request | success | success |
+
+Read from the GitHub REST API (`/actions/runs/{id}/jobs`), not inferred. `Assemble debug APK` is the
+only proof that the new Compose UI compiles; it now does. The three earlier failures
+(`35417714110`/`35417711245` on `cb07e2a`, `35439144679`/`35439146941` on `22a1b69`) were the
+defects recorded above, and their job logs were read to obtain the exact compiler errors.
 
 ### Unresolved limitations
 
-- **Compose is not compiled locally.** `ReaderScreen.kt`, `ReaderVoiceSection.kt`,
+- **Compose is still not compiled locally.** `ReaderScreen.kt`, `ReaderVoiceSection.kt`,
   `BookIntelCard.kt`, `ReaderLibrarySection.kt` and `ReaderCoverImage.kt` are only compiled by the
-  CI `Assemble debug` job. `checkimports.py` is necessary but not sufficient.
+  CI `Assemble debug` job — proven green for `8293a98`, but every future Compose edit still costs a
+  CI round trip. The extended `checkimports.py` closes the missing-import case specifically, not
+  Compose compilation in general.
+- **The real `TextExtractor.kt` is still not type-checked locally**, because
+  `validate-reader-android.sh` substitutes a stub for it (no PDFBox jar in the harness). The extended
+  guard covers its missing-import case only. Any other compile error in that file will again be
+  found by CI first.
 - **No real-device testing was performed.** The voice's perceived character, the cover loader, the
   library layout under RTL, and the resume behaviour after a real process death are all
   device-verification items.
@@ -236,7 +289,8 @@ per-job conclusions. Do not read this section as a green build until it says so.
 
 ### Exact next action
 
-Push `de89612`, then read the Android CI run for that commit via the GitHub REST API and confirm
-**both** jobs (`Unit tests`, `Assemble debug APK`) are `success`. If `Assemble debug` fails, the
-error is in a Compose file the local harness cannot compile — fix and push again before any further
-feature work.
+The Reader cycle is complete and CI-verified. The next action is **owner device verification**:
+install the `8293a98` debug APK and confirm, on a real device, the four things no automated check can
+reach — that the Female/Male narrator choice is audibly distinct and survives a restart, that a
+cover loads, that the library reads correctly under RTL, and that a book reopens at its saved chunk
+after a real process death.
