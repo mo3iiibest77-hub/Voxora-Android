@@ -212,6 +212,7 @@ class ReaderController @Inject constructor(
             return
         }
         library.markOpened(id)
+        VoxoraLog.d("Reader", "Resume requested book=$id chunk=${book.currentChunk + 1} of ${book.chunkCount}")
         startLoad(Uri.fromFile(file), restoring = restoring, book = book)
     }
 
@@ -310,7 +311,13 @@ class ReaderController @Inject constructor(
                         segmentIndex = 0
                         // Resume exactly where the reader stopped. The queue clamps the index, so a
                         // record written against an older extraction can never point past the end.
-                        if (book != null) queue.jumpTo(book.currentChunk)
+                        if (book != null) {
+                            queue.jumpTo(book.currentChunk)
+                            VoxoraLog.d(
+                                "Reader",
+                                "Resume restored book=${book.id} chunk=${queue.index + 1} of ${queue.size}",
+                            )
+                        }
                         loadJob = null
                         publish(ReaderPhase.READY)
                         null
@@ -529,7 +536,14 @@ class ReaderController @Inject constructor(
         fun loadCached(index: Int, units: List<String>): ReaderChunkCache.Entry? {
             val cacheKey = cacheKeyFor(index, units) ?: return null
             return try {
-                chunkCache.load(cacheKey)
+                chunkCache.load(cacheKey).also { entry ->
+                    if (entry == null) {
+                        // A miss is the normal first-listen case, so it is information, not a fault.
+                        VoxoraLog.d("Reader", "Cache miss chunk=${index + 1}: nothing stored for this key")
+                    } else {
+                        VoxoraLog.d("Reader", "Cache hit chunk=${index + 1}: reusing stored audio and text")
+                    }
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -547,7 +561,9 @@ class ReaderController @Inject constructor(
         fun keepCached(index: Int, units: List<String>, spool: ReaderSpool) {
             val cacheKey = cacheKeyFor(index, units) ?: return
             try {
-                chunkCache.store(cacheKey, spool)
+                if (chunkCache.store(cacheKey, spool)) {
+                    VoxoraLog.d("Reader", "Cache stored chunk=${index + 1}: a later Continue replays it")
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -591,10 +607,32 @@ class ReaderController @Inject constructor(
             }
             return slot
         }
-        fun prefetch(index: Int): Slot? {
-            if (index >= synchronized(lock) { queue.size }) return null
+        /**
+         * The slots this run has already allocated, by chunk index.
+         *
+         * A chunk is prepared at most once. The rolling window asks for the chunk after the current
+         * one, and because indices are prepared in increasing order the next index is normally new;
+         * the map is what makes a repeated request **coalesce onto the slot that is already
+         * producing it** rather than open a second Gemini session for the same artifact.
+         */
+        val prepared = mutableMapOf<Int, Slot>()
+
+        /**
+         * Prepares the next chunk in the bounded look-ahead window, or null when there is none.
+         *
+         * Returns null at the end of the book and when the window's chunk is already prepared —
+         * [prepared] is the deduplication, and the caller resolves a null against [prepared] before
+         * treating it as "no next chunk".
+         */
+        fun prefetchNext(from: Int): Slot? {
+            val index = ReaderPrefetchWindow.ahead(
+                current = from,
+                chunkCount = synchronized(lock) { queue.size },
+                prepared = prepared.keys,
+            ).firstOrNull() ?: return null
             return try {
-                prepare(index, 0, 1)
+                VoxoraLog.d("Reader", "Prefetch scheduled chunk=${index + 1}")
+                prepare(index, 0, 1).also { prepared[index] = it }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -604,7 +642,7 @@ class ReaderController @Inject constructor(
         }
         try {
             var current = prepare(position.chunk, position.segment, MAX_UNIT_ATTEMPTS)
-            var next = prefetch(position.chunk + 1)
+            var next = prefetchNext(position.chunk)
             // The run's first unit must already have its selected-language text before a single
             // frame is audible, so the wait happens here — before the output track is started, so
             // the app does not sit holding audio focus in silence while that unit is synthesised.
@@ -659,15 +697,20 @@ class ReaderController @Inject constructor(
                         savePositionLocked()
                     }
                 }
-                val promoted = next
+                val promoted = next ?: prepared[current.index + 1]
                 if (promoted == null) {
                     if (current.index + 1 < synchronized(lock) { queue.size }) {
                         throw NarrationFailure(R.string.reader_retry_unit)
                     }
                     break
                 }
+                // The promoted chunk is no longer being prepared ahead — it is the chunk playing —
+                // so its entry is released here. Without this the map would retain a reference to
+                // every slot the book ever produced, which is the unbounded growth the window
+                // exists to prevent.
+                prepared.remove(promoted.index)
                 current = promoted
-                next = prefetch(current.index + 1)
+                next = prefetchNext(current.index)
                 // The promoted chunk's first unit must be on the page in the selected language
                 // *and style* before its audio begins. The prefetch producer has been rendering
                 // this chunk since the previous one started, so this normally returns at once;
@@ -688,6 +731,9 @@ class ReaderController @Inject constructor(
                 // chunk, and the cache refuses it rather than storing something truncated.
                 slots.forEach { keepCached(it.index, it.units, it.spool) }
                 slots.forEach { it.spool.close() }
+                // The run is over, so nothing is being prepared ahead any more and no slot may be
+                // retained past the run that produced it.
+                prepared.clear()
                 // A run boundary is the natural point to force the batched usage record to disk,
                 // so a finished narration is fully accounted for even if the process dies later.
                 usageRecorder.flush()
@@ -1147,7 +1193,12 @@ class ReaderController @Inject constructor(
     }
 
     private fun fail(run: Long, revision: Long, error: Exception) = synchronized(lock) {
-        if (run != generation || revision != navigation) return@synchronized
+        if (run != generation || revision != navigation) {
+            // The reader moved on — another chunk, another book, or a stop — while this failure was
+            // in flight. Reporting it would put a stale error on a newer position.
+            VoxoraLog.d("Reader", "Stale narration failure discarded: ${error.javaClass.simpleName}")
+            return@synchronized
+        }
         VoxoraLog.w("Reader", "Narration failed: ${error.javaClass.simpleName}")
         val resource = (error as? NarrationFailure)?.resource ?: R.string.reader_retry_unit
         mutableState.value = state.value.copy(phase = ReaderPhase.ERROR, error = context.getString(resource))

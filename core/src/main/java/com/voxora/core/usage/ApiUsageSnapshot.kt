@@ -74,6 +74,8 @@ data class ApiUsageSnapshot(
     val modelsAvailable: UsageMetric,
     /** Observed requests Voxora made today (UTC). */
     val requestsToday: UsageMetric,
+    /** Observed requests Voxora made in the last seven UTC days, including today. */
+    val requestsThisWeek: UsageMetric,
     /** Observed requests Voxora made this UTC month. */
     val requestsThisMonth: UsageMetric,
     /** Of [requestsThisMonth], the ones that completed successfully. */
@@ -88,6 +90,13 @@ data class ApiUsageSnapshot(
     val lastSuccessAtMillis: Long?,
     val lastFailureAtMillis: Long?,
     val lastErrorCategory: String?,
+    /**
+     * Per-day observed requests for the chart window, oldest first.
+     *
+     * Empty when Voxora has never recorded a request, so a chart is drawn only when there is real
+     * data behind it. The values are observed counts, never a quota and never an estimate.
+     */
+    val observedDaily: List<UsagePoint>,
     /** Cloud project quota — never readable from an API key. */
     val projectQuota: UsageMetric,
     /** Cloud billing spend — never readable from an API key, and never estimated. */
@@ -110,6 +119,12 @@ data class ApiUsageSnapshot(
     }
 
     companion object {
+        /** The rolling window the dashboard calls "this week": the last seven UTC days. */
+        const val WEEK_DAYS = 7
+
+        /** How many UTC days the observed-usage chart shows. */
+        const val CHART_DAYS = 14
+
         /**
          * Assembles the dashboard from local state plus the last probe result.
          *
@@ -126,8 +141,13 @@ data class ApiUsageSnapshot(
         ): ApiUsageSnapshot {
             val configured = ApiKeyMask.isConfigured(apiKey)
             val today = ledger?.day(nowMillis)
+            val week = ledger?.window(nowMillis, WEEK_DAYS)
             val month = ledger?.month(nowMillis)
             val observed = (month?.requests ?: 0) > 0
+            // A separate flag from `observed`, which is about the *current month*: a ledger that
+            // holds last month's requests still knows this week's count, and reporting it as
+            // "unknown" would hide a real zero.
+            val observedAnything = (ledger?.totalRequests() ?: 0) > 0
             val tokensReported = month?.tokensReported ?: 0
 
             return ApiUsageSnapshot(
@@ -144,6 +164,11 @@ data class ApiUsageSnapshot(
                 },
                 requestsToday = when {
                     today != null -> UsageMetric.known(today.requests.toLong())
+                    !configured -> UsageMetric.missing(UsageUnavailable.NOT_CONFIGURED)
+                    else -> UsageMetric.missing(UsageUnavailable.UNKNOWN)
+                },
+                requestsThisWeek = when {
+                    observedAnything -> UsageMetric.known((week?.requests ?: 0).toLong())
                     !configured -> UsageMetric.missing(UsageUnavailable.NOT_CONFIGURED)
                     else -> UsageMetric.missing(UsageUnavailable.UNKNOWN)
                 },
@@ -166,6 +191,13 @@ data class ApiUsageSnapshot(
                 lastSuccessAtMillis = ledger?.lastSuccess,
                 lastFailureAtMillis = ledger?.lastFailure,
                 lastErrorCategory = ledger?.lastError,
+                // The chart is drawn only from days Voxora actually recorded; with no observations
+                // at all there is no series, so nothing can imply a measurement that never happened.
+                observedDaily = if (observedAnything) {
+                    UsageSeries.daily(ledger, nowMillis, CHART_DAYS)
+                } else {
+                    emptyList()
+                },
                 // An API key cannot read Cloud project quota or billing. These need OAuth
                 // credentials for the owning project, which this app does not hold.
                 projectQuota = UsageMetric.missing(UsageUnavailable.AUTH_REQUIRED),

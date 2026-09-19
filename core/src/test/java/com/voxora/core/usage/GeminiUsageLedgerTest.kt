@@ -222,6 +222,55 @@ class GeminiUsageLedgerTest {
     }
 
     @Test
+    fun theWeeklyWindowSumsTheLastSevenUtcDaysIncludingToday() {
+        val ledger = GeminiUsageLedger()
+        ledger.recordSuccess(day18, usage(total = 5))
+        ledger.recordSuccess(day17, usage(total = 3))
+        // Seven days ending on the 18th start on the 12th, so the 11th is outside the window.
+        val outside = Instant.parse("2026-09-11T10:00:00Z").toEpochMilli()
+        ledger.recordSuccess(outside, usage(total = 999))
+
+        val week = ledger.window(day18, 7)
+
+        assertEquals(7, week.days)
+        assertEquals(2, week.requests)
+        assertEquals(8L, week.totalTokens)
+    }
+
+    @Test
+    fun theWindowIncludesItsEndDayAndExcludesTheDayBeforeItsStart() {
+        val ledger = GeminiUsageLedger()
+        ledger.recordSuccess(Instant.parse("2026-09-12T00:30:00Z").toEpochMilli())
+
+        // Seven days ending on the 18th reach back to the 12th; six days start on the 13th.
+        assertEquals(1, ledger.window(day18, 7).requests)
+        assertEquals(0, ledger.window(day18, 6).requests)
+    }
+
+    @Test
+    fun aWindowOfNoDaysIsEmptyRatherThanTheWholeLedger() {
+        val ledger = GeminiUsageLedger()
+        ledger.recordSuccess(day18)
+
+        assertEquals(0, ledger.window(day18, 0).requests)
+        assertEquals(0, ledger.window(day18, -3).requests)
+    }
+
+    @Test
+    fun theWindowCountsSuccessesFailuresAndTokenCoverageSeparately() {
+        val ledger = GeminiUsageLedger()
+        ledger.recordSuccess(day18, usage(total = 4))
+        ledger.recordFailure(day17, UsageFailureCategory.NETWORK)
+
+        val week = ledger.window(day18, 7)
+
+        assertEquals(2, week.requests)
+        assertEquals(1, week.successes)
+        assertEquals(1, week.failures)
+        assertEquals(1, week.tokensReported)
+    }
+
+    @Test
     fun theStoredPayloadCarriesNoSecrets() {
         val ledger = GeminiUsageLedger()
         ledger.recordSuccess(day18, usage(total = 5))

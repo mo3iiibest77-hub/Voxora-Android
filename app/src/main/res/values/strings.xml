@@ -60,6 +60,7 @@
     <string name="usage_status_unknown">Unknown</string>
     <string name="usage_models_available">Models available</string>
     <string name="usage_requests_today">Requests today</string>
+    <string name="usage_requests_week">Requests this week</string>
     <string name="usage_requests_month">Requests this month</string>
     <string name="usage_tokens_input">Input tokens</string>
     <string name="usage_tokens_output">Output tokens</string>
@@ -71,6 +72,9 @@
     <string name="usage_last_error">Last error category</string>
     <string name="usage_never">Never</string>
     <string name="usage_observed_help">These are Voxora\'s own counts of the requests it made on this device. They are not a Google quota reading.</string>
+    <string name="usage_chart_title">Observed requests per day</string>
+    <string name="usage_chart_help">Each bar is one day on this device, counted by Voxora itself. There is no Google quota behind these bars.</string>
+    <string name="usage_chart_day">%1$d</string>
     <string name="usage_ring_success">%1$d of %2$d requests succeeded this month.</string>
     <string name="usage_ring_empty">No requests recorded this month yet.</string>
     <string name="usage_unavailable_not_configured">No key configured</string>
@@ -173,9 +177,13 @@
     <string name="toast_reconnecting">Reconnecting…</string>
     <string name="default_web_client_id" translatable="false">REPLACE_WITH_GOOGLE_WEB_CLIENT_ID</string>
     <string name="reader_title">Voxora Reader</string>
+    <string name="reader_help_open">Explain: %1$s</string>
+    <string name="reader_help_close">Got it</string>
     <string name="reader_pick">Choose PDF or TXT</string>
     <string name="reader_privacy">Reader sends the current and next chunk to Gemini using your saved API key (shared with Live Dub). Gemini narrates the complete text in your selected language and style, translating when needed. Temporary audio is cached on this device. No phone text-to-speech or separate backend is used. PDFs need selectable text; scans require OCR.</string>
-    <string name="reader_pause_hint">Reader keeps playing in the background and with the screen off. Pause here or stop from the notification. Resume restarts the selected segment; Stop returns to the first chunk.</string>
+    <string name="reader_pause_hint">Reader keeps playing in the background and with the screen off. Pause here or stop from the notification. Pause keeps your place, so Play continues from the segment you were on. Stop ends playback and saves the chunk you were on, so the next Play resumes there rather than restarting the document.</string>
+    <string name="reader_pause_hint_help">Pause stops the audio and keeps the notification and your position, so you can start again at the same segment. Stop ends playback and saves the chunk you were listening to; the next Play resumes at that chunk instead of the beginning of the document. Neither action deletes anything already generated.</string>
+    <string name="reader_playback_section">Playback</string>
     <string name="reader_connecting">Connecting to Gemini…</string>
     <string name="reader_notif_channel_name">Voxora Reader</string>
     <string name="reader_notif_channel_description">Background document narration and playback controls</string>
@@ -232,6 +240,7 @@
     <string name="reader_page_chunk">Chunk %1$d of %2$d</string>
     <string name="reader_page_section">Reading page</string>
     <string name="reader_page_hint">One narration unit per page. Swipe left or right — or use the arrows — to move through this chunk\'s units. The buttons below change the chunk.</string>
+    <string name="reader_page_hint_help">The page shows one narration unit at a time. Swiping, or the segment arrows, moves through the units of the current chunk only. The Previous and Next buttons below the page move between chunks. The text on the page is the narration in the language and style you selected.</string>
     <string name="reader_page_preparing">Preparing %1$s text…</string>
     <string name="reader_page_style">Narration style: %1$s</string>
     <string name="reader_preparing_first">Preparing the first segment in the selected language and narration style. This may take a moment before playback starts.</string>
@@ -244,6 +253,7 @@
     <string name="reader_bubble_hide">Hide floating bubble</string>
     <string name="reader_bubble_section">Background narration</string>
     <string name="reader_bubble_explain">Narration keeps playing in the background, even with the screen off. The floating bubble gives you quick access to it over other apps, and you can turn it on or off here or from the top bar. It is separate from Live Dub.</string>
+    <string name="reader_bubble_explain_help">The bubble is a small floating control that stays over other apps while narration runs, so you can pause or stop without reopening Voxora. It belongs to the Reader only and is unrelated to Live Dub. Turning it off hides the bubble and does not stop narration.</string>
     <string name="reader_bubble_toggle">Floating bubble</string>
     <string name="reader_choose_language">Narration language</string>
     <string name="reader_search_language">Search languages</string>
@@ -253,7 +263,7 @@
     <string name="reader_next_segment">Next segment</string>
     <string name="reader_partial_audio">Narration stopped partway through this segment. Received audio has finished playing. Your position is kept; Play retries this segment from its beginning.</string>
     <string name="reader_retry_unit">This segment could not be narrated. Your position is kept. Check your connection, key and model access, then press Play to retry.</string>
-    <string name="reader_document_failed">Could not read this document. Choose an accessible UTF-8 TXT or unlocked, selectable-text PDF (up to 20 MB). Scanned PDFs need OCR.</string>
+    <string name="reader_document_failed">Could not read this document. Choose an accessible UTF-8 TXT or unlocked, selectable-text PDF (up to 100 MB). Scanned PDFs need OCR.</string>
     <string name="reader_book_unavailable">This book\'s saved copy is no longer on this device. Import the file again, or remove the book.</string>
     <string name="reader_preview_source">This is the selected source segment. The highlight follows the audio actually played, not an estimated translation timeline.</string>
     <string name="reader_preview_next">The next segment remains visible and can be selected during playback.</string>
@@ -311,6 +321,7 @@
     <string name="reader_voice_male">Male voice</string>
     <string name="reader_voice_male_desc">Deeper and warmer.</string>
     <string name="reader_voice_explain">The voice Gemini narrates with. It applies to every new narration segment.</string>
+    <string name="reader_voice_explain_help">Gemini narrates with a prebuilt voice, and the choice applies to every new narration segment. A segment that was already generated keeps the voice it was produced with until it is generated again. Voxora does not pitch-shift the audio.</string>
 
     <!-- Reader library -->
     <string name="reader_library_section">Your books</string>
@@ -356,6 +367,7 @@
     <string name="reader_book_info_topics">Themes and subjects</string>
     <string name="reader_book_info_generated">AI-generated overview</string>
     <string name="reader_book_info_generated_note">Written from the catalogue record, in your reading language. It is a generated summary, not a catalogue fact.</string>
+    <string name="reader_book_info_generated_help">This paragraph is generated by Gemini from the catalogue record for this book — its title, author, publisher, date, subjects and description. It is not part of the book and not a catalogue fact, and the book\'s own text is never sent.</string>
     <string name="reader_book_info_source_language">The catalogue\'s own text is in %1$s.</string>
     <string name="reader_book_cover">Cover</string>
     <string name="reader_book_fact_author">Author</string>

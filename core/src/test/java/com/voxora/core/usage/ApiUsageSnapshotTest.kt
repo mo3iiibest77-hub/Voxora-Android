@@ -224,4 +224,39 @@ class ApiUsageSnapshotTest {
         assertNull(snapshot.projectQuota.knownValue)
         assertNull(snapshot.billing.knownValue)
     }
+
+    @Test
+    fun theWeekAndTheChartAreBuiltFromObservedRequestsOnly() {
+        val ledger = GeminiUsageLedger()
+        ledger.recordSuccess(now, GeminiUsageMetadata(totalTokens = 7))
+
+        val snapshot = ApiUsageSnapshot.assemble(key, null, null, ledger, now)
+
+        assertEquals(1L, snapshot.requestsThisWeek.knownValue)
+        assertEquals(ApiUsageSnapshot.CHART_DAYS, snapshot.observedDaily.size)
+        assertEquals("2026-09-18", snapshot.observedDaily.last().day)
+        assertEquals(1, snapshot.observedDaily.last().requests)
+        assertEquals("earlier days are real zeros, not invented points", 0, snapshot.observedDaily.first().requests)
+    }
+
+    @Test
+    fun withNothingEverObservedTheWeekIsUnknownAndThereIsNoChart() {
+        val snapshot = ApiUsageSnapshot.assemble(key, null, null, GeminiUsageLedger(), now)
+
+        assertEquals(UsageUnavailable.UNKNOWN, snapshot.requestsThisWeek.reasonOrNull)
+        assertTrue("no data means nothing to draw", snapshot.observedDaily.isEmpty())
+    }
+
+    @Test
+    fun anActiveLedgerWithNoRequestsThisWeekReportsARealZeroRatherThanUnknown() {
+        val ledger = GeminiUsageLedger()
+        // A request three weeks ago: the ledger has observations, but none in the last seven days.
+        ledger.recordSuccess(now - 21L * 24L * 60L * 60L * 1000L, null)
+
+        val snapshot = ApiUsageSnapshot.assemble(key, null, null, ledger, now)
+
+        assertEquals(0L, snapshot.requestsThisWeek.knownValue)
+        assertTrue(snapshot.observedDaily.isNotEmpty())
+        assertTrue(snapshot.observedDaily.all { it.requests == 0 })
+    }
 }

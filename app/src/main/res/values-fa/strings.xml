@@ -53,6 +53,7 @@
     <string name="usage_status_unknown">نامشخص</string>
     <string name="usage_models_available">مدل‌های در دسترس</string>
     <string name="usage_requests_today">درخواست‌های امروز</string>
+    <string name="usage_requests_week">درخواست‌های این هفته</string>
     <string name="usage_requests_month">درخواست‌های این ماه</string>
     <string name="usage_tokens_input">توکن‌های ورودی</string>
     <string name="usage_tokens_output">توکن‌های خروجی</string>
@@ -64,6 +65,9 @@
     <string name="usage_last_error">آخرین دستهٔ خطا</string>
     <string name="usage_never">هرگز</string>
     <string name="usage_observed_help">این‌ها شمارش خود ⁨Voxora⁩ از درخواست‌هایی است که از همین دستگاه فرستاده — نه گزارش سهمیهٔ ⁨Google⁩.</string>
+    <string name="usage_chart_title">درخواست‌های ثبت‌شده در هر روز</string>
+    <string name="usage_chart_help">هر ستون یک روز روی همین دستگاه است که خود ⁨Voxora⁩ شمرده — نه سهمیهٔ ⁨Google⁩.</string>
+    <string name="usage_chart_day">%1$d</string>
     <string name="usage_ring_success">از %2$d درخواست این ماه، %1$d درخواست موفق بود.</string>
     <string name="usage_ring_empty">هنوز درخواستی برای این ماه ثبت نشده است.</string>
     <string name="usage_unavailable_not_configured">کلیدی تنظیم نشده</string>
@@ -172,7 +176,9 @@
     <string name="toast_gemini_ready">⁨Gemini⁩ آماده است</string>
     <string name="toast_reconnecting">در حال اتصال مجدد…</string>
     <string name="reader_privacy">⁨Reader⁩ بخش فعلی و بعدی را با کلید ⁨API⁩ ذخیره‌شده (مشترک با ⁨Live Dub⁩) به ⁨Gemini⁩ می‌فرستد. ⁨Gemini⁩ متن کامل را به زبان و سبک انتخابی روایت می‌کند و در صورت نیاز ترجمه می‌کند. صدای موقت روی دستگاه ذخیره می‌شود. از گفتار دستگاه یا سرور واسط استفاده نمی‌شود. متن فایل ⁨PDF⁩ باید قابل انتخاب باشد؛ فایل‌های اسکن‌شده به ⁨OCR⁩ نیاز دارند.</string>
-    <string name="reader_pause_hint">⁨Reader⁩ در پس‌زمینه و با صفحهٔ خاموش هم پخش می‌کند. از اینجا مکث کن یا از نوتیفیکیشن متوقفش کن. ادامه از ابتدای قطعهٔ انتخاب‌شده پخش می‌شود؛ توقف به بخش اول برمی‌گردد.</string>
+    <string name="reader_pause_hint">⁨Reader⁩ در پس‌زمینه و با صفحهٔ خاموش هم پخش می‌کند. از اینجا مکث کن یا از نوتیفیکیشن متوقفش کن. مکث جایت را نگه می‌دارد، پس پخش از همان قطعه‌ای که بودی ادامه می‌یابد. ایست پخش را پایان می‌دهد و بخشی را که در آن بودی ذخیره می‌کند تا پخش بعدی از همان بخش شروع شود، نه از ابتدای فایل.</string>
+    <string name="reader_pause_hint_help">مکث صدا را نگه می‌دارد و نوتیفیکیشن و جایت را حفظ می‌کند، پس می‌توانی از همان قطعه دوباره شروع کنی. ایست پخش را پایان می‌دهد و بخشی را که می‌شنیدی ذخیره می‌کند؛ پخش بعدی از همان بخش شروع می‌شود، نه از ابتدای فایل. هیچ‌کدام از این دو، چیزی را که قبلاً ساخته شده پاک نمی‌کنند.</string>
+    <string name="reader_playback_section">پخش</string>
     <string name="reader_connecting">در حال اتصال به ⁨Gemini⁩…</string>
     <string name="reader_notif_channel_name">Voxora Reader</string>
     <string name="reader_notif_channel_description">روایت فایل در پس‌زمینه و کنترل‌های پخش</string>
@@ -194,6 +200,8 @@
     <string name="reader_models_exhausted">اتصال به هیچ‌کدام از مدل‌های روایت ⁨Gemini⁩ ممکن نشد. اتصال و کلید را بررسی کن و دوباره تلاش کن.</string>
     <string name="reader_audio_unavailable">خروجی صدا در دسترس نیست. اپ‌های رسانه‌ای دیگر را ببند و دوباره تلاش کن.</string>
     <string name="reader_title">Voxora Reader</string>
+    <string name="reader_help_open">توضیح %1$s</string>
+    <string name="reader_help_close">فهمیدم</string>
     <string name="reader_pick">انتخاب فایل ⁨PDF⁩ یا متنی</string>
     <string name="reader_faithful">وفادار</string>
     <string name="reader_fluent">روان</string>
@@ -231,6 +239,7 @@
     <string name="reader_page_chunk">بخش %1$d از %2$d</string>
     <string name="reader_page_section">صفحهٔ خواندن</string>
     <string name="reader_page_hint">هر صفحه یک قطعه از روایت است. برای جابه‌جایی بین قطعه‌های همین بخش، چپ یا راست بکش یا از فلش‌ها استفاده کن. دکمه‌های پایین بخش را عوض می‌کنند.</string>
+    <string name="reader_page_hint_help">صفحه هر بار یک قطعه از روایت را نشان می‌دهد. با کشیدن انگشت یا فلش‌های قطعه، فقط بین قطعه‌های همین بخش جابه‌جا می‌شوی. دکمه‌های قبلی و بعدی زیر صفحه، بخش را عوض می‌کنند. متنی که روی صفحه می‌بینی، روایت در زبان و سبکی است که انتخاب کرده‌ای.</string>
     <string name="reader_page_preparing">در حال آماده‌سازی متن %1$s</string>
     <string name="reader_page_style">سبک روایت: %1$s</string>
     <string name="reader_preparing_first">قطعهٔ اول در زبان و سبک روایت انتخاب‌شده آماده می‌شود. ممکن است پیش از شروع پخش کمی طول بکشد.</string>
@@ -243,6 +252,7 @@
     <string name="reader_bubble_hide">پنهان کردن حباب شناور</string>
     <string name="reader_bubble_section">روایت در پس‌زمینه</string>
     <string name="reader_bubble_explain">روایت در پس‌زمینه و حتی با صفحهٔ خاموش ادامه دارد. حباب شناور دسترسی سریع به آن را روی برنامه‌های دیگر می‌دهد و می‌توانی آن را از همین‌جا یا از نوار بالا روشن یا خاموش کنی. این حباب از ⁨Live Dub⁩ جدا است.</string>
+    <string name="reader_bubble_explain_help">حباب یک کنترل شناور کوچک است که هنگام روایت روی برنامه‌های دیگر می‌ماند تا بدون باز کردن ⁨Voxora⁩ بتوانی صدا را نگه داری یا متوقف کنی. این حباب فقط به ⁨Reader⁩ مربوط است و به ⁨Live Dub⁩ ربطی ندارد. خاموش کردنش حباب را پنهان می‌کند و روایت را متوقف نمی‌کند.</string>
     <string name="reader_bubble_toggle">حباب شناور</string>
     <string name="reader_choose_language">زبان روایت</string>
     <string name="reader_search_language">جست‌وجوی زبان‌ها</string>
@@ -252,7 +262,7 @@
     <string name="reader_next_segment">قطعهٔ بعدی</string>
     <string name="reader_partial_audio">روایت در میانهٔ این قطعه قطع شد. صدای دریافت‌شده پخش شده است. موقعیتت حفظ می‌شود؛ با زدن پخش، این قطعه از ابتدا دوباره روایت می‌شود.</string>
     <string name="reader_retry_unit">روایت این قطعه ممکن نشد. موقعیتت حفظ می‌شود. اتصال، کلید و دسترسی به مدل را بررسی کن و برای تلاش دوباره پخش را بزن.</string>
-    <string name="reader_document_failed">خواندن این فایل ممکن نشد. یک فایل متنی ⁨UTF-8⁩ یا ⁨PDF⁩ بدون رمز با متن قابل انتخاب (تا 20 مگابایت) انتخاب کن. ⁨PDF⁩ اسکن‌شده به ⁨OCR⁩ نیاز دارد.</string>
+    <string name="reader_document_failed">خواندن این فایل ممکن نشد. یک فایل متنی ⁨UTF-8⁩ یا ⁨PDF⁩ بدون رمز با متن قابل انتخاب (تا 100 مگابایت) انتخاب کن. ⁨PDF⁩ اسکن‌شده به ⁨OCR⁩ نیاز دارد.</string>
     <string name="reader_book_unavailable">نسخهٔ ذخیره‌شدهٔ این کتاب دیگر روی این دستگاه نیست. فایل را دوباره وارد کن یا کتاب را حذف کن.</string>
     <string name="reader_preview_source">این قطعهٔ انتخاب‌شده از متن اصلی است. برجسته‌سازی بر اساس صدای واقعاً پخش‌شده تغییر می‌کند، نه زمان‌بندی تخمینی ترجمه.</string>
     <string name="reader_preview_next">قطعهٔ بعدی قابل مشاهده است و هنگام پخش هم می‌توانی انتخابش کنی.</string>
@@ -310,6 +320,7 @@
     <string name="reader_voice_male">صدای مردانه</string>
     <string name="reader_voice_male_desc">بم‌تر و گرم‌تر.</string>
     <string name="reader_voice_explain">صدایی که ⁨Gemini⁩ با آن روایت می‌کند. روی هر قطعهٔ تازهٔ روایت اعمال می‌شود.</string>
+    <string name="reader_voice_explain_help">⁨Gemini⁩ با یک صدای از پیش ساخته روایت می‌کند و این انتخاب روی هر قطعهٔ تازهٔ روایت اعمال می‌شود. قطعه‌ای که قبلاً ساخته شده، تا وقتی دوباره ساخته شود با همان صدای قبلی می‌ماند. ⁨Voxora⁩ زیر و بم صدا را تغییر نمی‌دهد.</string>
 
     <!-- Reader library -->
     <string name="reader_library_section">کتاب‌های تو</string>
@@ -355,6 +366,7 @@
     <string name="reader_book_info_topics">درون‌مایه‌ها و موضوع‌ها</string>
     <string name="reader_book_info_generated">نمای کلی تولیدشده با هوش مصنوعی</string>
     <string name="reader_book_info_generated_note">از فرادادهٔ فهرست کتاب و به زبان خواندنت نوشته شده است؛ یک خلاصهٔ تولیدشده است، نه یک واقعیتِ ثبت‌شده در فهرست.</string>
+    <string name="reader_book_info_generated_help">این بند را ⁨Gemini⁩ از فرادادهٔ فهرست این کتاب می‌سازد — عنوان، نویسنده، ناشر، تاریخ، موضوع‌ها و توضیح آن. این متن بخشی از خود کتاب و یک واقعیت ثبت‌شده در فهرست نیست، و متن خود کتاب هرگز فرستاده نمی‌شود.</string>
     <string name="reader_book_info_source_language">متن خودِ فهرست به %1$s است.</string>
     <string name="reader_book_cover">جلد</string>
     <string name="reader_book_fact_author">نویسنده</string>

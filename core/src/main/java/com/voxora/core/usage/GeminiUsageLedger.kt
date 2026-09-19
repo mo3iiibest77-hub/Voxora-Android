@@ -55,6 +55,26 @@ data class UsageMonth(
 )
 
 /**
+ * Aggregated observed usage over a rolling window of UTC days.
+ *
+ * A rolling window rather than an ISO week because "the last seven days" is what a reader means by
+ * "this week's usage", and because it cannot silently show a partial week at a month boundary. The
+ * window is Voxora's own count of requests it made, exactly like [UsageMonth] — never a Google
+ * quota reading.
+ */
+data class UsageWindow(
+    /** How many days the window spans, including the day it ends on. */
+    val days: Int,
+    val requests: Int,
+    val successes: Int,
+    val failures: Int,
+    val promptTokens: Long,
+    val responseTokens: Long,
+    val totalTokens: Long,
+    val tokensReported: Int,
+)
+
+/**
  * A bounded, local record of the requests Voxora itself made.
  *
  * ## What it deliberately does not hold
@@ -128,6 +148,34 @@ class GeminiUsageLedger private constructor(
 
     /** Total observed requests ever recorded, within the retention window. */
     fun totalRequests(): Int = days.values.sumOf { it.requests }
+
+    /**
+     * Observed usage over the [dayCount] UTC days ending on the day that contains [atMillis].
+     *
+     * A day with no activity is not stored, so it contributes nothing rather than being treated as
+     * a gap: the window is a sum over the days that were recorded. That is a real zero for a day on
+     * which Voxora made no request, which is exactly what an observed count means.
+     */
+    fun window(atMillis: Long, dayCount: Int): UsageWindow {
+        val span = dayCount.coerceAtLeast(0)
+        if (span == 0) return UsageWindow(0, 0, 0, 0, 0L, 0L, 0L, 0)
+        val end = Instant.ofEpochMilli(atMillis).atZone(ZoneOffset.UTC).toLocalDate()
+        val start = end.minusDays((span - 1).toLong())
+        val matching = days.values.filter { stored ->
+            val date = runCatching { LocalDate.parse(stored.day) }.getOrNull()
+            date != null && !date.isBefore(start) && !date.isAfter(end)
+        }
+        return UsageWindow(
+            days = span,
+            requests = matching.sumOf { it.requests },
+            successes = matching.sumOf { it.successes },
+            failures = matching.sumOf { it.failures },
+            promptTokens = matching.sumOf { it.promptTokens },
+            responseTokens = matching.sumOf { it.responseTokens },
+            totalTokens = matching.sumOf { it.totalTokens },
+            tokensReported = matching.sumOf { it.tokensReported },
+        )
+    }
 
     /**
      * An independent copy.

@@ -67,6 +67,8 @@ import com.voxora.core.usage.GeminiKeyStatus
 import com.voxora.core.usage.GeminiUsageLedger
 import com.voxora.core.usage.GeminiUsageMetadata
 import com.voxora.core.usage.UsageMetric
+import com.voxora.core.usage.UsagePoint
+import com.voxora.core.usage.UsageSeries
 import com.voxora.core.usage.UsageUnavailable
 import java.text.DateFormat
 import java.util.Date
@@ -277,6 +279,7 @@ private fun ApiUsageContent(
         item(key = "observed") {
             UsageCard {
                 UsageMetricRow(stringResource(R.string.usage_requests_today), snapshot.requestsToday)
+                UsageMetricRow(stringResource(R.string.usage_requests_week), snapshot.requestsThisWeek)
                 UsageMetricRow(stringResource(R.string.usage_requests_month), snapshot.requestsThisMonth)
                 UsageMetricRow(stringResource(R.string.usage_tokens_input), snapshot.inputTokens)
                 UsageMetricRow(stringResource(R.string.usage_tokens_output), snapshot.outputTokens)
@@ -293,6 +296,23 @@ private fun ApiUsageContent(
                     },
                 )
                 UsageNote(stringResource(R.string.usage_observed_help))
+            }
+        }
+
+        // The chart is drawn only from days Voxora actually recorded. When nothing has been
+        // observed the series is empty and this item is not composed at all, so no axis can imply
+        // a measurement that never happened.
+        if (snapshot.observedDaily.isNotEmpty()) {
+            item(key = "observed-chart") {
+                UsageCard {
+                    Text(
+                        text = stringResource(R.string.usage_chart_title),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = colors.onSurfaceVariant,
+                    )
+                    UsageBarChart(points = snapshot.observedDaily)
+                    UsageNote(stringResource(R.string.usage_chart_help))
+                }
             }
         }
 
@@ -535,6 +555,73 @@ private fun UsageNote(text: String) {
         color = VoxoraColors.explanation,
     )
 }
+
+/** Height of the chart's bar area, in dp. */
+private const val CHART_BAR_MAX_DP = 56f
+
+/**
+ * The observed-usage chart: one bar per UTC day, oldest first.
+ *
+ * Every bar is a day Voxora actually counted, so the shape is a measurement rather than an
+ * illustration: a day with no recorded request is a real zero, drawn as a hairline, and the bars
+ * are scaled against the busiest day in the window rather than against a limit nobody reported.
+ * There is deliberately **no** quota line — Google does not expose one here, and drawing one would
+ * turn "we counted 12 requests" into "you have used 12 of something".
+ *
+ * It is a [Row] of columns rather than a `Canvas`, so the layout mirrors under RTL on its own:
+ * the oldest day sits where reading starts and the newest where it ends, with no hand-reversed
+ * axis and no hardcoded coordinates.
+ */
+@Composable
+private fun UsageBarChart(points: List<UsagePoint>, modifier: Modifier = Modifier) {
+    val colors = MaterialTheme.colorScheme
+    val peak = points.maxOfOrNull { it.requests } ?: 0
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.Bottom,
+    ) {
+        points.forEach { point ->
+            val fraction = if (peak <= 0) 0f else point.requests.toFloat() / peak.toFloat()
+            val barHeight = (CHART_BAR_MAX_DP * fraction)
+                .coerceAtLeast(if (point.requests > 0) 4f else 2f)
+            Column(
+                modifier = Modifier.weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Bottom,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .height(CHART_BAR_MAX_DP.dp)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.BottomCenter,
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.6f)
+                            .height(barHeight.dp)
+                            .clip(RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
+                            .background(
+                                if (point.requests > 0) colors.primary else colors.surfaceContainerHighest,
+                            ),
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = dayLabel(point),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = colors.onSurfaceVariant,
+                    maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+/** The bar's caption: the day of the month, or the stored label when it is not a date. */
+@Composable
+private fun dayLabel(point: UsagePoint): String =
+    UsageSeries.dateOf(point)?.let { stringResource(R.string.usage_chart_day, it.dayOfMonth) } ?: point.day
 
 /** Diameter and stroke of the usage ring, in dp. */
 private const val RING_SIZE_DP = 148

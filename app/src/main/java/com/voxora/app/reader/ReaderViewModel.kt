@@ -73,6 +73,16 @@ class ReaderViewModel @Inject constructor(
     @Volatile private var languageLocale = Locale.ENGLISH
 
     /**
+     * The "start narration when extraction finishes" job a Continue leaves behind.
+     *
+     * Continue cannot start playback until the restored document has been extracted, and holding the
+     * serialized command queue open for that would block Stop — which is exactly the action a reader
+     * reaches for when a large document is taking too long. So the wait lives on its own job, and
+     * every command cancels it: asking for anything else supersedes "keep listening".
+     */
+    private var pendingAutoPlay: Job? = null
+
+    /**
      * Books whose automatic identification has already been started.
      *
      * The library is observed rather than polled: a book is created in the `NONE` state, and the
@@ -276,14 +286,32 @@ class ReaderViewModel @Inject constructor(
     fun load(uri: Uri) = runCommand { controller.load(uri) }
 
     /**
-     * Opens a library book at its saved chunk.
+     * Continue: opens a library book at its exact saved chunk **and starts narration**.
      *
-     * Gated like picking a document, because it replaces the loaded document and therefore cancels
-     * any running narration — the same contract as choosing a new file.
+     * The reader's action means "keep listening", not "load this and then press Play". The book is
+     * opened through the controller's ordinary path, which re-extracts Voxora's own copy and jumps
+     * to the persisted chunk, and then playback is started once the transport can actually run.
+     * Nothing is regenerated on the way: a chunk whose text and audio are already in the persisted
+     * cache is replayed from disk, and only a chunk that was never produced asks Gemini for
+     * anything.
+     *
+     * Extraction runs beside this command, so the book is not playable the instant `openBook`
+     * returns. Rather than block the command queue for the length of an extraction, the wait for
+     * extraction to finish runs on its own job ([pendingAutoPlay]) which any later command cancels
+     * — so Stop, Pause or another book still take effect immediately. Playback starts only when the
+     * restored queue can actually be played; an empty or failed restore simply does not start.
      */
-    fun openBook(id: String) = runCommand {
+    fun continueBook(id: String) = runCommand {
         if (!ReaderGates.canPickDocument(ready.value)) return@runCommand
         controller.openBook(id)
+        pendingAutoPlay = viewModelScope.launch(Dispatchers.IO) {
+            val resumed = controller.state.first { !ReaderGates.isExtracting(it.phase) }
+            // The job may have been cancelled while the state was being read; this turns that into
+            // the same outcome as being cancelled before it.
+            ensureActive()
+            if (!ReaderGates.canPlay(ready.value, resumed.phase, resumed.total > 0)) return@launch
+            startPlayback()
+        }
     }
 
     /** Removes a book and its stored document. */
@@ -299,6 +327,11 @@ class ReaderViewModel @Inject constructor(
     fun play() = runCommand {
         // Never start narration before the queue is ready; see ReaderGates.canPlay.
         if (!ReaderGates.canPlay(ready.value, state.value.phase, state.value.total > 0)) return@runCommand
+        startPlayback()
+    }
+
+    /** Asks the service to start (or resume) narration in the current style. */
+    private fun startPlayback() {
         try {
             ContextCompat.startForegroundService(
                 context,
@@ -325,6 +358,10 @@ class ReaderViewModel @Inject constructor(
     private fun canConfigure(): Boolean = ReaderGates.canConfigure(ready.value, state.value.phase)
 
     private fun runCommand(command: suspend () -> Unit) {
+        // Every command supersedes a pending "play when extraction finishes". Without this, a Stop
+        // tapped during a slow restore would be followed by narration starting anyway.
+        pendingAutoPlay?.cancel()
+        pendingAutoPlay = null
         val previous = commandJob
         commandJob = viewModelScope.launch(Dispatchers.IO) {
             previous?.join()

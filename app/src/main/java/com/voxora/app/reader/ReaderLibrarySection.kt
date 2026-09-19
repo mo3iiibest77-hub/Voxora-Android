@@ -66,8 +66,9 @@ private val SWIPE_THRESHOLD = 48.dp
  *
  * "Which book was I reading, and where was I?" The section always names one book — the one the
  * reader picked here, or the one the Reader has open, or the most recently read — and shows its real
- * saved chunk and when it was last read. Continue resumes exactly that book, and because the
- * position is the persisted chunk, resuming is the same chunk the reader stopped on.
+ * saved chunk and when it was last read. Continue opens exactly that book, restores its persisted
+ * chunk and starts narration, so "keep listening" is one press and never a re-synthesis of what was
+ * already produced.
  *
  * ## One list, opened vertically
  *
@@ -91,7 +92,7 @@ internal fun ReaderLibrarySection(
     books: List<ReaderBook>,
     activeBookId: String?,
     canOpen: Boolean,
-    onOpen: (String) -> Unit,
+    onContinue: (String) -> Unit,
     onRemove: (String) -> Unit,
     onImport: () -> Unit,
     modifier: Modifier = Modifier,
@@ -149,7 +150,7 @@ internal fun ReaderLibrarySection(
                                     active = book.id == activeBookId,
                                     enabled = canOpen,
                                     onSelect = { chosenId = book.id },
-                                    onOpen = { onOpen(book.id) },
+                                    onOpen = { onContinue(book.id) },
                                     onRemove = { pendingRemoval = book.id },
                                 )
                             }
@@ -159,7 +160,7 @@ internal fun ReaderLibrarySection(
                         SelectedSummary(
                             book = selected,
                             enabled = canOpen && !selected.isUnavailable,
-                            onOpen = { onOpen(selected.id) },
+                            onOpen = { onContinue(selected.id) },
                         )
                     }
                 }
@@ -511,7 +512,7 @@ private fun ReaderLibrarySectionPreview() {
             ),
             activeBookId = "a",
             canOpen = true,
-            onOpen = {},
+            onContinue = {},
             onRemove = {},
             onImport = {},
         )

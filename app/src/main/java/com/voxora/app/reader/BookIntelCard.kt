@@ -202,10 +202,10 @@ private fun IdentifiedBook(book: ReaderBook, locale: Locale, outputLang: String)
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.onSurface,
             )
-            Text(
+            ExplanationNote(
                 text = stringResource(R.string.reader_book_info_generated_note),
-                style = MaterialTheme.typography.labelSmall,
-                color = VoxoraColors.explanation,
+                helpTitle = stringResource(R.string.reader_book_info_generated),
+                helpBody = stringResource(R.string.reader_book_info_generated_help),
             )
         }
     }

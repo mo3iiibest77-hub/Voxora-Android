@@ -173,4 +173,52 @@ class ReaderLibraryTest {
         assertEquals(listOf("b"), ReaderLibrary.remove(library, "a").map { it.id })
         assertEquals(listOf("b"), ReaderLibrary.remove(ReaderLibrary.remove(library, "a"), "a").map { it.id })
     }
+
+    // ---- independent resume -----------------------------------------------------------------
+
+    @Test
+    fun twoBooksKeepIndependentResumePointsAcrossAlternatingSaves() {
+        var library = listOf(
+            book("a", state = ReaderBookState.NOT_STARTED, importedAt = 1_000L),
+            book("b", state = ReaderBookState.NOT_STARTED, importedAt = 2_000L),
+        )
+        // The reader hears Book A up to its fourth chunk, switches to Book B and stops on its third,
+        // then comes back to Book A for one more chunk.
+        library = ReaderLibrary.withPosition(library, "a", chunk = 3, atMillis = 5_000L)
+        library = ReaderLibrary.withPosition(library, "b", chunk = 2, atMillis = 6_000L)
+        library = ReaderLibrary.withPosition(library, "a", chunk = 4, atMillis = 7_000L)
+
+        // Each book resumes exactly where it was left, and neither save moved the other's position.
+        assertEquals(4, ReaderLibrary.find(library, "a")!!.currentChunk)
+        assertEquals(2, ReaderLibrary.find(library, "b")!!.currentChunk)
+        assertEquals(ReaderBookState.IN_PROGRESS, ReaderLibrary.find(library, "a")!!.state)
+        assertEquals(ReaderBookState.IN_PROGRESS, ReaderLibrary.find(library, "b")!!.state)
+    }
+
+    @Test
+    fun eachBooksResumePointSurvivesTheStoredLibraryExactly() {
+        var library = ReaderLibrary.upsert(emptyList(), book("a", chunkCount = 7))
+        library = ReaderLibrary.upsert(library, book("b", chunkCount = 9))
+        library = ReaderLibrary.withPosition(library, "a", chunk = 3, atMillis = 5_000L)
+        library = ReaderLibrary.withPosition(library, "b", chunk = 2, atMillis = 6_000L)
+
+        val restored = ReaderBookCodec.decode(ReaderBookCodec.encode(library))
+
+        // Resume names the exact logical chunk of each book: not the first chunk, and not the chunk
+        // of whichever book happened to be read last.
+        assertEquals(3, ReaderLibrary.find(restored, "a")!!.currentChunk)
+        assertEquals(2, ReaderLibrary.find(restored, "b")!!.currentChunk)
+        // The position the UI shows for each is its own, one-based.
+        assertEquals(4, ReaderLibrary.find(restored, "a")!!.displayChunk)
+        assertEquals(3, ReaderLibrary.find(restored, "b")!!.displayChunk)
+    }
+
+    @Test
+    fun aBookThatWasNeverNarratedHasNothingToResume() {
+        // Continue must not offer a position for a book the reader has not started, so an import
+        // stays NOT_STARTED until a chunk is actually reached.
+        val imported = book("a", state = ReaderBookState.NOT_STARTED)
+        assertTrue(!imported.hasResumePoint)
+        assertEquals(0, imported.currentChunk)
+    }
 }

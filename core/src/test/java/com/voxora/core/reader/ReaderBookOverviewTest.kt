@@ -102,6 +102,22 @@ class ReaderBookOverviewTest {
     }
 
     @Test
+    fun theReuseDecisionSkipsGenerationOnAHitAndRunsOnAMiss() {
+        // The repository's exact predicate, `isUsableFor(book.overviewFor(language), language)`: a
+        // usable overview for the requested language means there is nothing to generate, so a
+        // language the reader has already paid for is never paid for twice.
+        val cached = book(overviews = listOf(overview("fa")))
+        assertTrue(BookIntelOverviewPrompt.isUsableFor(cached.overviewFor("fa"), "fa"))
+
+        // A language that was never generated has no usable overview, so generation runs for it.
+        assertFalse(BookIntelOverviewPrompt.isUsableFor(cached.overviewFor("en"), "en"))
+
+        // An entry whose text is blank is a miss as well, rather than a cached "nothing".
+        val blank = book(overviews = listOf(overview("en", text = "   ")))
+        assertFalse(BookIntelOverviewPrompt.isUsableFor(blank.overviewFor("en"), "en"))
+    }
+
+    @Test
     fun storingAnOverviewTouchesNothingElse() {
         val before = book()
         val after = before.withOverview(overview("fa"))

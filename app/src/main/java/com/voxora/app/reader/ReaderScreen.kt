@@ -172,7 +172,7 @@ fun ReaderScreen(
         onJumpToChunk = viewModel::jumpToChunk,
         onJumpToSegment = viewModel::jumpToSegment,
         onToggleBubble = viewModel::setReaderBubble,
-        onOpenBook = viewModel::openBook,
+        onContinueBook = viewModel::continueBook,
         onRemoveBook = viewModel::removeBook,
         onRetryBookInfo = viewModel::retryBookInfo,
         modifier = modifier,
@@ -216,7 +216,7 @@ private fun ReaderContent(
     onJumpToChunk: (Int) -> Boolean,
     onJumpToSegment: (Int) -> Boolean,
     onToggleBubble: (Boolean) -> Unit,
-    onOpenBook: (String) -> Unit,
+    onContinueBook: (String) -> Unit,
     onRemoveBook: (String) -> Unit,
     onRetryBookInfo: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -264,7 +264,7 @@ private fun ReaderContent(
                     books = books,
                     activeBookId = activeBookId,
                     canOpen = ReaderGates.canPickDocument(ready),
-                    onOpen = onOpenBook,
+                    onOpen = onContinueBook,
                     onRemove = onRemoveBook,
                     onImport = onPick,
                 )
@@ -769,10 +769,10 @@ private fun PlaybackCard(
                 Spacer(Modifier.width(6.dp))
                 Text(stringResource(R.string.action_stop))
             }
-            Text(
+            ExplanationNote(
                 text = stringResource(R.string.reader_pause_hint),
-                style = MaterialTheme.typography.bodySmall,
-                color = VoxoraColors.explanation,
+                helpTitle = stringResource(R.string.reader_playback_section),
+                helpBody = stringResource(R.string.reader_pause_hint_help),
             )
         }
     }
@@ -825,10 +825,10 @@ private fun BubbleCard(
                     color = colors.onSurface,
                 )
             }
-            Text(
+            ExplanationNote(
                 text = stringResource(R.string.reader_bubble_explain),
-                style = MaterialTheme.typography.bodySmall,
-                color = VoxoraColors.explanation,
+                helpTitle = stringResource(R.string.reader_bubble_section),
+                helpBody = stringResource(R.string.reader_bubble_explain_help),
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1108,6 +1108,8 @@ private fun ChunkPage(
         SectionHeader(
             title = stringResource(R.string.reader_page_section),
             hint = stringResource(R.string.reader_page_hint),
+            helpTitle = stringResource(R.string.reader_page_section),
+            helpBody = stringResource(R.string.reader_page_hint_help),
         )
         ChunkHeader(
             chunk = state.chunk,
@@ -1516,11 +1518,17 @@ private fun NarrationCard(
  *
  * `internal` rather than `private` so `ReaderLibrarySection`, `ReaderVoiceSection` and
  * `BookIntelCard` can use the same heading instead of each inventing one.
+ *
+ * A hint is the section's explanation sentence. When the caller also supplies the section's help,
+ * the hint gains an info affordance beside it — the sentence itself is unchanged, so a section that
+ * already explained itself still says exactly what it said.
  */
 @Composable
 internal fun SectionHeader(
     title: String,
     hint: String? = null,
+    helpTitle: String? = null,
+    helpBody: String? = null,
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
@@ -1535,11 +1543,15 @@ internal fun SectionHeader(
             color = colors.onSurface,
         )
         if (hint != null) {
-            Text(
-                text = hint,
-                style = MaterialTheme.typography.bodySmall,
-                color = VoxoraColors.explanation,
-            )
+            if (helpTitle != null && helpBody != null) {
+                ExplanationNote(text = hint, helpTitle = helpTitle, helpBody = helpBody)
+            } else {
+                Text(
+                    text = hint,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = VoxoraColors.explanation,
+                )
+            }
         }
     }
 }
@@ -1778,7 +1790,7 @@ private fun ReaderScreenPreview(modifier: Modifier = Modifier) {
                 onJumpToSegment = { true },
                 onToggleBubble = {},
                 onVoiceChange = {},
-                onOpenBook = {},
+                onContinueBook = {},
                 onRemoveBook = {},
                 onRetryBookInfo = {},
             )
@@ -1830,7 +1842,7 @@ private fun ReaderScreenPreparingPreview(modifier: Modifier = Modifier) {
                 onJumpToSegment = { true },
                 onToggleBubble = {},
                 onVoiceChange = {},
-                onOpenBook = {},
+                onContinueBook = {},
                 onRemoveBook = {},
                 onRetryBookInfo = {},
             )
@@ -1868,7 +1880,7 @@ private fun ReaderScreenEmptyPreview(modifier: Modifier = Modifier) {
                 onJumpToSegment = { true },
                 onToggleBubble = {},
                 onVoiceChange = {},
-                onOpenBook = {},
+                onContinueBook = {},
                 onRemoveBook = {},
                 onRetryBookInfo = {},
             )

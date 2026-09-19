@@ -11,6 +11,7 @@ import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.text.TextPosition
 import com.voxora.core.reader.BookSignals
 import com.voxora.core.reader.BookSignalsReader
+import com.voxora.core.reader.ReaderDocumentLimits
 import com.voxora.core.reader.ReaderDocumentType
 import com.voxora.core.reader.ReaderSourceType
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -89,8 +90,12 @@ class TextExtractor @Inject constructor(@ApplicationContext private val context:
                         name = cursor.getString(nameColumn)
                     }
                     val sizeColumn = cursor.getColumnIndex(OpenableColumns.SIZE)
-                    if (sizeColumn >= 0 && !cursor.isNull(sizeColumn) && cursor.getLong(sizeColumn) > MAX_BYTES) {
-                        throw ExtractionException("This file is too large. Choose a file smaller than 20 MB.")
+                    if (sizeColumn >= 0 && !cursor.isNull(sizeColumn) &&
+                        ReaderDocumentLimits.exceeds(cursor.getLong(sizeColumn))
+                    ) {
+                        throw ExtractionException(
+                            "This file is too large. Choose a file no larger than ${ReaderDocumentLimits.LABEL}.",
+                        )
                     }
                 }
             }
@@ -136,11 +141,19 @@ class TextExtractor @Inject constructor(@ApplicationContext private val context:
                     var total = 0
                     while (true) {
                         coroutineContext.ensureActive()
-                        val count = input.read(buffer, 0, minOf(buffer.size, MAX_BYTES - total + 1))
+                        // Read one byte past the limit at most, so a file that is too large is
+                        // refused without ever buffering more than the supported size.
+                        val count = input.read(
+                            buffer,
+                            0,
+                            minOf(buffer.size.toLong(), ReaderDocumentLimits.MAX_BYTES - total + 1L).toInt(),
+                        )
                         if (count < 0) break
                         total += count
-                        if (total > MAX_BYTES) {
-                            throw ExtractionException("This file is too large. Choose a file smaller than 20 MB.")
+                        if (ReaderDocumentLimits.exceeds(total.toLong())) {
+                            throw ExtractionException(
+                                "This file is too large. Choose a file smaller than ${ReaderDocumentLimits.LABEL}.",
+                            )
                         }
                         output.write(buffer, 0, count)
                     }
@@ -286,7 +299,9 @@ class TextExtractor @Inject constructor(@ApplicationContext private val context:
     }
 
     private companion object {
-        const val MAX_BYTES = 20 * 1024 * 1024
+        // The document-size limit is not declared here: it is one rule shared with the document
+        // store, in `ReaderDocumentLimits`, so the boundary that reads a file and the boundary
+        // that copies it can never disagree about what "too large" means.
         const val MAX_CHARS = 2_000_000
         const val MAX_PAGES = 1_000
     }

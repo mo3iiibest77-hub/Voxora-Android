@@ -3,6 +3,7 @@ package com.voxora.app.reader.library
 import android.content.Context
 import android.net.Uri
 import com.voxora.app.util.VoxoraLog
+import com.voxora.core.reader.ReaderDocumentLimits
 import com.voxora.core.reader.ReaderSourceType
 import java.io.File
 import java.io.IOException
@@ -25,8 +26,9 @@ import kotlinx.coroutines.withContext
  * the same chunks, which is exactly what makes a persisted chunk index a valid resume point across
  * restarts.
  *
- * The copy is bounded by the same 20 MB limit `TextExtractor` enforces, so a book cannot fill the
- * device, and it is deleted when the book is removed from the library.
+ * The copy is bounded by the same limit `TextExtractor` enforces — one rule, in
+ * [ReaderDocumentLimits], consulted by both boundaries — so a book cannot fill the device, and it
+ * is deleted when the book is removed from the library.
  *
  * All file work runs on [Dispatchers.IO]. Nothing here touches the narration path.
  */
@@ -56,7 +58,7 @@ class ReaderDocumentStore(private val context: Context) {
                             val read = input.read(buffer)
                             if (read < 0) break
                             total += read
-                            if (total > MAX_BYTES) {
+                            if (ReaderDocumentLimits.exceeds(total)) {
                                 VoxoraLog.w(TAG, "Imported document exceeds the storage limit")
                                 target.delete()
                                 return@withContext null
@@ -101,8 +103,5 @@ class ReaderDocumentStore(private val context: Context) {
     private companion object {
         const val TAG = "ReaderLibrary"
         const val DIRECTORY = "reader/books"
-
-        /** Matches `TextExtractor`'s own limit, so a file it would refuse can never be copied. */
-        const val MAX_BYTES = 20L * 1024 * 1024
     }
 }
