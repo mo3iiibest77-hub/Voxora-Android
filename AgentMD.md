@@ -126,8 +126,117 @@ point of the role.
 | `themecheck.py` | local harness | no colour literal outside `Theme.kt` and the three palette files |
 | `dubguard.py` | local harness | the disabled overlay stays unconstructed, no fixed delay or `Thread.sleep` returns to `dub/`, the pure sync core (including the playback timeline and head unwrap) imports no `android.*`, `MediaSessionManager` stays in its adapter, the synchronizer reads only a monotonic clock, `DubService` consults `PlaybackTimeline.onChunkArrived` and branches on `ChunkAction.PLAY`, it feeds the synchronizer the playhead rather than `writtenNanos()`, and `DubPlayback` reads the device playback position |
 | `PaletteContrast` + the palette tests | `:app:testDebugUnitTest` | every text role clears WCAG AA on the surface it sits on |
+| `ReaderDubIsolationTest` | `:app:testDebugUnitTest` | no file under `app/.../reader/` imports or names anything from Live Dub (comments stripped, imports checked raw) |
 | `Android CI` | GitHub Actions | the only real compile check for Compose, which the dev server cannot run |
 
 The local harness cannot compile Compose. A green local run is necessary but not sufficient: the
 `Assemble debug` CI job is what proves the UI actually builds, and only a real device proves how it
 looks and reads.
+
+---
+
+## 5. Implementation record — Reader voice, library, resume and Book Intelligence
+
+This section is a **record**, not a rule. The standing rules are §1–§4 above; the Reader's
+architecture contract is `AGENTS.md` §5.
+
+**Commit.** `de8961294090842e5758bdc715e2e607ba0350ce` (`de89612`), branch
+`feat/reader-segmented-spooling`.
+
+### What was requested
+
+One coherent Reader upgrade: a narration-voice choice (Female/Male, native Gemini voices, no DSP
+pitch shifting), a persistent multi-book library that survives restart, exact chunk-level resume,
+per-book progress and reading state, automatic book identification after import, and a detailed
+source-backed "About This Book" section — all inside the Reader, with Live Dub untouched, no local
+Gradle, and CI as the only Android compile check.
+
+### What was actually implemented
+
+- **Voice.** `core/.../gemini/ReaderVoice.kt` — `FEMALE` → `Aoede`, `MALE` → `Charon`, both verified
+  present in the documented 30-voice Gemini prebuilt set. `GeminiReaderSession.connect(...)` now
+  takes the voice as a required argument (the private `READER_VOICE = "Kore"` constant is gone), and
+  `ReaderController.play` resolves it once per run from `UserPrefs.readerVoice` and passes it to
+  every session. **Gemini publishes no gender or pitch field**, so the mapping is documented in code
+  as a curated perceptual choice, not an API fact.
+- **Persistent library.** `ReaderBookRepository` (DataStore `voxora_reader_library`, one versioned
+  JSON document) + `ReaderDocumentStore` (the imported document copied into
+  `filesDir/reader/books/<id>.<ext>`). Records hold id, path, title, source type, chunk count,
+  current chunk, state, timestamps, cached metadata, lookup state and signals. The pure rules live in
+  `core/.../reader/ReaderLibrary.kt` and the codec in `ReaderBookCodec.kt`.
+- **Resume.** Chunk-level, saved at import / chunk-becomes-current / pause / stop / navigation /
+  completion, fire-and-forget on the IO scope so it can never stall audio. `stop()` no longer resets
+  the queue. Opening a book re-extracts Voxora's copy and jumps to the saved chunk before publishing
+  `READY`. The legacy `last_doc_uri` is migrated once, through the ordinary import path.
+- **Book identification.** `BookSignalsReader` (ISBN with check-digit validation, conservative
+  title/author heuristics) → `GoogleBooksSource` (primary) + `OpenLibrarySource` (fallback) →
+  `BookMatch` (ISBN exact > title+author > unique near-exact title; ties refused) → cached on the
+  book. `MetadataHttp` classifies offline/timeout/rate-limit/server/parse distinctly and sends no
+  credential.
+- **Book Intelligence.** `BookIntel` produces source-backed facts only, plus a fiction/non-fiction
+  read from subject headings alone. `BookIntelCard` renders identified / not-found / ambiguous /
+  unavailable states. Covers use a minimal hand-written OkHttp + `BitmapFactory` loader.
+- **UI.** `ReaderLibrarySection` (continue card + book list + import), `ReaderVoiceSection`,
+  `BookIntelCard`, `ReaderCoverImage`. `ReaderScreen` remains a stateless `ReaderContent`. All new
+  strings exist in `values` and `values-fa`.
+- **No AI-generated overview was added.** Doing it safely would need a metadata-only path; the
+  source-backed section is the required baseline and the optional part was deliberately skipped.
+
+### Files and components changed
+
+`core`: new `reader/` package (11 files) + `gemini/ReaderVoice.kt`; modified
+`gemini/GeminiReaderSession.kt`, `prefs/UserPrefs.kt`.
+`app`: new `reader/library/` (2 files) + `reader/{ReaderVoiceSection, ReaderLibrarySection,
+BookIntelCard, ReaderCoverImage, ReaderRecency}.kt`; modified `reader/{ReaderController,
+ReaderViewModel, ReaderScreen, TextExtractor}.kt`, `res/values*/strings.xml`.
+Docs: `AGENTS.md` §5/§13/§14.
+
+### Tests actually run
+
+| What | How | Result |
+|---|---|---|
+| Pure-JVM contract suite (55 classes) | `/tmp/rr/validate-cloud.sh` (kotlinc 2.0.21 + JUnit, `-ea`) | **642 tests OK** |
+| Android-side Reader layers | `/tmp/rr/validate-reader-android.sh` (android.jar + AndroidX/Hilt/DataStore stubs) | **OK** |
+| Guards | `themecheck`, `themeguard`, `checkimports`, `stringcheck`, `bidi_fa`, `dubguard` | all **OK** |
+| Live Dub untouched | `git status` filtered for `dub/`, `GeminiLive*`, `SystemCapture`, `DubPlayback`, `FloatingBubble*`, `DelayedScreenOverlay` | **no changes** |
+
+New test classes: `ReaderVoiceTest`, `ReaderBookTest`, `ReaderLibraryTest`, `ReaderBookCodecTest`,
+`BookSignalsReaderTest`, `BookMatchTest`, `BookIntelTest`, `GoogleBooksSourceTest`,
+`OpenLibrarySourceTest`, `BookMetadataLookupTest` (core); `ReaderRecencyTest`,
+`ReaderDubIsolationTest` (app); plus two voice setup-payload cases added to
+`GeminiReaderSessionTest`.
+
+The harness caught one real defect before push: `library.remove(...)` was being called inside
+`synchronized(lock)`, which is a suspension point inside a critical section.
+
+### CI result
+
+**Not yet verified at the time this record was written.** The commit is pushed and the Android CI
+run is checked before the task is reported complete; see the final report for the run id and the
+per-job conclusions. Do not read this section as a green build until it says so.
+
+### Unresolved limitations
+
+- **Compose is not compiled locally.** `ReaderScreen.kt`, `ReaderVoiceSection.kt`,
+  `BookIntelCard.kt`, `ReaderLibrarySection.kt` and `ReaderCoverImage.kt` are only compiled by the
+  CI `Assemble debug` job. `checkimports.py` is necessary but not sufficient.
+- **No real-device testing was performed.** The voice's perceived character, the cover loader, the
+  library layout under RTL, and the resume behaviour after a real process death are all
+  device-verification items.
+- **Google Books and Open Library were never contacted for real.** Their contracts are pinned
+  against `MockWebServer` with recorded response shapes; live coverage, rate limits and the exact
+  match quality on real documents are unverified.
+- **Matching quality on real title pages is unmeasured.** The heuristics are deliberately
+  conservative (a rejection is preferred to a wrong attachment), so real-world identification may
+  often end in `NOT_FOUND`.
+- **The library is one DataStore document**, bounded in practice by the capped description length
+  (4 000 chars per book) and by realistic library sizes. A very large library was not exercised.
+- **The legacy migration runs once.** If it fails for a transient reason, the old document is not
+  retried.
+
+### Exact next action
+
+Push `de89612`, then read the Android CI run for that commit via the GitHub REST API and confirm
+**both** jobs (`Unit tests`, `Assemble debug APK`) are `success`. If `Assemble debug` fails, the
+error is in a Compose file the local harness cannot compile — fix and push again before any further
+feature work.
