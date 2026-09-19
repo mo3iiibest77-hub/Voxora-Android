@@ -306,4 +306,44 @@ class ReaderSpoolTest {
             ReaderSpool.fromCache(file, 6L, listOf(ReaderSpool.UnitEnd(0, 4L, "short")))
         }
     }
+
+    // ---- where a resumed chunk starts playing --------------------------------------------------
+
+    /**
+     * The arithmetic behind "resume at the saved segment, not at the first one".
+     *
+     * A chunk restored from the cache always begins at unit zero, because the entry holds the whole
+     * chunk. The reader's saved segment is a separate thing, and this is what turns it into the byte
+     * the consumer starts writing from. Getting it wrong in either direction is audible: too small
+     * replays units the reader already heard, too large plays one unit's audio under another's text.
+     */
+    @Test
+    fun aRestoredChunkPlaysFromTheSavedUnitRatherThanFromTheFirstOne() {
+        val ends = listOf(
+            ReaderSpool.UnitEnd(0, 100L, "first"),
+            ReaderSpool.UnitEnd(1, 250L, "second"),
+            ReaderSpool.UnitEnd(2, 600L, "third"),
+            ReaderSpool.UnitEnd(3, 900L, "fourth"),
+        )
+        // Unit zero starts at the beginning of the file; every later unit starts where the previous
+        // one ended. Resuming at the third unit must not replay the first two.
+        assertEquals(0L, ReaderSpool.unitStart(ends, 0))
+        assertEquals(100L, ReaderSpool.unitStart(ends, 1))
+        assertEquals(250L, ReaderSpool.unitStart(ends, 2))
+        assertEquals(600L, ReaderSpool.unitStart(ends, 3))
+    }
+
+    @Test
+    fun aSpoolStillBeingProducedStartsAtItsOwnFirstByte() {
+        // A produced spool records only the units it produced, and its first recorded unit is the
+        // first byte of the file — so production starting at unit 2 must still start at offset 0.
+        val ends = listOf(
+            ReaderSpool.UnitEnd(2, 80L, "first produced"),
+            ReaderSpool.UnitEnd(3, 200L, "second produced"),
+        )
+        assertEquals(0L, ReaderSpool.unitStart(ends, 2))
+        assertEquals(80L, ReaderSpool.unitStart(ends, 3))
+        // Nothing has been recorded yet: the unit the producer is about to write begins at zero.
+        assertEquals(0L, ReaderSpool.unitStart(emptyList(), 2))
+    }
 }

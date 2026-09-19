@@ -28,6 +28,7 @@ import com.voxora.app.ui.theme.VoxoraTheme
 import com.voxora.core.gemini.ReaderLanguages
 import com.voxora.core.reader.BookIntel
 import com.voxora.core.reader.BookIntelFactKind
+import com.voxora.core.reader.BookIntelOverview
 import com.voxora.core.reader.BookWorkKind
 import com.voxora.core.reader.MatchConfidence
 import com.voxora.core.reader.MetadataLookupState
@@ -67,6 +68,12 @@ internal fun BookIntelCard(
 ) {
     val colors = MaterialTheme.colorScheme
     val metadata = book.metadata
+    // The generated overview is per output language. It is read here rather than only inside
+    // [IdentifiedBook] because a book the catalogues could **not** identify can now have one: its
+    // overview is generated from the book's own details and a bounded web search. That text is the
+    // only Book Intelligence such a book can have, so showing it is the point of the fallback —
+    // hiding it behind the identified branch would have made the whole path invisible.
+    val overview = remember(book.overviews, outputLang) { book.overviewFor(outputLang) }
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
@@ -79,16 +86,28 @@ internal fun BookIntelCard(
             SectionHeader(title = stringResource(R.string.reader_book_info_section))
             when {
                 metadata != null && book.lookup == MetadataLookupState.FOUND ->
-                    IdentifiedBook(book = book, locale = locale, outputLang = outputLang)
+                    IdentifiedBook(book = book, locale = locale, outputLang = outputLang, overview = overview)
 
                 book.lookup == MetadataLookupState.NOT_FOUND ->
-                    Unidentified(message = stringResource(R.string.reader_book_info_not_found), onRetry = onRetry)
+                    Unidentified(
+                        message = stringResource(R.string.reader_book_info_not_found),
+                        onRetry = onRetry,
+                        overview = overview,
+                    )
 
                 book.lookup == MetadataLookupState.AMBIGUOUS ->
-                    Unidentified(message = stringResource(R.string.reader_book_info_ambiguous), onRetry = onRetry)
+                    Unidentified(
+                        message = stringResource(R.string.reader_book_info_ambiguous),
+                        onRetry = onRetry,
+                        overview = overview,
+                    )
 
                 book.lookup == MetadataLookupState.UNAVAILABLE ->
-                    Unidentified(message = stringResource(R.string.reader_book_info_unavailable), onRetry = onRetry)
+                    Unidentified(
+                        message = stringResource(R.string.reader_book_info_unavailable),
+                        onRetry = onRetry,
+                        overview = overview,
+                    )
 
                 else -> Row(verticalAlignment = Alignment.CenterVertically) {
                     CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
@@ -105,7 +124,12 @@ internal fun BookIntelCard(
 }
 
 @Composable
-private fun IdentifiedBook(book: ReaderBook, locale: Locale, outputLang: String) {
+private fun IdentifiedBook(
+    book: ReaderBook,
+    locale: Locale,
+    outputLang: String,
+    overview: BookIntelOverview?,
+) {
     val colors = MaterialTheme.colorScheme
     val metadata = book.metadata ?: return
     // A language is only ever named in a locale Voxora ships, and only when the app's own catalog
@@ -116,9 +140,6 @@ private fun IdentifiedBook(book: ReaderBook, locale: Locale, outputLang: String)
     val facts = remember(metadata, locale) { BookIntel.facts(metadata, languageName) }
     val topics = remember(metadata) { BookIntel.topics(metadata) }
     val description = BookIntel.description(metadata)
-    // The generated overview is per output language: this is the one that matches the language the
-    // reader has chosen to hear the book in, and it is absent until one has been generated.
-    val overview = remember(book.overviews, outputLang) { book.overviewFor(outputLang) }
     // The catalogue's subject headings are always in the catalogue's own language ("Evolution",
     // "Biology"), so when the overview carries headings rendered in the reading language those win.
     // They live inside the per-language overview, which is why a language switch can never show the
@@ -190,25 +211,7 @@ private fun IdentifiedBook(book: ReaderBook, locale: Locale, outputLang: String)
     // The generated overview comes first: it is the part written in the reader's own language, and
     // it is labelled as generated so it can never be mistaken for something the catalogue said.
     // Absent until a generation has succeeded, which is why its absence is not an error state.
-    if (overview != null) {
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(
-                text = stringResource(R.string.reader_book_info_generated),
-                style = MaterialTheme.typography.labelMedium,
-                color = colors.onSurfaceVariant,
-            )
-            Text(
-                text = overview.text,
-                style = MaterialTheme.typography.bodyMedium,
-                color = colors.onSurface,
-            )
-            ExplanationNote(
-                text = stringResource(R.string.reader_book_info_generated_note),
-                helpTitle = stringResource(R.string.reader_book_info_generated),
-                helpBody = stringResource(R.string.reader_book_info_generated_help),
-            )
-        }
-    }
+    GeneratedOverviewBlock(overview)
 
     if (description != null) {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -268,14 +271,53 @@ private fun IdentifiedBook(book: ReaderBook, locale: Locale, outputLang: String)
     }
 }
 
+/**
+ * The generated paragraph, labelled as generated.
+ *
+ * Shared by the identified and unidentified branches because the paragraph is the same kind of thing
+ * in both: text Gemini wrote, in the reader's reading language, from evidence rather than from the
+ * book. What differs is only the evidence — a catalogue record, or the book's own details and a
+ * search — and the help text says both.
+ */
 @Composable
-private fun Unidentified(message: String, onRetry: () -> Unit) {
+private fun GeneratedOverviewBlock(overview: BookIntelOverview?) {
+    if (overview == null) return
+    val colors = MaterialTheme.colorScheme
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = stringResource(R.string.reader_book_info_generated),
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.onSurfaceVariant,
+        )
+        Text(
+            text = overview.text,
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.onSurface,
+        )
+        ExplanationNote(
+            text = stringResource(R.string.reader_book_info_generated_note),
+            helpTitle = stringResource(R.string.reader_book_info_generated),
+            helpBody = stringResource(R.string.reader_book_info_generated_help),
+        )
+    }
+}
+
+/**
+ * The "could not be identified" branches.
+ *
+ * A generated overview is shown here too when one exists. It is not a contradiction of the message
+ * above it: the message says no **catalogue** identified the book, and the paragraph is labelled as
+ * generated text written from a search — two different statements, kept visibly different.
+ */
+@Composable
+private fun Unidentified(message: String, onRetry: () -> Unit, overview: BookIntelOverview?) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(
             text = message,
             style = MaterialTheme.typography.bodyMedium,
             color = VoxoraColors.explanation,
         )
+        GeneratedOverviewBlock(overview)
         OutlinedButton(onClick = onRetry) {
             Text(text = stringResource(R.string.reader_book_info_retry))
         }

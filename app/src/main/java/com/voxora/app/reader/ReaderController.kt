@@ -13,6 +13,7 @@ import com.voxora.core.gemini.ReaderSessionStatus
 import com.voxora.core.prefs.UserPrefs
 import com.voxora.core.prefs.UsagePrefs
 import com.voxora.core.reader.ReaderBook
+import com.voxora.core.reader.ReaderPosition
 import com.voxora.core.reader.ReaderSourceType
 import com.voxora.core.usage.UsageFailureCategory
 import com.voxora.core.usage.UsageRecorder
@@ -81,7 +82,27 @@ class ReaderController @Inject constructor(
     internal val narrationText = mutableNarrationText.asStateFlow()
     private var queue = ChunkQueue(emptyList())
     private var documentName = ""
+    /**
+     * Zero-based index of the narration unit inside the current chunk — the logical segment the
+     * reader is on.
+     *
+     * This is the *reading* position, not a playback cursor: it is updated from audible progress,
+     * persisted with the chunk, and restored before playback starts. It is deliberately kept apart
+     * from a spool's `firstUnit` (where production of a chunk begins) and from the byte cursor the
+     * consumer writes from, because a chunk restored from the cache holds every unit while playback
+     * may start in the middle of it.
+     */
     private var segmentIndex = 0
+    /**
+     * Orders position writes by the moment the position was decided, not by the moment it landed.
+     *
+     * A save is fire-and-forget on [documentScope], so two saves for the same book can reach the
+     * library out of order; the repository's mutex serializes them but cannot order them. Each save
+     * takes the next value of this counter under [lock] and the record refuses a stamp that is not
+     * newer than the one it already holds. Seeded from the record on open so a restart cannot make a
+     * fresh write look older than the stored one.
+     */
+    private var positionStamp = 0L
     /**
      * The library record the loaded document belongs to, or null before a book is committed.
      *
@@ -131,6 +152,17 @@ class ReaderController @Inject constructor(
         val spool: ReaderSpool,
         var producer: Job? = null,
         val attempts: Int,
+        /**
+         * The unit playback starts at — the *playback cursor*.
+         *
+         * Deliberately not [ReaderSpool.firstUnit]: that is where **production** begins, and a spool
+         * restored from the cache always begins at unit zero because the entry holds the whole chunk.
+         * A reader who resumes at segment 3 of a cached chunk therefore has `spool.firstUnit == 0`
+         * and `startUnit == 3`; playback starts at 3 while every earlier unit's audio and text stay
+         * available and are never re-generated. For a produced spool the two coincide, because
+         * production and playback start at the same unit.
+         */
+        val startUnit: Int,
     )
     private data class AudibleUnit(val index: Int, val startFrame: Long, var transcript: String = "")
     private class NarrationFailure(val resource: Int) : Exception()
@@ -212,7 +244,11 @@ class ReaderController @Inject constructor(
             return
         }
         library.markOpened(id)
-        VoxoraLog.d("Reader", "Resume requested book=$id chunk=${book.currentChunk + 1} of ${book.chunkCount}")
+        VoxoraLog.d(
+            "Reader",
+            "Resume requested book=$id chunk=${book.currentChunk + 1} of ${book.chunkCount} " +
+                "segment=${book.currentSegment + 1}",
+        )
         startLoad(Uri.fromFile(file), restoring = restoring, book = book)
     }
 
@@ -251,6 +287,7 @@ class ReaderController @Inject constructor(
         displayTexts.clear()
         documentName = ""
         segmentIndex = 0
+        positionStamp = 0L
         bookId = null
         publish(ReaderPhase.EXTRACTING)
         loadJob = documentScope.launch(start = CoroutineStart.LAZY) {
@@ -309,13 +346,22 @@ class ReaderController @Inject constructor(
                         documentName = document.name
                         bookId = committed?.id ?: book?.id
                         segmentIndex = 0
-                        // Resume exactly where the reader stopped. The queue clamps the index, so a
-                        // record written against an older extraction can never point past the end.
+                        // Resume exactly where the reader stopped. The queue clamps the chunk, so a
+                        // record written against an older extraction can never point past the end,
+                        // and the segment is clamped against this extraction's real unit count — a
+                        // segment written against a longer extraction lands on the last unit of the
+                        // chunk rather than crashing or jumping to the start of the book.
+                        positionStamp = book?.positionStamp ?: 0L
                         if (book != null) {
                             queue.jumpTo(book.currentChunk)
+                            segmentIndex = ReaderPosition.clampSegment(
+                                persisted = book.currentSegment,
+                                segmentCount = queue.segments(queue.index).size,
+                            )
                             VoxoraLog.d(
                                 "Reader",
-                                "Resume restored book=${book.id} chunk=${queue.index + 1} of ${queue.size}",
+                                "Resume restored book=${book.id} chunk=${queue.index + 1} of " +
+                                    "${queue.size} segment=${segmentIndex + 1}",
                             )
                         }
                         loadJob = null
@@ -345,19 +391,25 @@ class ReaderController @Inject constructor(
     }
 
     /**
-     * Saves the current chunk beside playback. Must be called with [lock] held.
+     * Saves the current chunk **and segment** beside playback. Must be called with [lock] held.
      *
      * Deliberately fire-and-forget: the save is launched on the document scope, so a slow disk can
      * never stall audio, and it is never called from a PCM callback — only from the transitions that
      * matter (a chunk becoming current, pause, stop, navigation, completion). That is the whole
-     * reason chunk-level persistence is affordable.
+     * reason position persistence is affordable.
+     *
+     * The position and its ordering stamp are both captured **under the lock**, before the coroutine
+     * is launched: reading them inside the coroutine would let a later save's values be written
+     * under an earlier save's stamp, which is precisely the inversion the stamp exists to prevent.
      */
     private fun savePositionLocked() {
         val id = bookId ?: return
         val chunk = queue.index
+        val segment = segmentIndex
+        val stamp = ++positionStamp
         documentScope.launch {
             try {
-                library.recordPosition(id, chunk)
+                library.recordPosition(id, chunk, segment, stamp)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -576,10 +628,13 @@ class ReaderController @Inject constructor(
                 checkOwned(run, position.revision)
                 queue.segments(index)
             }
-            // A stored chunk may only be replayed from its first unit: the entry holds the whole
-            // chunk from unit zero, so starting mid-chunk from it would play unit zero's audio
-            // under a later unit's text.
-            val entry = if (firstUnit == 0) loadCached(index, units) else null
+            // The cache is consulted whatever unit the run starts at. An entry holds the **whole**
+            // chunk from unit zero, so it is just as usable when resuming at unit 3 as at unit 0 —
+            // what changes is only where playback starts, which is the slot's `startUnit`. Refusing
+            // the entry for a mid-chunk resume was what made Continue re-narrate a chunk that was
+            // already on disk.
+            val startUnit = ReaderPosition.clampSegment(firstUnit, units.size)
+            val entry = loadCached(index, units)
             val restored = entry?.let { cached ->
                 try {
                     val spool = ReaderSpool.fromCache(cached.audio, cached.committed, cached.ends)
@@ -598,7 +653,13 @@ class ReaderController @Inject constructor(
                     null
                 }
             }
-            val slot = Slot(index, units, restored ?: ReaderSpool(context.cacheDir, firstUnit), attempts = attempts)
+            val slot = if (restored != null) {
+                Slot(index, units, restored, attempts = attempts, startUnit = startUnit)
+            } else {
+                // Nothing cached: production and playback both begin at the requested unit, because
+                // the earlier units of this chunk were never produced and cannot be replayed.
+                Slot(index, units, ReaderSpool(context.cacheDir, startUnit), attempts = attempts, startUnit = startUnit)
+            }
             slots.add(slot)
             // A restored chunk has nothing to produce, so it gets no producer at all: the consumer
             // reads it exactly like a finished one, and no request is made for content already here.
@@ -650,7 +711,10 @@ class ReaderController @Inject constructor(
             // being shown a timer that pretends to be progress.
             setPreparingFirstUnit(true, run)
             try {
-                awaitInitialRendering(current, position.segment, language, mode, run, position.revision)
+                // The slot's own start unit, not the raw persisted segment: prepare clamps it
+                // against this extraction's real unit count, and the gate must wait for the unit
+                // that will actually play.
+                awaitInitialRendering(current, current.startUnit, language, mode, run, position.revision)
             } finally {
                 setPreparingFirstUnit(false, run)
             }
@@ -796,12 +860,17 @@ class ReaderController @Inject constructor(
     }
 
     /**
-     * Waits for a promoted chunk's first unit to have its rendering before that chunk's audio.
+     * Waits for a promoted chunk's first **playable** unit to have its rendering before that
+     * chunk's audio.
      *
      * Unlike [awaitInitialRendering], a unit the producer has already failed is **not** turned
      * into an error here: the consumer reports that failure with the precise message (including
      * partial audio) and drains whatever was produced, so this gate only ever adds the wait for
      * text, never changes how a failure is surfaced.
+     *
+     * The unit is [Slot.startUnit], not the spool's production boundary: a chunk restored from the
+     * cache holds every unit but plays from the resumed one, and it is that unit whose text must be
+     * on the page first.
      */
     private suspend fun awaitNextUnitRendering(
         slot: Slot,
@@ -810,7 +879,7 @@ class ReaderController @Inject constructor(
         run: Long,
         revision: Long,
     ) {
-        val unit = slot.spool.firstUnit
+        val unit = slot.startUnit
         val display = displayTexts.forMode(mode)
         while (true) {
             currentCoroutineContext().ensureActive()
@@ -951,7 +1020,13 @@ class ReaderController @Inject constructor(
         revision: Long,
     ) {
         if (slot.attempts == 1 && slot.spool.state.value.canRetryPrefetch(0L)) throw EmptyPrefetchFailure()
-        var cursor = 0L
+        // Where playback starts inside the spool. A produced spool begins at the unit production
+        // began at, so its first byte is byte zero. A spool restored from the cache holds the whole
+        // chunk, so resuming at a later unit starts at the byte where that unit's audio begins; the
+        // earlier units are never written to the output and are never re-generated. This is the
+        // third position the reader's resume has to keep apart: the persisted logical segment, the
+        // cache entry's first unit, and this playback cursor.
+        var cursor = ReaderSpool.unitStart(slot.spool.state.value.ends, slot.startUnit)
         val audible = ArrayDeque<AudibleUnit>()
         fun progress() = synchronized(lock) {
             checkOwned(run, revision)
@@ -971,7 +1046,7 @@ class ReaderController @Inject constructor(
             audibleProgress = reportProgress
         }
         try {
-            for (unit in slot.spool.firstUnit until slot.units.size) {
+            for (unit in slot.startUnit until slot.units.size) {
                 val marker = AudibleUnit(unit, output.writtenFrames)
                 synchronized(lock) {
                     // A unit the producer has already finished carries its transcript with it.
@@ -1046,8 +1121,9 @@ class ReaderController @Inject constructor(
             captureAudibleProgress()
             cancelOwned()
             publish(ReaderPhase.PAUSED)
-            // Pausing preserves the chunk — that was always true in memory — and now it preserves
-            // it across the process too.
+            // Pausing preserves the exact position — chunk and segment — in memory and, now, across
+            // the process too. Pause and Stop differ in what they do to playback, never in what they
+            // do to where the reader was.
             savePositionLocked()
         }
     }
@@ -1055,14 +1131,19 @@ class ReaderController @Inject constructor(
     /**
      * Stops narration.
      *
-     * Stop ends playback; it does **not** throw away where the reader was. The queue keeps its
-     * position and that position is saved, so the next Play resumes at the same chunk instead of
-     * restarting the document. Resetting the queue here was the defect that made Stop send the
-     * reader back to chunk one.
+     * Stop ends playback; it does **not** throw away where the reader was. Both the chunk and the
+     * segment are kept and persisted, so the next Play resumes at the same logical position instead
+     * of restarting the document or restarting the chunk. Resetting either here was the defect that
+     * made Stop send the reader back.
+     *
+     * Audible progress is captured *before* the run is cancelled. [cancelOwned] advances the
+     * generation, which is exactly what makes a cancelled run's own capture a no-op — so without
+     * this the position would fall back to whatever was last published rather than to the unit the
+     * reader was actually hearing.
      */
     fun stop() = synchronized(lock) {
+        captureAudibleProgress()
         cancelOwned()
-        segmentIndex = 0
         publish(if (queue.size == 0) ReaderPhase.IDLE else ReaderPhase.STOPPED)
         savePositionLocked()
     }
@@ -1102,6 +1183,9 @@ class ReaderController @Inject constructor(
         if (target == segmentIndex) return@synchronized false
         segmentIndex = target
         navigate()
+        // A swipe is a position the reader chose, so it is persisted like any other move. Without
+        // this, the segment reached by swiping was the one position a process death lost.
+        savePositionLocked()
         true
     }
 

@@ -72,9 +72,13 @@ enum class ReaderBookState(val id: String) {
  *
  * ## Progress
  *
- * [currentChunk] is a zero-based index into the extracted chunks — the persisted resume point, and
- * the only position the Reader promises. PCM offsets are deliberately not persisted: they are not
- * stable across re-extraction, and a chunk is the granularity the user actually perceives.
+ * [currentChunk] is a zero-based index into the extracted chunks and [currentSegment] a zero-based
+ * index into that chunk's narration units — together the persisted resume point, and the only
+ * position the Reader promises. PCM offsets are deliberately not persisted: they are not stable
+ * across re-extraction, and a unit is the smallest thing a reader perceives as "where I was".
+ *
+ * The two are persisted **together and independently per book**. A single global cursor was the
+ * defect that made Stop lose the segment and made one book's position able to overwrite another's.
  */
 data class ReaderBook(
     /** Stable local identity. Generated once at import and never reused. */
@@ -87,6 +91,30 @@ data class ReaderBook(
     val chunkCount: Int,
     /** Zero-based index of the chunk to resume at. */
     val currentChunk: Int,
+    /**
+     * Zero-based index of the narration unit to resume at inside [currentChunk].
+     *
+     * Coarse on purpose, like [currentChunk]: it is the unit the reader was hearing, not a byte
+     * offset. A record written before this field existed decodes to `0`, which is exactly the old
+     * chunk-start behaviour — a safe migration rather than a lost position.
+     *
+     * It is clamped to the real unit count only where that count is known (the controller, which has
+     * the extracted queue), because the record itself stores chunk counts, not unit counts.
+     */
+    val currentSegment: Int = 0,
+    /**
+     * Orders position writes so an older save can never overwrite a newer one.
+     *
+     * Position saves are fire-and-forget coroutines, so two of them for the same book can reach the
+     * library out of order. The stamp is assigned under the controller's lock, so it orders the
+     * writes by the moment the position was *decided* rather than by the moment the write happened;
+     * [withPosition] refuses a stamp that is not newer than the one already stored.
+     *
+     * `0` means "no ordering information" — a record written before this field existed, or a caller
+     * that does not care. Such a write is always applied, so the stamp can never make a legitimate
+     * position unsavable.
+     */
+    val positionStamp: Long = 0L,
     val state: ReaderBookState,
     /** When the document was imported, in wall-clock epoch millis. */
     val importedAt: Long,
@@ -135,21 +163,37 @@ data class ReaderBook(
     val hasResumePoint: Boolean get() = state != ReaderBookState.NOT_STARTED && !isUnavailable && chunkCount > 0
 
     /**
-     * Moves the persisted position.
+     * Moves the persisted position, chunk and segment together.
      *
      * A move on a completed book is ignored: completion is a fact about the document, and a stale
      * in-flight save must not silently un-complete it. Every other move records [IN_PROGRESS] and
      * stamps [lastReadAt], because "the reader was here" is exactly what recency means.
+     *
+     * [stamp] orders concurrent saves; see [positionStamp]. A `0` stamp carries no ordering claim and
+     * is always applied, so a caller that does not participate in ordering behaves exactly as it did
+     * before the stamp existed. A non-zero stamp that is not newer than the stored one is **dropped**
+     * rather than applied: that is what stops a slow write for an older segment from landing after a
+     * fast write for a newer one.
+     *
+     * [segment] is only bounded below, because a record does not know how many units its chunk has.
+     * The controller clamps it against the extracted queue, where the real count is known.
      */
-    fun withPosition(chunk: Int, atMillis: Long): ReaderBook {
+    fun withPosition(chunk: Int, segment: Int, atMillis: Long, stamp: Long): ReaderBook {
         if (isCompleted) return this
-        val bounded = chunk.coerceIn(0, maxOf(0, chunkCount - 1))
+        if (stamp != 0L && stamp <= positionStamp) return this
+        val boundedChunk = chunk.coerceIn(0, maxOf(0, chunkCount - 1))
         return copy(
-            currentChunk = bounded,
+            currentChunk = boundedChunk,
+            currentSegment = segment.coerceAtLeast(0),
+            positionStamp = maxOf(positionStamp, stamp),
             state = ReaderBookState.IN_PROGRESS,
             lastReadAt = maxOf(lastReadAt, atMillis),
         )
     }
+
+    /** Moves the persisted position without an ordering claim. See the four-argument overload. */
+    fun withPosition(chunk: Int, atMillis: Long): ReaderBook =
+        withPosition(chunk, currentSegment, atMillis, stamp = 0L)
 
     /** Records that the reader was in this book, without claiming a position. */
     fun touched(atMillis: Long): ReaderBook = copy(lastReadAt = maxOf(lastReadAt, atMillis))
@@ -159,10 +203,15 @@ data class ReaderBook(
      *
      * A completed record refuses ordinary position moves — completion is a fact about the document.
      * Hearing the book again is a different act, and it is the one case that clears completion,
-     * because the reader has deliberately gone back to the beginning.
+     * because the reader has deliberately gone back to the beginning. That is also the only act that
+     * resets the segment, and it resets it to the first unit of the first chunk.
+     *
+     * The stamp is left alone so it keeps increasing: the writes that follow a restart are newer
+     * than everything written before it.
      */
     fun reopened(atMillis: Long): ReaderBook = copy(
         currentChunk = 0,
+        currentSegment = 0,
         state = ReaderBookState.IN_PROGRESS,
         lastReadAt = maxOf(lastReadAt, atMillis),
     )

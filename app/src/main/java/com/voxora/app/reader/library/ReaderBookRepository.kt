@@ -8,16 +8,22 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.voxora.app.reader.ReaderChunkCache
 import com.voxora.app.util.VoxoraLog
+import com.voxora.core.reader.BookContextSource
 import com.voxora.core.reader.BookIntelOverview
 import com.voxora.core.reader.BookIntelOverviewGenerator
-import com.voxora.core.reader.BookIntelOverviewPrompt
+import com.voxora.core.reader.BookIntelOverviewPlan
 import com.voxora.core.reader.BookLookupOutcome
+import com.voxora.core.reader.BookMetadata
 import com.voxora.core.reader.BookMetadataLookup
 import com.voxora.core.reader.BookSignals
+import com.voxora.core.reader.GeminiGroundedBookSearch
+import com.voxora.core.reader.GeminiHttpSearchTransport
 import com.voxora.core.reader.GeminiHttpTextTransport
 import com.voxora.core.reader.GoogleBooksSource
 import com.voxora.core.reader.MetadataLookupState
 import com.voxora.core.reader.MetadataUnavailable
+import com.voxora.core.reader.OpenLibraryCover
+import com.voxora.core.reader.OpenLibraryCoverLookup
 import com.voxora.core.reader.OpenLibrarySource
 import com.voxora.core.reader.ReaderBook
 import com.voxora.core.reader.ReaderBookCodec
@@ -117,6 +123,19 @@ class ReaderBookRepository @Inject constructor(
      * book exactly as it was.
      */
     private val overviewGenerator = BookIntelOverviewGenerator(GeminiHttpTextTransport())
+
+    /**
+     * The third identification stage: a bounded web search for a book the catalogues could not
+     * identify. Constructed here for the same reason the catalogue sources are — it has no
+     * dependencies of its own beyond an HTTP client.
+     */
+    private val contextSearch: BookContextSource = GeminiGroundedBookSearch(GeminiHttpSearchTransport())
+
+    /**
+     * A cover for a matched book whose catalogue record carried none, looked up by the ISBN the
+     * document itself supplied and verified before it is attached. See [OpenLibraryCover].
+     */
+    private val coverLookup = OpenLibraryCoverLookup()
 
     private val mutex = Mutex()
     private val metadataMutex = Mutex()
@@ -235,17 +254,23 @@ class ReaderBookRepository @Inject constructor(
     }
 
     /**
-     * Records the reading position.
+     * Records the reading position — chunk and segment — for one book.
      *
      * Called on the transitions that matter — import, a chunk becoming current, pause, stop,
      * navigation and completion — never per audio callback. It is a suspend call the controller
      * makes *beside* playback, so a slow write can never stall audio.
+     *
+     * [stamp] is the controller's ordering claim; see [ReaderBook.positionStamp]. It is applied
+     * inside [updateLibrary]'s lock, so a save for an older position that arrives after a newer one
+     * is dropped rather than written.
      */
     suspend fun recordPosition(
         id: String,
         chunk: Int,
+        segment: Int = 0,
+        stamp: Long = 0L,
         atMillis: Long = System.currentTimeMillis(),
-    ) = mutate(id) { ReaderLibrary.withPosition(it, id, chunk, atMillis) }
+    ) = mutate(id) { ReaderLibrary.withPosition(it, id, chunk, atMillis, segment, stamp) }
 
     /** Records that narration finished. */
     suspend fun complete(id: String, atMillis: Long = System.currentTimeMillis()) =
@@ -331,8 +356,12 @@ class ReaderBookRepository @Inject constructor(
                 BookLookupOutcome.Unavailable(MetadataUnavailable.SERVER_ERROR)
             }
             when (outcome) {
-                is BookLookupOutcome.Matched ->
-                    mutate(id) { ReaderLibrary.withMetadata(it, id, outcome.metadata) }
+                is BookLookupOutcome.Matched -> {
+                    // Resolved before the transform: the cover lookup suspends, and the reducer is
+                    // deliberately pure and non-suspending.
+                    val metadata = withFallbackCover(outcome.metadata, signals)
+                    mutate(id) { ReaderLibrary.withMetadata(it, id, metadata) }
+                }
                 BookLookupOutcome.NotFound ->
                     mutate(id) { ReaderLibrary.withLookup(it, id, MetadataLookupState.NOT_FOUND) }
                 BookLookupOutcome.Ambiguous ->
@@ -344,21 +373,51 @@ class ReaderBookRepository @Inject constructor(
     }
 
     /**
+     * Fills a missing cover from an identifier-tied source, and never displaces a real one.
+     *
+     * A catalogue that matched a book almost always has its cover, so this normally does nothing.
+     * When it does act, it acts only on the **document's own** ISBN — the one signal that identifies
+     * this work rather than a similar one — and only after the image has been fetched and confirmed
+     * to exist. A cover that cannot be verified is not attached at all, which is the honest outcome:
+     * the card shows its placeholder rather than a picture of the wrong book.
+     */
+    private suspend fun withFallbackCover(metadata: BookMetadata, signals: BookSignals): BookMetadata {
+        if (metadata.coverUrl != null) return metadata
+        val fallback = try {
+            coverLookup.verifiedCover(signals.isbn)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            VoxoraLog.w(TAG, "Cover fallback failed: ${e.javaClass.simpleName}")
+            null
+        } ?: return metadata
+        return metadata.copy(coverUrl = OpenLibraryCover.preferred(metadata.coverUrl, fallback))
+    }
+
+    /**
      * Generates and caches the Book Intelligence overview for [id] in [language], when missing.
      *
      * ## What it sends, and what it does not
      *
-     * Only the catalogue record is sent — never the document, never an excerpt of it, and never
-     * anything about the reader's position. The narration session is not involved: this is a
-     * separate one-shot text call, and it runs beside playback rather than in it.
+     * Either the catalogue record, or — when no catalogue identified the book — the signals
+     * extraction already produced plus the findings of a bounded web search. **The document is never
+     * sent** and no excerpt of it is sent, in either path. The narration session is not involved:
+     * this is a separate one-shot text call, and it runs beside playback rather than in it.
+     *
+     * ## Which path is taken
+     *
+     * [BookIntelOverviewPlan] decides, and it is the same decision the UI makes — so the two cannot
+     * disagree about whether a book needs an overview. A catalogue record is preferred whenever one
+     * exists, because it is strictly better evidence; the search is a fallback for a book no
+     * catalogue could identify, which previously got nothing at all.
      *
      * ## Why it is safe to call speculatively
      *
      * A cached text for [language] short-circuits before any network work, so switching languages
-     * back and forth is free. A missing catalogue match, an unconfigured key, an offline device and
-     * a rejected model all end the same way: nothing is generated, nothing is stored, and the book
-     * is untouched. Serialized by [overviewMutex] so two triggers cannot generate the same text
-     * twice.
+     * back and forth is free. No catalogue match **and** no usable search finding, an unconfigured
+     * key, an offline device and a rejected model all end the same way: nothing is generated, nothing
+     * is stored, and the book is untouched. Serialized by [overviewMutex] so two triggers cannot
+     * generate the same text twice.
      *
      * @return true when a new overview was generated and stored.
      */
@@ -367,23 +426,59 @@ class ReaderBookRepository @Inject constructor(
             overviewMutex.withLock {
                 ensureLoaded()
                 val book = ReaderLibrary.find(_books.value, id) ?: return@withLock false
-                val metadata = book.metadata ?: return@withLock false
-                if (BookIntelOverviewPrompt.isUsableFor(book.overviewFor(language), language)) {
-                    return@withLock false
+                when (val need = BookIntelOverviewPlan.need(book, language)) {
+                    BookIntelOverviewPlan.Need.None -> false
+
+                    BookIntelOverviewPlan.Need.FromMetadata -> {
+                        val metadata = book.metadata ?: return@withLock false
+                        val overview = generated { overviewGenerator.generate(apiKey, metadata, language) }
+                            ?: return@withLock false
+                        mutate(id) { ReaderLibrary.withOverview(it, id, overview) }
+                        true
+                    }
+
+                    is BookIntelOverviewPlan.Need.FromContext -> {
+                        val signals = book.signals ?: return@withLock false
+                        VoxoraLog.d(TAG, "Book Intelligence: no catalogue record, searching for context")
+                        val context = try {
+                            contextSearch.search(signals, apiKey)
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: Exception) {
+                            VoxoraLog.w(TAG, "Context search failed: ${e.javaClass.simpleName}")
+                            null
+                        }
+                        if (context == null) {
+                            // Nothing to summarise. Generating from a title alone would be invented
+                            // content, so the card keeps showing only what the signals support.
+                            VoxoraLog.d(TAG, "Book Intelligence: no search context, nothing generated")
+                            return@withLock false
+                        }
+                        val overview = generated {
+                            overviewGenerator.generateFromContext(apiKey, signals, context, language)
+                        } ?: return@withLock false
+                        // The fingerprint travels with the text, so a later question that differs
+                        // cannot be answered with this one.
+                        if (overview.contextFingerprint != need.fingerprint) {
+                            VoxoraLog.w(TAG, "Book Intelligence: generated text does not match its question")
+                            return@withLock false
+                        }
+                        mutate(id) { ReaderLibrary.withOverview(it, id, overview) }
+                        true
+                    }
                 }
-                val overview = try {
-                    overviewGenerator.generate(apiKey, metadata, language)
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    // The generator is total, so this is belt-and-braces only.
-                    VoxoraLog.w(TAG, "Overview generation failed: ${e.javaClass.simpleName}")
-                    null
-                } ?: return@withLock false
-                mutate(id) { ReaderLibrary.withOverview(it, id, overview) }
-                true
             }
         }
+
+    /** Runs one generation, reducing every failure to null. The generators are total already. */
+    private suspend fun generated(block: suspend () -> BookIntelOverview?): BookIntelOverview? = try {
+        block()
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        VoxoraLog.w(TAG, "Overview generation failed: ${e.javaClass.simpleName}")
+        null
+    }
 
     /** Applies a pure library transform and persists the result, if anything changed. */
     private suspend fun mutate(

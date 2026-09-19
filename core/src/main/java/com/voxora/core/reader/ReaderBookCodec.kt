@@ -73,6 +73,8 @@ object ReaderBookCodec {
         .put("sourceType", book.sourceType.id)
         .put("chunkCount", book.chunkCount)
         .put("currentChunk", book.currentChunk)
+        .put("currentSegment", book.currentSegment)
+        .put("positionStamp", book.positionStamp)
         .put("state", book.state.id)
         .put("importedAt", book.importedAt)
         .put("lastReadAt", book.lastReadAt)
@@ -98,6 +100,11 @@ object ReaderBookCodec {
                     val themes = JSONArray()
                     for (theme in overview.themes) themes.put(theme)
                     json.put("themes", themes)
+                }
+                // Omitted when empty, which is every catalogue-backed overview — the only kind that
+                // existed before the search fallback.
+                if (overview.contextFingerprint.isNotEmpty()) {
+                    json.put("contextFingerprint", overview.contextFingerprint)
                 }
                 array.put(json)
             }
@@ -134,6 +141,12 @@ object ReaderBookCodec {
         val localPath = entry.optionalString("localPath") ?: return null
         val chunkCount = entry.optInt("chunkCount", 0).coerceAtLeast(0)
         val currentChunk = entry.optInt("currentChunk", 0).coerceIn(0, maxOf(0, chunkCount - 1))
+        // A record written before the segment existed has none, and `0` is the first unit — which is
+        // exactly what the old build resumed at, so the migration preserves the old behaviour rather
+        // than inventing a position. The upper bound is not known here (a record stores chunk counts,
+        // not unit counts); the controller clamps it against the extracted queue.
+        val currentSegment = entry.optInt("currentSegment", 0).coerceAtLeast(0)
+        val positionStamp = entry.optLong("positionStamp", 0L).coerceAtLeast(0L)
         val importedAt = entry.optLong("importedAt", 0L)
         return ReaderBook(
             id = id,
@@ -142,6 +155,8 @@ object ReaderBookCodec {
             sourceType = ReaderSourceType.normalize(entry.optionalString("sourceType")),
             chunkCount = chunkCount,
             currentChunk = currentChunk,
+            currentSegment = currentSegment,
+            positionStamp = positionStamp,
             state = ReaderBookState.normalize(entry.optionalString("state")),
             importedAt = importedAt,
             lastReadAt = entry.optLong("lastReadAt", importedAt),
@@ -171,6 +186,9 @@ object ReaderBookCodec {
                     // Missing, empty or malformed means "no themes", which the card treats as a
                     // reason to fall back to the catalogue's own headings — never as a failure.
                     themes = json.stringList("themes"),
+                    // Missing means a catalogue-backed text, which is what every overview written
+                    // before the search fallback was.
+                    contextFingerprint = json.optionalString("contextFingerprint") ?: "",
                 ),
             )
         }

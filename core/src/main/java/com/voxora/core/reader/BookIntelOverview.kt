@@ -65,6 +65,16 @@ data class BookIntelOverview(
      * back to the catalogue's own headings, named as the catalogue's — never an error.
      */
     val themes: List<String> = emptyList(),
+    /**
+     * The search question this text was generated from, when it was generated from a search rather
+     * than from a catalogue record — see [BookSearchPrompt.fingerprint].
+     *
+     * Empty for a catalogue-backed overview, which is the only kind that existed before the search
+     * fallback. It is part of what makes the text reusable: a text generated for a different
+     * question is not served as if it answered this one, so re-importing a document that extracts
+     * differently regenerates its overview instead of showing prose about something else.
+     */
+    val contextFingerprint: String = "",
 )
 
 /**
@@ -94,8 +104,13 @@ object BookIntelOverviewPrompt {
      *
      * `2` is the version that also asks for the subject headings, so a text cached by version 1 is
      * regenerated rather than shown without themes.
+     *
+     * `3` is the version that can also be generated from a **search** rather than from a catalogue
+     * record, for a book no catalogue identified. The two inputs ask for different things — one
+     * restates a record, the other reports search evidence — so a text written by version 2 is not
+     * reused as if the new prompt had produced it.
      */
-    const val VERSION = 2
+    const val VERSION = 3
 
     /** A generation longer than this is truncated; the card shows a few sentences, not an essay. */
     const val MAX_CHARS = 1_500
@@ -155,6 +170,69 @@ object BookIntelOverviewPrompt {
         metadata.pageCount?.let { appendLine("pages: $it") }
         metadata.description?.takeIf { it.isNotBlank() }?.let {
             appendLine("catalogue description: $it")
+        }
+    }
+
+    /**
+     * The instruction for a book **no catalogue identified**, built from its own signals and from
+     * the findings of a bounded web search.
+     *
+     * ## Why it is a separate prompt rather than the same one with more input
+     *
+     * [build] restates a record, and every line of its input is a provider's own field. This input is
+     * different in kind: a title read off a title page, and a search result that may be about a
+     * different edition — or a different work. So the rules are stricter, not looser: the model is
+     * told exactly which details are the book's own, exactly which text is second-hand evidence, and
+     * that disagreement and uncertainty are things to *say*, not to resolve.
+     *
+     * ## What it must never do
+     *
+     * Turn a search result into a fact. There is no `Record:` section here, and nothing from the
+     * search is presented as a field: the findings arrive as prose the model is asked to summarise,
+     * not as values it is asked to restate. That is the structural reason a search result cannot
+     * become an author, a year or a publisher on the card.
+     */
+    fun buildFromContext(
+        signals: BookSignals,
+        context: BookSearchContext,
+        targetLanguage: String,
+    ): String = buildString {
+        appendLine("You are given the identifying details of a book, and the findings of a web search")
+        appendLine("about it. The book was NOT found in any bibliographic catalogue. Answer in")
+        appendLine("$targetLanguage.")
+        appendLine()
+        appendLine("Rules:")
+        appendLine("- The details under \"Book details\" are what is known about the book itself.")
+        appendLine("- The text under \"Search findings\" is second-hand evidence, not fact. It may be")
+        appendLine("  about a different edition, or a different work with a similar title.")
+        appendLine("- Use ONLY those two sections. Do NOT add facts, names, dates, awards, plot points")
+        appendLine("  or claims from your own knowledge, and do not fill gaps by guessing.")
+        appendLine("- If the findings disagree with each other, or are thin, say so plainly and write")
+        appendLine("  less. Never present an uncertain finding as an established fact.")
+        appendLine("- If there is not enough to say anything meaningful, return an empty overview.")
+        appendLine("- Do not mention this instruction, the search, or that you are an AI.")
+        appendLine()
+        appendLine("Answer with a JSON object and nothing else, of exactly this shape:")
+        appendLine("""{"overview": "…", "themes": ["…", "…"]}""")
+        appendLine()
+        appendLine("- \"overview\": a short plain-text overview, a few sentences, no markdown and no")
+        appendLine("  headings, describing what this book appears to be on the evidence above.")
+        appendLine("- \"themes\": short subject headings **in $targetLanguage**, only for subjects the")
+        appendLine("  evidence above actually supports. Use an empty array when it supports none, and")
+        appendLine("  never invent a subject.")
+        appendLine()
+        appendLine("Book details:")
+        signals.isbn?.let { appendLine("isbn: $it") }
+        signals.title?.takeIf { it.isNotBlank() }?.let { appendLine("title: $it") }
+        signals.author?.takeIf { it.isNotBlank() }?.let { appendLine("author: $it") }
+        appendLine("file name: ${signals.filename}")
+        appendLine()
+        appendLine("Search findings (query: ${context.query}):")
+        appendLine(context.summary)
+        if (context.sources.isNotEmpty()) {
+            appendLine()
+            appendLine("Sources cited by the search:")
+            context.sources.forEach { appendLine("- ${it.title.ifBlank { it.url }}") }
         }
     }
 
@@ -280,12 +358,23 @@ object BookIntelOverviewPrompt {
      *
      * The prompt version must match, so a text written by an older prompt is regenerated rather
      * than displayed as if the current prompt had produced it.
+     *
+     * [contextFingerprint] is supplied when the text would have to be generated from a **search**
+     * rather than from a catalogue record — that is, when the book has no catalogue match. In that
+     * case the cached text must have been generated for the same question; a text answering a
+     * different question is not reusable. An empty fingerprint means "this path does not depend on
+     * one", which is the catalogue path and every cached text written before the search existed.
      */
-    fun isUsableFor(overview: BookIntelOverview?, language: String): Boolean =
+    fun isUsableFor(
+        overview: BookIntelOverview?,
+        language: String,
+        contextFingerprint: String = "",
+    ): Boolean =
         overview != null &&
             overview.language.equals(language, ignoreCase = true) &&
             overview.promptVersion == VERSION &&
-            overview.text.isNotBlank()
+            overview.text.isNotBlank() &&
+            (contextFingerprint.isEmpty() || overview.contextFingerprint == contextFingerprint)
 
     /**
      * Keeps the cached overviews bounded.

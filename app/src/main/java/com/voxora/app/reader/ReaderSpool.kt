@@ -175,6 +175,21 @@ internal class ReaderSpool private constructor(
             )
         }
 
+        /**
+         * The byte offset at which [unit]'s audio begins inside a spool whose [ends] are known.
+         *
+         * This is what lets a chunk restored from the cache start playing at the reader's saved
+         * segment instead of at unit zero: the entry holds every unit, and this names the first byte
+         * of the one to play. It returns `0` for the first recorded unit — which is also the right
+         * answer for a spool a producer is still filling, because its first recorded unit *is* the
+         * first byte of the file.
+         *
+         * Pure, so the arithmetic that decides where playback starts is unit-tested rather than
+         * only exercised on a device.
+         */
+        fun unitStart(ends: List<UnitEnd>, unit: Int): Long =
+            ends.firstOrNull { it.index == unit - 1 }?.bytes ?: 0L
+
         fun removeOrphans(cacheDir: File) {
             cacheDir.listFiles { file -> file.name.startsWith("voxora-reader-") && file.extension == "pcm" }
                 ?.forEach { if (!it.delete()) VoxoraLog.w("ReaderSpool", "Orphan spool deletion failed") }

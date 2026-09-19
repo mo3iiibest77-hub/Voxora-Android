@@ -34,13 +34,20 @@ object ReaderLibrary {
     fun find(books: List<ReaderBook>, id: String?): ReaderBook? =
         if (id == null) null else books.firstOrNull { it.id == id }
 
-    /** Records a reading position, leaving every other book untouched. */
+    /**
+     * Records a reading position — chunk and segment — leaving every other book untouched.
+     *
+     * [segment] and [stamp] are optional so an existing caller that only knows the chunk keeps
+     * working; see [ReaderBook.withPosition] for what each means.
+     */
     fun withPosition(
         books: List<ReaderBook>,
         id: String,
         chunk: Int,
         atMillis: Long,
-    ): List<ReaderBook> = mapBook(books, id) { it.withPosition(chunk, atMillis) }
+        segment: Int = 0,
+        stamp: Long = 0L,
+    ): List<ReaderBook> = mapBook(books, id) { it.withPosition(chunk, segment, atMillis, stamp) }
 
     /** Records that the reader was in a book, without moving its position. */
     fun touched(books: List<ReaderBook>, id: String, atMillis: Long): List<ReaderBook> =

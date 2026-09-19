@@ -68,6 +68,46 @@ class BookIntelOverviewGenerator(
         // and a call without a key would only produce a failure the reader cannot act on.
         if (key.isEmpty() || language.isBlank()) return null
         val prompt = BookIntelOverviewPrompt.build(metadata, targetLanguage = language)
+        val answer = request(key, prompt) ?: return null
+        return store(language = language, answer = answer, contextFingerprint = "")
+    }
+
+    /**
+     * Generates the overview for a book **no catalogue identified**, from its own signals and the
+     * findings of a bounded web search.
+     *
+     * ## Why an empty context generates nothing
+     *
+     * The product rule is that the Book Intelligence section is source-backed or absent. With no
+     * catalogue record and no search finding there is nothing to restate and nothing to summarise —
+     * only a title and a file name — and a paragraph generated from those would be invented
+     * content wearing the label "generated from what is known". So this returns null and the card
+     * simply keeps showing what the book's own signals support. The prompt's own rules would not
+     * stop a model from producing something plausible; not asking is what stops it.
+     *
+     * The context is carried into the cache key by its fingerprint, so a text generated for one
+     * question is never served as the answer to a different one.
+     */
+    suspend fun generateFromContext(
+        apiKey: String?,
+        signals: BookSignals,
+        context: BookSearchContext,
+        language: String,
+    ): BookIntelOverview? {
+        val key = apiKey?.trim().orEmpty()
+        if (key.isEmpty() || language.isBlank()) return null
+        if (context.isEmpty) return null
+        val prompt = BookIntelOverviewPrompt.buildFromContext(signals, context, targetLanguage = language)
+        val answer = request(key, prompt) ?: return null
+        return store(
+            language = language,
+            answer = answer,
+            contextFingerprint = BookSearchPrompt.fingerprint(signals),
+        )
+    }
+
+    /** One `generateContent` call, with every failure already reduced to null. */
+    private suspend fun request(key: String, prompt: String): GeneratedOverview? {
         val result = try {
             transport.generate(key, model, prompt)
         } catch (e: CancellationException) {
@@ -75,13 +115,24 @@ class BookIntelOverviewGenerator(
         } catch (_: Exception) {
             GeminiTextResult.Failed(MetadataUnavailable.SERVER_ERROR)
         }
-        val answer = when (result) {
-            is GeminiTextResult.Failed -> return null
+        return when (result) {
+            is GeminiTextResult.Failed -> null
             is GeminiTextResult.Text -> result.value
         }
-        // The answer is re-sanitized here even though [BookIntelOverviewPrompt.parse] already did:
-        // this generator is the boundary that decides what may be stored, and a transport that
-        // bypassed `parse` must not be able to persist prose the rule would have rejected.
+    }
+
+    /**
+     * The one place an answer becomes a stored overview.
+     *
+     * The answer is re-sanitized here even though [BookIntelOverviewPrompt.parse] already did: this
+     * generator is the boundary that decides what may be stored, and a transport that bypassed
+     * `parse` must not be able to persist prose the rule would have rejected.
+     */
+    private fun store(
+        language: String,
+        answer: GeneratedOverview,
+        contextFingerprint: String,
+    ): BookIntelOverview? {
         val text = BookIntelOverviewPrompt.sanitize(answer.text) ?: return null
         return BookIntelOverview(
             language = language,
@@ -89,6 +140,7 @@ class BookIntelOverviewGenerator(
             model = model,
             generatedAt = clock(),
             themes = answer.themes,
+            contextFingerprint = contextFingerprint,
         )
     }
 

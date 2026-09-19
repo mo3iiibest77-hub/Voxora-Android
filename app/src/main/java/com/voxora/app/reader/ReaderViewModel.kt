@@ -13,7 +13,7 @@ import com.voxora.core.gemini.ReaderLanguages
 import com.voxora.core.gemini.ReaderNarrationModes
 import com.voxora.core.gemini.ReaderVoice
 import com.voxora.core.prefs.UserPrefs
-import com.voxora.core.reader.BookIntelOverviewPrompt
+import com.voxora.core.reader.BookIntelOverviewPlan
 import com.voxora.core.reader.MetadataLookupState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -162,27 +162,30 @@ class ReaderViewModel @Inject constructor(
     /**
      * Keeps the Book Intelligence overview in step with the chosen output language.
      *
-     * A book that has been identified but has no overview for the current language gets one
-     * generated — once. This is what makes "explanatory content follows the Reader output language"
-     * true even though no public catalogue carries a Persian description: the catalogue's own
-     * description is translated and condensed, and clearly labelled as generated.
+     * A book that needs an overview for the current language gets one generated — once. That
+     * includes a book **no catalogue could identify**: for one of those the repository runs a bounded
+     * web search first and generates from its findings, which is what makes Book Intelligence exist
+     * for a title the public catalogues do not carry. This is what makes "explanatory content
+     * follows the Reader output language" true even though no public catalogue carries a Persian
+     * description: the source text is translated and condensed, and clearly labelled as generated.
      *
-     * The staleness test is [BookIntelOverviewPrompt.isUsableFor], **not** "an entry exists". A
-     * record cached by an older prompt version is not usable, and testing only for presence would
-     * skip it here — before the repository's own check ever runs — so a prompt improvement would be
+     * Whether an overview is needed is decided by [BookIntelOverviewPlan], the **same** pure
+     * decision the repository makes. Testing only "a catalogue record exists" here — which is what
+     * this used to do — meant the search fallback was never reached, because the UI skipped exactly
+     * the books it exists for. Testing only "an entry exists" would be the opposite fault: a record
+     * cached by an older prompt would be treated as current, so a prompt improvement would be
      * silently masked by an answer that was already paid for. Both layers have to agree on what
      * "cached" means.
      *
      * Runs entirely beside playback. Nothing here gates narration, and a book with no catalogue
-     * match, no API key or no network simply never gets an overview.
+     * match, no search finding, no API key or no network simply never gets an overview.
      */
     private fun observeLibraryForOverviews() {
         viewModelScope.launch {
             combine(library.books, outputLang) { books, language -> books to language }
                 .collect { (books, language) ->
                     for (book in books) {
-                        if (book.metadata == null) continue
-                        if (BookIntelOverviewPrompt.isUsableFor(book.overviewFor(language), language)) continue
+                        if (BookIntelOverviewPlan.need(book, language) == BookIntelOverviewPlan.Need.None) continue
                         if (!overviewStarted.add("${book.id}|$language")) continue
                         launch(Dispatchers.IO) { runOverview(book.id, language) }
                     }
