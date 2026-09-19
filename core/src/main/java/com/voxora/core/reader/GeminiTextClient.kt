@@ -20,7 +20,7 @@ import org.json.JSONObject
  * optional enhancement, and nothing about it may reach the reading path as an error.
  */
 sealed class GeminiTextResult {
-    data class Text(val value: String) : GeminiTextResult()
+    data class Text(val value: GeneratedOverview) : GeminiTextResult()
     data class Failed(val reason: MetadataUnavailable) : GeminiTextResult()
 }
 
@@ -75,15 +75,20 @@ class BookIntelOverviewGenerator(
         } catch (_: Exception) {
             GeminiTextResult.Failed(MetadataUnavailable.SERVER_ERROR)
         }
-        val text = when (result) {
+        val answer = when (result) {
             is GeminiTextResult.Failed -> return null
-            is GeminiTextResult.Text -> BookIntelOverviewPrompt.sanitize(result.value)
-        } ?: return null
+            is GeminiTextResult.Text -> result.value
+        }
+        // The answer is re-sanitized here even though [BookIntelOverviewPrompt.parse] already did:
+        // this generator is the boundary that decides what may be stored, and a transport that
+        // bypassed `parse` must not be able to persist prose the rule would have rejected.
+        val text = BookIntelOverviewPrompt.sanitize(answer.text) ?: return null
         return BookIntelOverview(
             language = language,
             text = text,
             model = model,
             generatedAt = clock(),
+            themes = answer.themes,
         )
     }
 
@@ -134,11 +139,15 @@ class GeminiHttpTextTransport(
             )
             // Low temperature: this is a restatement of supplied facts, not a creative task, and
             // the output is cached and shown as if it were knowledge.
+            // JSON output is requested so the prose and the localized subject headings arrive as
+            // separate fields. It is a request, not an assumption: `parse` still accepts a plain
+            // prose answer, because a usable overview matters more than the shape it arrives in.
             .put(
                 "generationConfig",
                 JSONObject()
                     .put("temperature", 0.2)
-                    .put("maxOutputTokens", 700),
+                    .put("maxOutputTokens", 700)
+                    .put("responseMimeType", JSON),
             )
             .toString()
         val request = Request.Builder()

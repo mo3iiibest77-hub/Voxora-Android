@@ -60,8 +60,18 @@ class ReaderBookOverviewTest {
         fetchedAt = 1_000L,
     )
 
-    private fun overview(language: String, text: String = "متن", at: Long = 10L) =
-        BookIntelOverview(language = language, text = text, model = "m", generatedAt = at)
+    private fun overview(
+        language: String,
+        text: String = "متن",
+        at: Long = 10L,
+        themes: List<String> = emptyList(),
+    ) = BookIntelOverview(
+        language = language,
+        text = text,
+        model = "m",
+        generatedAt = at,
+        themes = themes,
+    )
 
     // ---- the cached overview ----------------------------------------------------------------
 
@@ -180,6 +190,34 @@ class ReaderBookOverviewTest {
     }
 
     @Test
+    fun codecRoundTripsTheThemesInsideTheirLanguage() {
+        val original = book(
+            overviews = listOf(
+                overview("fa", "متن فارسی", at = 5L, themes = listOf("فرگشت", "زیست‌شناسی")),
+                overview("en", "english", at = 6L, themes = listOf("Evolution", "Biology")),
+            ),
+        )
+        val restored = ReaderBookCodec.decode(ReaderBookCodec.encode(listOf(original))).single()
+        assertEquals(listOf("فرگشت", "زیست‌شناسی"), restored.overviewFor("fa")?.themes)
+        assertEquals(listOf("Evolution", "Biology"), restored.overviewFor("en")?.themes)
+    }
+
+    @Test
+    fun aLanguageSwitchCanNeverShowTheOtherLanguagesThemes() {
+        // The themes live inside the per-language record, so the only headings a given language can
+        // show are the ones generated for that language — there is no shared list to leak from.
+        val book = book(
+            overviews = listOf(
+                overview("fa", at = 5L, themes = listOf("فرگشت")),
+                overview("en", at = 6L, themes = listOf("Evolution")),
+            ),
+        )
+        assertEquals(listOf("فرگشت"), book.overviewFor("fa")?.themes)
+        assertEquals(listOf("Evolution"), book.overviewFor("en")?.themes)
+        assertNull(book.overviewFor("de")?.themes)
+    }
+
+    @Test
     fun codecTreatsAnEntryWithNoPromptVersionAsStale() {
         // An overview written before the version was persisted: it must not be shown as current.
         val raw = """
@@ -242,5 +280,25 @@ class ReaderBookOverviewTest {
         // Keeps the stored bytes of a record that never generated anything identical to before.
         val encoded = ReaderBookCodec.encode(listOf(book()))
         assertFalse(encoded.contains("overviews"))
+    }
+
+    @Test
+    fun codecOmitsThemesWhenThereAreNoneAndDecodesTheirAbsenceAsEmpty() {
+        // A record written before themes existed must decode to "no themes", which the card reads as
+        // a reason to fall back to the catalogue's own headings — never as a failure.
+        val encoded = ReaderBookCodec.encode(listOf(book(overviews = listOf(overview("fa")))))
+        assertTrue(encoded.contains("overviews"))
+        assertFalse(encoded.contains("themes"))
+        assertTrue(ReaderBookCodec.decode(encoded).single().overviewFor("fa")!!.themes.isEmpty())
+
+        val raw = """
+            {"version":1,"books":[{
+              "id":"book-1","localPath":"/data/reader/books/book-1.pdf","title":"T",
+              "sourceType":"pdf","chunkCount":10,"currentChunk":0,"state":"in_progress",
+              "importedAt":1,"lastReadAt":1,"lookup":"found",
+              "overviews":[{"language":"fa","text":"متن","model":"m","generatedAt":3,"promptVersion":2}]
+            }]}
+        """.trimIndent()
+        assertTrue(ReaderBookCodec.decode(raw).single().overviewFor("fa")!!.themes.isEmpty())
     }
 }

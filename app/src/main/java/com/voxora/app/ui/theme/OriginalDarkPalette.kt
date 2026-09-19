@@ -13,18 +13,46 @@ package com.voxora.app.ui.theme
  * - `f25cc5b` — the same dark values extended with the container/outline ramp and the semantic
  *   status tones (`success #3DDC84`, `warning #E6B422`, `danger #E85D5D`).
  *
- * The one deliberate change from the historical palette is the **explanation/help** role: the
- * historical warm tan `#A79E8C` read as a second gold accent rather than as guidance, so the owner
- * replaced it with a dedicated icy/electric blue, `#7DD3FC`. It is a guidance-only role — never a
- * heading, body, button or status colour — and it clears AA (11.9:1) on the near-black page and
- * (10.2:1) on a card. Because the icy blue is brighter than the warm secondary text, the historical
- * "explanation is dimmer than secondary content" ordering does not apply to this theme; the role is
- * kept distinct by hue and by its dedicated use instead.
+ * ## The current redesign — two semantic swaps
+ *
+ * The owner asked for two **semantic** swaps, not a recolouring pass. Both were applied here and
+ * nowhere else; the light appearance states its own values and is deliberately untouched.
+ *
+ * 1. **The status and explanation roles exchanged their hues.** The green `#3DDC84` and the icy
+ *    blue `#7DD3FC` traded places: [Success] is now the icy blue, [Explanation] is now the green.
+ *    The role each colour *means* is unchanged — success is still "active narration / a healthy
+ *    connection", explanation is still "help and guidance" — only the hue carrying each meaning
+ *    moved. `VoxoraBrand.waveGreen #3DDC97` is **not** part of this role and is deliberately left
+ *    alone: it is a decorative waveform stop, not a status colour.
+ * 2. **The two text roles exchanged their values.** [OnSurface] is now the khaki `#C4BBA8` and
+ *    [OnSurfaceVariant] the cream `#F5F0E6`, so primary headings render in the khaki and the
+ *    supporting/information text in the cream.
+ *
+ * ### The consequence, stated plainly
+ * After swap 2 the **primary content role is the dimmer of the two** (`#C4BBA8` luminance 0.501
+ * against `#F5F0E6` at 0.875). That inverts the usual "primary is the brightest" expectation, and
+ * it is intentional: the roles are ordered by **purpose**, not by luminance, which is the rule
+ * `AGENTS.md` §3 already states for this theme. A screen must still ask for the role it means —
+ * `onSurface` for content, `onSurfaceVariant` for supporting labels — and must never pick between
+ * them by which one looks stronger.
+ *
+ * ### Contrast (WCAG 2.x, measured on the three dark surfaces)
+ *
+ * | Role | NearBlack `#0A0A0B` | SurfaceDark `#141416` | Card `#1C1C1F` |
+ * |------|------|------|------|
+ * | `OnSurface` `#C4BBA8` | 10.39 | 9.66 | 8.92 |
+ * | `OnSurfaceVariant` `#F5F0E6` | 17.42 | 16.20 | 14.97 |
+ * | `Explanation` `#3DDC84` | 11.09 | 10.31 | 9.53 |
+ * | `Neutral` `#8E8A7E` | 5.74 | 5.33 | 4.93 |
+ *
+ * Every content and help role clears AA (4.5) on all three surfaces; `Success` `#7DD3FC` measures
+ * 11.87 / 11.04 / 10.20. The ratios are re-derived by `OriginalDarkPaletteTest` rather than trusted
+ * from this table.
  *
  * A later pass (`660f6c9`) replaced the gold `primary` with a Google blue and de-warmed the text;
  * this object restores the verified original. The two roles the historical code did not name —
  * [Neutral] and [Disabled] — are derived from the same warm ramp rather than imported from the
- * light themes, so the dark identity stays whole.
+ * light theme, so the dark identity stays whole.
  *
  * ## Why raw values and not `Color`
  * The local harness cannot compile Compose, so keeping the numbers in a plain Kotlin object is what
@@ -68,11 +96,17 @@ internal object OriginalDarkPalette {
     const val SurfaceContainerHigh: Long = 0xFF1C1C1F
     const val SurfaceContainerHighest: Long = 0xFF242428
 
-    /** Warm light text on the dark surfaces. */
-    const val OnSurface: Long = 0xFFF5F0E6
+    /**
+     * Primary content and screen titles.
+     *
+     * The khaki. It is the **dimmer** of the two text roles (luminance 0.501 against
+     * [OnSurfaceVariant]'s 0.875) — the roles are ordered by purpose, not by brightness. See the
+     * class note.
+     */
+    const val OnSurface: Long = 0xFFC4BBA8
 
-    /** Muted warm secondary text. */
-    const val OnSurfaceVariant: Long = 0xFFC4BBA8
+    /** Supporting content: labels, values, subtitles. The cream, and the brighter text role. */
+    const val OnSurfaceVariant: Long = 0xFFF5F0E6
 
     const val Outline: Long = 0xFF4E4A42
     const val OutlineVariant: Long = 0xFF2E2C28
@@ -94,8 +128,8 @@ internal object OriginalDarkPalette {
 
     // ---- semantic roles Material 3 does not model ----------------------------------------
 
-    /** Active narration / a healthy connection. */
-    const val Success: Long = 0xFF3DDC84
+    /** Active narration / a healthy connection. The icy blue. */
+    const val Success: Long = 0xFF7DD3FC
 
     /** Paused, ready, preparing — the warm Voxora accent. */
     const val Warning: Long = 0xFFE6B422
@@ -114,13 +148,15 @@ internal object OriginalDarkPalette {
     const val Neutral: Long = 0xFF8E8A7E
 
     /**
-     * Help and explanatory text: the owner's dedicated icy/electric blue.
+     * Help and explanatory text: the green.
      *
      * Used **only** for guidance — descriptions under a control, hints, privacy and limitation
-     * notes — never for headings, body content, buttons or status. See the class note for why it
-     * replaces the historical warm tan.
+     * notes — never for headings, body content, buttons or status. It is the hue the status role
+     * [Success] used to carry; the two exchanged places in the redesign, and the role each colour
+     * means did not change. It is deliberately **not** `VoxoraBrand.waveGreen`, which is a
+     * decorative waveform stop and carries no meaning.
      */
-    const val Explanation: Long = 0xFF7DD3FC
+    const val Explanation: Long = 0xFF3DDC84
 
     /** Present but not actionable. Derived from the same warm ramp. */
     const val Disabled: Long = 0xFF6B6558

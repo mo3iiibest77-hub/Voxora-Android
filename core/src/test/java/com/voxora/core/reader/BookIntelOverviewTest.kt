@@ -104,9 +104,86 @@ class BookIntelOverviewTest {
         val body = """
             {"candidates":[{"content":{"parts":[{"text":"The book sets out the gene-centred "},{"text":"view of natural selection in detail."}]}}]}
         """.trimIndent()
+        // Plain prose is still an answer: the prompt asks for JSON, but a model that ignores the
+        // shape must not cost the reader their overview.
         assertEquals(
-            "The book sets out the gene-centred view of natural selection in detail.",
+            GeneratedOverview("The book sets out the gene-centred view of natural selection in detail."),
             BookIntelOverviewPrompt.parse(body),
+        )
+    }
+
+    @Test
+    fun parseReadsTheJsonShapeWithItsThemes() {
+        val body = """
+            {"candidates":[{"content":{"parts":[{"text":"{\"overview\":\"$ANSWER\",\"themes\":[\"Evolution\",\"Biology\"]}"}]}}]}
+        """.trimIndent()
+        assertEquals(
+            GeneratedOverview(ANSWER, listOf("Evolution", "Biology")),
+            BookIntelOverviewPrompt.parse(body),
+        )
+    }
+
+    @Test
+    fun parseAcceptsJsonWrappedInCodeFences() {
+        val body = """
+            {"candidates":[{"content":{"parts":[{"text":"```json\n{\"overview\":\"$ANSWER\",\"themes\":[\"Evolution\"]}\n```"}]}}]}
+        """.trimIndent()
+        assertEquals(GeneratedOverview(ANSWER, listOf("Evolution")), BookIntelOverviewPrompt.parse(body))
+    }
+
+    @Test
+    fun parseAcceptsJsonWithoutThemesAsAValidAnswer() {
+        val body = """
+            {"candidates":[{"content":{"parts":[{"text":"{\"overview\":\"$ANSWER\"}"}]}}]}
+        """.trimIndent()
+        // A book with no catalogue subjects has nothing to translate; that must not void the prose.
+        assertEquals(GeneratedOverview(ANSWER), BookIntelOverviewPrompt.parse(body))
+    }
+
+    @Test
+    fun parseRejectsJsonThatCarriesNoUsableOverview() {
+        // A JSON object must not be shown as prose: `{"overview": …}` on the card would be worse
+        // than showing nothing at all.
+        val body = """
+            {"candidates":[{"content":{"parts":[{"text":"{\"themes\":[\"Evolution\"]}"}]}}]}
+        """.trimIndent()
+        assertNull(BookIntelOverviewPrompt.parse(body))
+    }
+
+    @Test
+    fun parseRejectsJsonWhoseOverviewIsTooShort() {
+        val body = """
+            {"candidates":[{"content":{"parts":[{"text":"{\"overview\":\"Too short.\",\"themes\":[\"Evolution\"]}"}]}}]}
+        """.trimIndent()
+        assertNull(BookIntelOverviewPrompt.parse(body))
+    }
+
+    @Test
+    fun sanitizeThemesTrimsDeduplicatesAndBoundsTheList() {
+        val raw = org.json.JSONArray()
+            .put("  Evolution  ")
+            .put("evolution")
+            .put("")
+            .put("Biology")
+            .put("Genetics")
+        assertEquals(
+            listOf("Evolution", "Biology", "Genetics"),
+            BookIntelOverviewPrompt.sanitizeThemes(raw),
+        )
+        assertTrue(BookIntelOverviewPrompt.sanitizeThemes(null).isEmpty())
+        assertTrue(BookIntelOverviewPrompt.sanitizeThemes(org.json.JSONArray()).isEmpty())
+    }
+
+    @Test
+    fun sanitizeThemesCapsTheCountAndTheLengthOfAHeading() {
+        val many = org.json.JSONArray()
+        repeat(BookIntelOverviewPrompt.MAX_THEMES + 5) { many.put("Subject $it") }
+        assertEquals(BookIntelOverviewPrompt.MAX_THEMES, BookIntelOverviewPrompt.sanitizeThemes(many).size)
+
+        val long = org.json.JSONArray().put("x".repeat(BookIntelOverviewPrompt.MAX_THEME_CHARS + 40))
+        assertEquals(
+            BookIntelOverviewPrompt.MAX_THEME_CHARS,
+            BookIntelOverviewPrompt.sanitizeThemes(long).single().length,
         )
     }
 
@@ -201,7 +278,7 @@ class BookIntelOverviewTest {
 
     @Test
     fun generatorStoresTheTextWithItsLanguageAndModel() = runBlocking {
-        val transport = FakeTransport(GeminiTextResult.Text(ANSWER))
+        val transport = FakeTransport(GeminiTextResult.Text(GeneratedOverview(ANSWER)))
         val generator = BookIntelOverviewGenerator(transport, model = "models/text", clock = { 42L })
         val overview = generator.generate("key", metadata(), "fa")
         assertNotNull(overview)
@@ -213,8 +290,19 @@ class BookIntelOverviewTest {
     }
 
     @Test
+    fun generatorCarriesTheThemesIntoTheStoredOverview() = runBlocking {
+        val transport = FakeTransport(
+            GeminiTextResult.Text(GeneratedOverview(ANSWER, listOf("Evolution", "Biology"))),
+        )
+        val overview = BookIntelOverviewGenerator(transport).generate("key", metadata(), "fa")
+        // The themes are stored inside the per-language record, which is what makes a language
+        // switch unable to show the previous language's headings.
+        assertEquals(listOf("Evolution", "Biology"), overview!!.themes)
+    }
+
+    @Test
     fun generatorMakesNoRequestWithoutAKey() = runBlocking {
-        val transport = FakeTransport(GeminiTextResult.Text(ANSWER))
+        val transport = FakeTransport(GeminiTextResult.Text(GeneratedOverview(ANSWER)))
         val generator = BookIntelOverviewGenerator(transport)
         assertNull(generator.generate(null, metadata(), "fa"))
         assertNull(generator.generate("   ", metadata(), "fa"))
@@ -232,7 +320,7 @@ class BookIntelOverviewTest {
 
     @Test
     fun generatorRefusesATextTooShortToStore() = runBlocking {
-        val transport = FakeTransport(GeminiTextResult.Text("Nope."))
+        val transport = FakeTransport(GeminiTextResult.Text(GeneratedOverview("Nope.")))
         val generator = BookIntelOverviewGenerator(transport)
         assertNull(generator.generate("key", metadata(), "fa"))
     }
@@ -275,6 +363,19 @@ class BookIntelOverviewTest {
         assertEquals("secret-key", recorded.getHeader("x-goog-api-key"))
         assertFalse(recorded.path!!.contains("secret-key"))
         assertTrue(recorded.body.readUtf8().contains("PROMPT"))
+    }
+
+    @Test
+    fun transportAsksForJsonSoTheThemesArriveAsAField() = runBlocking {
+        server.enqueue(
+            MockResponse().setBody(
+                """{"candidates":[{"content":{"parts":[{"text":"$ANSWER"}]}}]}""",
+            ),
+        )
+        transportTo(server).generate("k", "m", "p")
+        val body = server.takeRequest().body.readUtf8()
+        assertTrue(body.contains("application/json"))
+        assertTrue(body.contains("responseMimeType"))
     }
 
     @Test

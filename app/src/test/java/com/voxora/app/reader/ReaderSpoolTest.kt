@@ -10,6 +10,7 @@ import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -225,6 +226,84 @@ class ReaderSpoolTest {
             assertThrows(IllegalStateException::class.java) { spool.endUnit(3, "skipped") }
             spool.endUnit(2, "valid")
             assertThrows(IllegalStateException::class.java) { spool.endUnit(2, "duplicate") }
+        }
+    }
+
+    // ---- handing a produced chunk over, and reading one back ---------------------------------
+
+    @Test
+    fun detachHandsTheFileOverAndLeavesItInPlace() {
+        val spool = ReaderSpool(temporary.root, 0)
+        spool.append(byteArrayOf(1, 2, 3, 4))
+        spool.endUnit(0, "unit")
+        spool.finish()
+
+        val file = spool.detach()
+        assertTrue(file!!.isFile)
+        // The spool is closed by the detach, so a later close must not delete what the caller holds.
+        spool.close()
+        assertTrue(file.isFile)
+        assertArrayEquals(byteArrayOf(1, 2, 3, 4), file.readBytes())
+    }
+
+    @Test
+    fun detachRefusesASpoolThatDoesNotOwnItsFile() {
+        val spool = ReaderSpool(temporary.root, 0)
+        spool.append(byteArrayOf(1, 2))
+        spool.endUnit(0, "unit")
+        spool.finish()
+        val file = spool.detach()!!
+
+        ReaderSpool.fromCache(file, 2L, listOf(ReaderSpool.UnitEnd(0, 2L, "unit"))).use { restored ->
+            // The file belongs to the cache, so a restored spool can never hand it over or delete it.
+            assertNull(restored.detach())
+        }
+        assertTrue(file.isFile)
+    }
+
+    @Test
+    fun aRestoredSpoolIsCompleteAndReadsFromItsFirstUnit() {
+        val spool = ReaderSpool(temporary.root, 0)
+        spool.append(byteArrayOf(1, 2, 3, 4))
+        spool.endUnit(0, "first")
+        spool.append(byteArrayOf(5, 6))
+        spool.endUnit(1, "second")
+        spool.finish()
+        val file = spool.detach()!!
+
+        ReaderSpool.fromCache(file, 6L, spool.state.value.ends).use { restored ->
+            assertEquals(0, restored.firstUnit)
+            assertTrue(restored.state.value.complete)
+            assertEquals(6L, restored.state.value.committed)
+            assertEquals(listOf("first", "second"), restored.state.value.ends.map { it.transcript })
+            // The consumer reads it exactly like a chunk that was just produced.
+            assertArrayEquals(byteArrayOf(1, 2, 3, 4, 5, 6), restored.read(0, 6))
+            assertFalse(restored.state.value.canRetryPrefetch(0))
+        }
+        // Closing a restored spool leaves the cache entry for the next Stop → Continue.
+        assertTrue(file.isFile)
+    }
+
+    @Test
+    fun aRestoredSpoolCannotBeAppendedToOrFailed() {
+        val spool = ReaderSpool(temporary.root, 0)
+        spool.append(byteArrayOf(1, 2))
+        spool.endUnit(0, "unit")
+        spool.finish()
+        val file = spool.detach()!!
+
+        ReaderSpool.fromCache(file, 2L, listOf(ReaderSpool.UnitEnd(0, 2L, "unit"))).use { restored ->
+            assertThrows(IllegalStateException::class.java) { restored.append(byteArrayOf(3, 4)) }
+            assertThrows(IllegalStateException::class.java) { restored.fail(0, IllegalStateException("late")) }
+        }
+    }
+
+    @Test
+    fun fromCacheRefusesBoundariesThatDoNotCoverTheFile() {
+        val file = temporary.newFile("audio.pcm").apply { writeBytes(ByteArray(6)) }
+        assertThrows(IllegalArgumentException::class.java) { ReaderSpool.fromCache(file, 0L, emptyList()) }
+        assertThrows(IllegalArgumentException::class.java) {
+            ReaderSpool.fromCache(file, 6L, listOf(ReaderSpool.UnitEnd(0, 4L, "short")))
         }
     }
 }

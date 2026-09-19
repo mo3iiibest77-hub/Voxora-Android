@@ -14,26 +14,28 @@ import com.voxora.core.prefs.ThemeMode
 /**
  * The Voxora design system.
  *
- * ## Three independent themes
- * Voxora ships three complete, separately defined colour systems. Each is a full appearance in its
- * own right, not a variation of another:
+ * ## Two independent themes
+ * Voxora ships two complete, separately defined colour systems. Each is a full appearance in its
+ * own right, not a variation of the other:
  *
  * | `ThemeMode`        | Palette                 | Identity |
  * |--------------------|-------------------------|----------|
  * | [ThemeMode.ORIGINAL_DARK] | [OriginalDarkPalette] | the original Voxora dark gold theme — the product's primary identity and the default |
- * | [ThemeMode.LIGHT_TEST_1]  | [LightTest1Palette]   | Voxora Light, Nova-inspired — a comparison candidate |
- * | [ThemeMode.LIGHT_TEST_2]  | [LightTest2Palette]   | Voxora Light — warm cream, gold leaf, warm brown shadows; the final light appearance |
+ * | [ThemeMode.LIGHT_TEST_2]  | [LightTest2Palette]   | Voxora Light — warm cream, gold leaf, warm brown shadows |
  *
  * **The palettes are independent by construction.** Each lives in its own file, declares every
- * value it uses, and shares no constant or mutable state with the others. A change to the light
+ * value it uses, and shares no constant or mutable state with the other. A change to the light
  * appearance cannot move a dark value, and a change to the dark appearance cannot move a light one;
  * removing an appearance means deleting its palette file, its scheme block below, its `ThemeMode`
- * entry and its string. Neither light appearance is implemented as an override of the other, and
- * the light appearance is never achieved by "lightening" the dark theme's tokens.
+ * entry and its string. The light appearance is never achieved by "lightening" the dark theme's
+ * tokens.
+ *
+ * **A third appearance, the Nova-inspired `LIGHT_TEST_1` candidate, was removed.** Only the two
+ * above remain, and a redesign of the dark appearance must never reach the light one.
  *
  * ## Roles, not numbers
  * A screen asks for a role — `MaterialTheme.colorScheme.*` or `VoxoraColors.*` — and never for a
- * number. This file is the only place a raw value becomes a `Color`, and together with the three
+ * number. This file is the only place a raw value becomes a `Color`, and together with the two
  * palette files it is the only place in the app allowed to contain a colour literal.
  *
  * ## Text hierarchy
@@ -59,8 +61,8 @@ import com.voxora.core.prefs.ThemeMode
  * - [explanation] is the one role for **explanatory and help text** — the sentence under a control,
  *   the note about why a figure is unavailable, the description of what a feature does. It is
  *   deliberately distinct from primary and secondary content, and each theme expresses that
- *   distinction its own way: the dark theme by a cool icy hue (brighter than its secondary text,
- *   never confused with it), the light themes by a quieter grey. It is never used for a heading,
+ *   distinction its own way: the dark theme by a cool hue (kept distinct by hue and dedicated use),
+ *   the light theme by a quieter grey. It is never used for a heading,
  *   a button label or a status;
  * - [disabled] is content that is present but explicitly not actionable.
  * - [glow] is the one **decorative** role: the accent wash painted behind an icon or a brand mark.
@@ -91,16 +93,6 @@ private val OriginalDarkSemantics = VoxoraSemanticColors(
     explanation = Color(OriginalDarkPalette.Explanation),
     disabled = Color(OriginalDarkPalette.Disabled),
     glow = Color(OriginalDarkPalette.Glow),
-)
-
-private val LightTest1Semantics = VoxoraSemanticColors(
-    success = Color(LightTest1Palette.Success),
-    warning = Color(LightTest1Palette.Warning),
-    danger = Color(LightTest1Palette.Danger),
-    neutral = Color(LightTest1Palette.Neutral),
-    explanation = Color(LightTest1Palette.Explanation),
-    disabled = Color(LightTest1Palette.Disabled),
-    glow = Color(LightTest1Palette.Glow),
 )
 
 private val LightTest2Semantics = VoxoraSemanticColors(
@@ -211,51 +203,10 @@ private val OriginalDarkColors = darkColorScheme(
 )
 
 /**
- * **Light Test 1 — Voxora Light, Nova inspired.** A light neutral page, white cards, subtle
- * borders, and cyan/indigo/violet accents. Every role resolves to a value from
- * [LightTest1Palette]; nothing is inherited from the other themes.
- */
-private val LightTest1Colors = lightColorScheme(
-    primary = Color(LightTest1Palette.Primary),
-    onPrimary = Color(LightTest1Palette.OnPrimary),
-    primaryContainer = Color(LightTest1Palette.PrimaryContainer),
-    onPrimaryContainer = Color(LightTest1Palette.OnPrimaryContainer),
-    inversePrimary = Color(LightTest1Palette.Primary),
-    secondary = Color(LightTest1Palette.Secondary),
-    onSecondary = Color(LightTest1Palette.OnSecondary),
-    secondaryContainer = Color(LightTest1Palette.SecondaryContainer),
-    onSecondaryContainer = Color(LightTest1Palette.OnSecondaryContainer),
-    tertiary = Color(LightTest1Palette.Tertiary),
-    onTertiary = Color(LightTest1Palette.OnTertiary),
-    tertiaryContainer = Color(LightTest1Palette.TertiaryContainer),
-    onTertiaryContainer = Color(LightTest1Palette.OnTertiaryContainer),
-    background = Color(LightTest1Palette.Background),
-    onBackground = Color(LightTest1Palette.OnSurface),
-    surface = Color(LightTest1Palette.Surface),
-    onSurface = Color(LightTest1Palette.OnSurface),
-    surfaceVariant = Color(LightTest1Palette.SurfaceVariant),
-    onSurfaceVariant = Color(LightTest1Palette.OnSurfaceVariant),
-    surfaceTint = Color(LightTest1Palette.Primary),
-    surfaceBright = Color(LightTest1Palette.SurfaceContainerLowest),
-    surfaceDim = Color(LightTest1Palette.SurfaceContainerHighest),
-    surfaceContainerLowest = Color(LightTest1Palette.SurfaceContainerLowest),
-    surfaceContainerLow = Color(LightTest1Palette.SurfaceContainerLow),
-    surfaceContainer = Color(LightTest1Palette.SurfaceContainer),
-    surfaceContainerHigh = Color(LightTest1Palette.SurfaceContainerHigh),
-    surfaceContainerHighest = Color(LightTest1Palette.SurfaceContainerHighest),
-    outline = Color(LightTest1Palette.Outline),
-    outlineVariant = Color(LightTest1Palette.OutlineVariant),
-    error = Color(LightTest1Palette.Error),
-    onError = Color(LightTest1Palette.OnError),
-    errorContainer = Color(LightTest1Palette.ErrorContainer),
-    onErrorContainer = Color(LightTest1Palette.OnErrorContainer),
-)
-
-/**
- * **Voxora Light — warm cream and gold leaf.** The final light appearance: warm parchment surfaces
+ * **Voxora Light — warm cream and gold leaf.** The light appearance: warm parchment surfaces
  * (never pure white), the darker Voxora Light gold as `primary`, warm brown shadows and a
  * gold-at-12 % glow. Every role resolves to a value from [LightTest2Palette]; nothing is inherited
- * from the other appearances, and it is deliberately not a lightened copy of the dark theme.
+ * from the dark appearance, and it is deliberately not a lightened copy of the dark theme.
  */
 private val LightTest2Colors = lightColorScheme(
     primary = Color(LightTest2Palette.Primary),
@@ -308,12 +259,10 @@ fun VoxoraTheme(
 ) {
     val colorScheme = when (mode) {
         ThemeMode.ORIGINAL_DARK -> OriginalDarkColors
-        ThemeMode.LIGHT_TEST_1 -> LightTest1Colors
         ThemeMode.LIGHT_TEST_2 -> LightTest2Colors
     }
     val semantics = when (mode) {
         ThemeMode.ORIGINAL_DARK -> OriginalDarkSemantics
-        ThemeMode.LIGHT_TEST_1 -> LightTest1Semantics
         ThemeMode.LIGHT_TEST_2 -> LightTest2Semantics
     }
     CompositionLocalProvider(LocalVoxoraSemanticColors provides semantics) {

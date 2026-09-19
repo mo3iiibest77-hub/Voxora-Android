@@ -95,7 +95,6 @@
     <string name="settings_theme_mode">پوسته</string>
     <string name="settings_theme_help">ظاهر ⁨Voxora⁩ را انتخاب کن.</string>
     <string name="settings_theme_original_dark">تاریک اصلی</string>
-    <string name="settings_theme_light_test_1">روشن آزمایشی ۱</string>
     <string name="settings_theme_light_test_2">روشن ⁨Voxora⁩</string>
     <string name="settings_sign_in">ورود با حساب ⁨Google⁩</string>
     <string name="settings_saved">ذخیره شد</string>
@@ -315,6 +314,12 @@
     <!-- Reader library -->
     <string name="reader_library_section">کتاب‌های تو</string>
     <string name="reader_library_empty">هنوز کتابی نداری. برای شروع یک ⁨PDF⁩ یا ⁨TXT⁩ وارد کن.</string>
+    <string name="reader_library_count">%1$d کتاب</string>
+    <string name="reader_library_expand">نمایش همهٔ کتاب‌ها</string>
+    <string name="reader_library_collapse">پنهان کردن فهرست کتاب‌ها</string>
+    <string name="reader_library_active">در حال خواندن</string>
+    <string name="reader_library_start">شروع</string>
+    <string name="reader_library_listen_again">دوباره گوش کن</string>
     <string name="reader_library_continue_title">از همان‌جا که رها کردی ادامه بده</string>
     <string name="reader_library_import">وارد کردن کتاب</string>
     <string name="reader_library_continue">ادامه</string>

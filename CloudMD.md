@@ -1,7 +1,8 @@
 # CloudMD.md — Voxora long-term project state
 
 **Branch:** `feat/reader-segmented-spooling`
-**Last updated:** 2026-09-19, at commit `115d6df994b6db654fe8c1102b158d264e76ab5a` (`115d6df`).
+**Last updated:** 2026-09-19, at commit `cf0dc07` plus the uncommitted two-appearance / library /
+chunk-cache cycle described below.
 
 This file is the concise, durable state of the project: what is finished, what is in flight, what is
 blocked, and the single next action. It is **not** a plan and it is not a wish list — an item is only
@@ -12,9 +13,64 @@ holds the standing UI/i18n rules plus the current implementation record.
 
 ## DONE
 
-- **Voxora Light is an independent appearance** (`d037a20`). Three palettes (`OriginalDarkPalette`,
-  `LightTest1Palette`, `LightTest2Palette`), the owner's supplied Light values verbatim, WCAG AA
-  measured and documented, `glow` promoted to a semantic role. CI-verified.
+- **The experimental light variant is removed; there are two appearances** (this cycle). The three
+  variants were read from the code, not assumed: `ORIGINAL_DARK` ("Original Dark"), `LIGHT_TEST_1`
+  ("Light Test 1") and `LIGHT_TEST_2` ("Voxora Light" — the appearance the request called "Voxlerai").
+  `LIGHT_TEST_1` was removed completely — palette file, `Theme.kt` scheme and semantics blocks,
+  `ThemeMode` entry, `SettingsScreen` branch, string in both locales and its test file — while the
+  Voxora Light appearance was left untouched. `ThemeMode` now declares exactly `ORIGINAL_DARK` and
+  `LIGHT_TEST_2`, and every legacy id (including `"light"` and `"light_test_1"`) migrates onto Voxora
+  Light so an existing choice can never leave the app themeless. The two survivors stay independent by
+  construction, and `themeguard.py` now enforces two modes and asserts that none of the removed
+  candidate's values survives in code **or docs**.
+- **The Dark UI's two semantic swaps are applied, in the Dark palette only** (this cycle). The status
+  and explanation roles exchanged hues (`Success #7DD3FC`, `Explanation #3DDC84`) and the two text
+  roles exchanged values (`OnSurface #C4BBA8`, `OnSurfaceVariant #F5F0E6`). Nothing else moved and the
+  light appearance was not touched. The consequence is pinned rather than implied: the primary content
+  role is deliberately the dimmer of the two text roles. The decorative `waveGreen #3DDC97` was
+  deliberately **not** swept up, and contrast was re-derived — every content/help role still clears AA.
+- **"Your Books" is one vertically expandable list** (this cycle). A single card holds every saved
+  book, collapsed by default with the selected book's compact summary and Continue; it expands on a
+  downward drag or a tap and collapses on an upward drag, with the gesture confined to the header row.
+  Selecting a book does not open it: it reveals the real chunk, the state and the last-read line plus
+  Continue/Remove, so browsing can never interrupt what is playing. The action's wording follows the
+  book's real state, and a book whose copy is gone offers no action that could only fail. No new
+  persistence was introduced.
+- **Stop → Continue no longer re-synthesises the chunk the reader was on** (this cycle). New
+  `ReaderChunkCache` (pure JVM) persists whole chunks — PCM plus every unit's boundary and transcript
+  — under `cacheDir/reader-chunks/`, reused only when the whole key matches (book, chunk, chunk count,
+  unit count, unit-text hash, language, mode, voice, model) and the unit boundaries validate
+  all-or-nothing. Only whole chunks are stored; a restored chunk launches no producer at all and has
+  its transcripts seeded before the first-unit gate; a restored chunk is replayed from unit zero or
+  not at all; the cache is written in the run's `finally` as well as at promotion, which is what
+  covers the run's own first chunk. Bounded (two per book, a byte budget, LRU, the just-written entry
+  never evicted) and stored by **rename**, not copy. Nothing in it can fail a run. Resume remains
+  keyed by the exact persisted logical chunk — never a text, character, PCM or sample offset.
+- **Book Intelligence themes follow the reading language** (this cycle). The metadata-only one-shot
+  prompt now also asks for the catalogue's subjects as headings **in the target language**, stored
+  inside the per-language overview record so a language switch is structurally unable to show another
+  language's themes; the card shows them in place of the catalogue's own headings and falls back with
+  the existing source-language note when they are absent. Two latent defects were fixed: the prompt
+  `VERSION` was documented as part of the cache key but consulted nowhere, and the view model tested
+  "an entry exists" instead of `isUsableFor(...)`. A language-labelled code fence is now recognised
+  rather than shown as prose.
+- **Persistent book reopen is fixed, and Book Intelligence is localized** (`115d6df`, CI-verified).
+  The reported real-device defect — a saved book reopening to `ExtractionException` / "Could not read
+  this document…" — was **not** a bad document. `ReaderBook.withMetadata` replaces the display title
+  with the catalogue title once identification succeeds, and type resolution was falling back to that
+  title's "extension" because Voxora's own `file://` copy carries no MIME type. Type resolution is now
+  one rule in `core/.../reader/ReaderDocumentType.kt` with a **known type always winning**: the
+  persisted `sourceType` → provider MIME → a *file name*'s extension. A display title is never treated
+  as a file name. A book whose copy is gone is now marked the persisted `UNAVAILABLE` state instead of
+  being deleted (position and cached Book Intelligence are kept, no Continue is offered, no extraction
+  is re-attempted), and reopening the already-open book is a no-op. Book Intelligence now separates
+  *source metadata* (the catalogue's own text, shown unedited with its source language) from
+  *explanatory content* (a labelled AI-generated overview produced by a separate one-shot
+  metadata-only `generateContent` call, cached per output language, never the document and never the
+  narration session). 681 pure-JVM tests pass locally (up from 642); the Android-side layers
+  type-check; all six guards pass; Live Dub untouched. **Android CI is green** on `115d6df`:
+  `Unit tests` and `Assemble debug APK` both `success` on the push run `35443414003` and the PR run
+  `35443416114`.
 - **Live Dub synchronization** (`8d4397f`). The 4 s lag was diagnosed as a measured-latency model
   that had no floor, a fabricated source clock, an uncounted hand-off backlog and avoidable local
   buffering. Replaced with a sliding-window latency floor, a real capture clock, accounted hand-off,
@@ -35,50 +91,43 @@ holds the standing UI/i18n rules plus the current implementation record.
   missing `BookSignals` import. All three were committed-tree-only faults that the local harness
   could not see; see `AgentMD.md` §5 for why, and for the `checkimports.py` extension that now
   catches the missing-import class locally.
-- **Persistent book reopen is fixed, and Book Intelligence is localized** (`115d6df`, CI-verified).
-  The reported real-device defect — a saved book reopening to `ExtractionException` / "Could not read
-  this document…" — was **not** a bad document. `ReaderBook.withMetadata` replaces the display title
-  with the catalogue title once identification succeeds, and type resolution was falling back to that
-  title's "extension" because Voxora's own `file://` copy carries no MIME type. Type resolution is now
-  one rule in `core/.../reader/ReaderDocumentType.kt` with a **known type always winning**: the
-  persisted `sourceType` → provider MIME → a *file name*'s extension. A display title is never treated
-  as a file name. A book whose copy is gone is now marked the persisted `UNAVAILABLE` state instead of
-  being deleted (position and cached Book Intelligence are kept, no Continue is offered, no extraction
-  is re-attempted), and reopening the already-open book is a no-op. Book Intelligence now separates
-  *source metadata* (the catalogue's own text, shown unedited with its source language) from
-  *explanatory content* (a labelled AI-generated overview produced by a separate one-shot
-  metadata-only `generateContent` call, cached per output language, never the document and never the
-  narration session). 681 pure-JVM tests pass locally (up from 642); the Android-side layers
-  type-check; all six guards pass; Live Dub untouched. **Android CI is green** on `115d6df`:
-  `Unit tests` and `Assemble debug APK` both `success` on the push run `35443414003` and the PR run
-  `35443416114`.
 
 ## IN PROGRESS
 
-- Nothing. The Reader work above is implemented, locally validated and CI-verified.
+- **This cycle is implemented and locally validated but its CI run has not been read yet.** The
+  implementation and documentation are committed together and pushed; the `Unit tests` and
+  `Assemble debug APK` jobs are the only proof that `ReaderLibrarySection.kt` and the palette wiring
+  compile, because the local harness cannot compile Compose. The run ids are recorded in the
+  follow-up docs commit once they are read from the REST API.
 
 ## BLOCKED
 
 - **Real-device verification is unavailable from this environment.** Everything about how the
-  features *feel* (voice character, cover loading, RTL library layout, resume across a real process
-  death, the rate trim's audibility) is an owner-only item, and the reopen fix itself has not been
-  exercised on a device — it is proven by unit tests and by tracing the lifecycle, not by reopening a
-  real book. CI proves it compiles and the pure-JVM suite proves its logic, not how it looks or
-  sounds.
+  features *feel* is an owner-only item: the two-entry theme selector and the legacy-id redirect, the
+  drag-to-expand library gesture under RTL, whether the swapped Dark roles read as intended, whether
+  Continue actually plays from the cache, and whether the resume lands on the same chunk. CI proves it
+  compiles and the pure-JVM suite proves its logic, not how it looks or sounds.
+- **The cache's real hit rate is unmeasured.** The tests prove the reuse and eviction rules; they
+  cannot prove that a real Stop usually lands on a chunk whose producer had finished. A missed cache
+  costs a re-synthesis, never a lost position — `cacheDir` is the OS's to clear, and the cache is
+  derived audio by design.
 - **Live catalogue behaviour is unverified.** Google Books and Open Library contracts are pinned
   against `MockWebServer`; no real request was made, so live coverage, rate limits and real match
   quality are unknown.
 - **The `generateContent` overview path is unverified against the live API.** The transport is pinned
   against `MockWebServer` and `DEFAULT_MODEL` (`models/gemini-2.0-flash`) has not been confirmed with
-  a real key. A wrong model name degrades to "no overview" and nothing else.
+  a real key. A wrong model name degrades to "no overview" and nothing else; a model that ignores
+  `responseMimeType` degrades to prose-without-themes, which the card renders as the catalogue's own
+  headings.
 
 ## NEXT
 
-Owner device verification: import a PDF, let identification succeed so the title becomes the
-catalogue title, then **tap the saved card and confirm the book reopens at its saved chunk** instead
-of showing "Could not read this document…". Then confirm the Book Intelligence section shows the
-catalogue's description with its source language plus a labelled AI-generated overview in the
-selected output language. No further Reader code work is pending.
+Owner device verification of the whole cycle: (1) confirm the Settings theme selector offers exactly
+two appearances and that an install whose saved preference was the removed one lands on Voxora Light
+rather than failing; (2) open "Your Books", drag the header down and up, select a book and confirm its
+real chunk and last-read appear and Continue resumes it; (3) play a chunk, let the next one prefetch,
+tap Stop, then Continue, and confirm it resumes at the same place; (4) switch the output language and
+confirm the Book Intelligence themes change language without narration being disturbed.
 
 ---
 

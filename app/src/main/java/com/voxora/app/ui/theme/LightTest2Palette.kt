@@ -3,10 +3,9 @@ package com.voxora.app.ui.theme
 /**
  * **Voxora Light — the warm cream and gold-leaf appearance** — raw ARGB values.
  *
- * This is a **complete, independent light appearance**, not an override of [OriginalDarkPalette] and
- * not a re-tint of [LightTest1Palette]. It owns every value below; it shares no constant and no
- * mutable state with either of the other palettes, so a change here can never alter the dark theme
- * or the Nova-style light candidate, and a change there can never alter this one.
+ * This is a **complete, independent light appearance**, not an override of [OriginalDarkPalette].
+ * It owns every value below; it shares no constant and no mutable state with the dark palette, so a
+ * change here can never alter the dark theme and a change there can never alter this one.
  *
  * It occupies the `ThemeMode.LIGHT_TEST_2` slot because that is the stored preference id; the
  * identifier is historical and is kept so a user's saved choice keeps working. The *appearance* is

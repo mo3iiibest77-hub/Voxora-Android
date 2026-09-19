@@ -103,7 +103,6 @@
     <string name="settings_theme_mode">Theme</string>
     <string name="settings_theme_help">Choose the look of Voxora.</string>
     <string name="settings_theme_original_dark">Original Dark</string>
-    <string name="settings_theme_light_test_1">Light Test 1</string>
     <string name="settings_theme_light_test_2">Voxora Light</string>
     <string name="settings_app_language_open">Open language settings</string>
     <string name="settings_sign_in">Sign in with Google</string>
@@ -316,6 +315,12 @@
     <!-- Reader library -->
     <string name="reader_library_section">Your books</string>
     <string name="reader_library_empty">No books yet. Import a PDF or TXT to start listening.</string>
+    <string name="reader_library_count">%1$d books</string>
+    <string name="reader_library_expand">Show every book</string>
+    <string name="reader_library_collapse">Hide the book list</string>
+    <string name="reader_library_active">Reading now</string>
+    <string name="reader_library_start">Start</string>
+    <string name="reader_library_listen_again">Listen again</string>
     <string name="reader_library_continue_title">Continue where you left off</string>
     <string name="reader_library_import">Import a book</string>
     <string name="reader_library_continue">Continue</string>

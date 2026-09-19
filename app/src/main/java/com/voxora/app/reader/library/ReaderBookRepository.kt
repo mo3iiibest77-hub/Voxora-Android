@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.voxora.app.reader.ReaderChunkCache
 import com.voxora.app.util.VoxoraLog
 import com.voxora.core.reader.BookIntelOverview
 import com.voxora.core.reader.BookIntelOverviewGenerator
@@ -91,6 +92,13 @@ class ReaderBookRepository @Inject constructor(
     private val keyMigrated = booleanPreferencesKey("legacy_document_migrated")
 
     private val documents = ReaderDocumentStore(context)
+
+    /**
+     * The persisted chunk cache, used here only to drop a book's cached audio when the book itself
+     * is removed. The Reader owns reading and writing entries; a cache keyed by a book that no
+     * longer exists could never be read again, so removing the record removes its entries too.
+     */
+    private val chunkCache = ReaderChunkCache(File(context.cacheDir, ReaderChunkCache.DIRECTORY))
 
     /**
      * The two public catalogues, primary then fallback.
@@ -262,7 +270,7 @@ class ReaderBookRepository @Inject constructor(
     suspend fun markUnavailable(id: String) =
         mutate(id) { ReaderLibrary.markedUnavailable(it, id) }
 
-    /** Removes a book and its document. */
+    /** Removes a book, its document and its cached narration audio. */
     suspend fun remove(id: String) = withContext(Dispatchers.IO) {
         ensureLoaded()
         // Read the path before the record disappears; deleting afterwards keeps the file from
@@ -270,6 +278,9 @@ class ReaderBookRepository @Inject constructor(
         val path = ReaderLibrary.find(_books.value, id)?.localPath
         updateLibrary(active = _activeBookId.value?.takeIf { it != id }) { ReaderLibrary.remove(it, id) }
         documents.delete(path)
+        // A cache entry is keyed by the book, so once the book is gone the entry can never be read
+        // again — keeping it would only be dead weight on the device.
+        chunkCache.remove(id)
     }
 
     /** True when the legacy single-document preference still needs migrating into the library. */

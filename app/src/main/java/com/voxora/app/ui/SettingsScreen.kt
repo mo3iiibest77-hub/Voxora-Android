@@ -696,12 +696,12 @@ private fun SettingsRowHeader(
 }
 
 /**
- * The theme choice: Original Dark / Light Test 1 / Voxora Light (the `LIGHT_TEST_2` slot).
+ * The theme choice: Original Dark / Voxora Light (the `LIGHT_TEST_2` slot).
  *
- * Three visible options rather than a dropdown, because the appearance is the one setting whose
- * effect should be obvious from the Settings screen itself. Each option is a normal selectable
- * surface laid out in a `Row`, so it mirrors correctly under RTL without any custom drawing, and
- * the selected option carries the `selected` semantics a screen reader announces.
+ * The options are laid out as visible surfaces rather than a dropdown, because the appearance is
+ * the one setting whose effect should be obvious from the Settings screen itself. Each option is a
+ * normal selectable surface in a `Row`, so it mirrors correctly under RTL without any custom
+ * drawing, and the selected option carries the `selected` semantics a screen reader announces.
  */
 @Composable
 private fun ThemeSelector(
@@ -741,7 +741,6 @@ private fun ThemeSelector(
 
 private fun themeLabelOf(mode: ThemeMode): Int = when (mode) {
     ThemeMode.ORIGINAL_DARK -> R.string.settings_theme_original_dark
-    ThemeMode.LIGHT_TEST_1 -> R.string.settings_theme_light_test_1
     ThemeMode.LIGHT_TEST_2 -> R.string.settings_theme_light_test_2
 }
 
@@ -837,7 +836,7 @@ private fun SettingsContentSignedInPreview(modifier: Modifier = Modifier) {
                 onDubbingLanguageChange = {},
                 appLanguage = "fa",
                 onAppLanguageChange = {},
-                themeMode = ThemeMode.LIGHT_TEST_1,
+                themeMode = ThemeMode.LIGHT_TEST_2,
                 onThemeModeChange = {},
                 saved = true,
                 onBack = {},

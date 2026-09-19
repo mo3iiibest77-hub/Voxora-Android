@@ -106,12 +106,18 @@ point of the role.
 
 - `VoxoraColors.explanation` resolves through `VoxoraSemanticColors` (`staticCompositionLocalOf` in
   `Theme.kt`), so a screen asks for the role and never for a number.
-- **Each theme states its own value, and the role is not defined by being dimmer.** Original Dark
-  uses the owner's dedicated icy/electric blue `#7DD3FC`, which is *brighter* than its warm
-  secondary text and is kept distinct by hue and dedicated use; Light Test 1 uses `#64748B` and
-  Voxora Light the deeper navy-blue `#0369A1`, where it is the lighter of the two by luminance and
-  so still reads as the quieter role.
-- Never make it a brand gold or an accent, and never make it an action or a status colour.
+- **Each appearance states its own value, and the role is not defined by being dimmer.** Original Dark
+  uses the green `#3DDC84` — the hue its status role used to carry, because the two roles exchanged
+  places in the redesign and the role each colour *means* did not change; Voxora Light uses the deeper
+  navy-blue `#0369A1`, where it is the lighter of the two by luminance and so still reads as the
+  quieter role.
+- **The role is ordered by purpose, never by brightness.** The same redesign exchanged the two text
+  roles' values in Original Dark, so the *primary* content role (`onSurface`) is deliberately the
+  dimmer of the two there. A screen must ask for the role it means; picking between them by which one
+  looks stronger is the failure this rule exists to prevent.
+- Never make it a brand gold or an accent, and never make it an action or a status colour. The
+  decorative waveform stop `VoxoraBrand.waveGreen` (`#3DDC97`) is a *different* value from the status
+  and explanation roles and is never swept up in a semantic swap.
 
 ---
 
@@ -119,11 +125,11 @@ point of the role.
 
 | Check | Where | What it proves |
 |---|---|---|
-| `themeguard.py` | local harness | three `ThemeMode`s all handled, no palette inheriting another, no deleted-Light-Test-2 leftover, no bundled font reintroduced |
+| `themeguard.py` | local harness | exactly two `ThemeMode`s all handled, no palette inheriting another, no removed-light-candidate leftover, no bundled font reintroduced |
 | `checkimports.py` | local harness | no Compose/AndroidX symbol used without its import |
 | `stringcheck.py` | local harness | every `R.string.*` exists, and `values`/`values-fa` parity holds |
 | `bidi_fa.py` | local harness | every Latin run inside Persian is isolated, format specifiers untouched |
-| `themecheck.py` | local harness | no colour literal outside `Theme.kt` and the three palette files |
+| `themecheck.py` | local harness | no colour literal outside `Theme.kt` and the two palette files |
 | `dubguard.py` | local harness | the disabled overlay stays unconstructed, no fixed delay or `Thread.sleep` returns to `dub/`, the pure sync core (including the playback timeline and head unwrap) imports no `android.*`, `MediaSessionManager` stays in its adapter, the synchronizer reads only a monotonic clock, `DubService` consults `PlaybackTimeline.onChunkArrived` and branches on `ChunkAction.PLAY`, it feeds the synchronizer the playhead rather than `writtenNanos()`, and `DubPlayback` reads the device playback position |
 | `PaletteContrast` + the palette tests | `:app:testDebugUnitTest` | every text role clears WCAG AA on the surface it sits on |
 | `ReaderDubIsolationTest` | `:app:testDebugUnitTest` | no file under `app/.../reader/` imports or names anything from Live Dub (comments stripped, imports checked raw) |
@@ -503,3 +509,178 @@ saved chunk instead of showing "Could not read this document…". Then confirm t
 section shows the catalogue's own description with its source language, and a labelled AI-generated
 overview in the selected output language, and that switching the output language does not disturb
 narration.
+
+---
+
+## 7. Implementation record — two appearances, the Dark semantic swaps, a redesigned library, and a persisted chunk cache
+
+### What was requested
+
+Four connected areas, in the owner's order:
+
+- **A. Consolidate the UI variants.** Keep only the main Dark UI and the Voxora Light UI; remove the
+  experimental light variant completely — implementation, navigation/selection path, theme
+  references, resources and preview/demo entry points — while leaving the surviving light UI
+  untouched and the two survivors architecturally isolated.
+- **B. Redesign the Dark UI's colours only**, as two **semantic swaps** rather than a
+  search-and-replace: `#3DDC84` ↔ `#7DD3FC` (green/status ↔ ice-blue/explanation) and `#F5F0E6` ↔
+  `#C4BBA8` (primary headings ↔ supporting text). Unrelated greens such as `#3DDC97` were to be left
+  alone unless proven to be the same semantic role, and nothing was allowed to leak into the light UI.
+- **C. "Your Books" as one unified vertically expandable/collapsible list** — swipe down to expand, up
+  to collapse, never horizontal. Collapsed must stay compact and useful. Selecting a book makes it
+  active and exposes its real saved chunk and last-read; Continue resumes that book, reusing the
+  existing persistence model.
+- **D–F. Exact chunk-level resume, a two-chunk active cache with rolling prefetch, and a Stop →
+  Continue that is not a fresh session.** Resume must land on the exact persisted logical chunk — not
+  an approximate text/character/PCM/sample offset and not transient memory — and must play from local
+  cache immediately when it is available.
+
+### What the repository actually contained (checked, not assumed)
+
+- The three variants were `ThemeMode.ORIGINAL_DARK` ("Original Dark"), `LIGHT_TEST_1` ("Light Test 1",
+  a Nova-inspired comparison candidate) and `LIGHT_TEST_2` ("Voxora Light", the final light
+  appearance — the string the request called "Voxlerai"). The names were read from the code, not
+  taken from the prompt.
+- **Chunk-level resume already existed** (`queue.jumpTo(book.currentChunk)` on open, position saved at
+  safe transitions) and a **rolling current+next prefetch already existed** (`runPipeline` prepares
+  the current chunk and prefetches the next).
+- The genuine gap for D–F was that `ReaderSpool` deleted its temp file at the end of every run, so
+  Stop → Continue re-synthesised the chunk the reader was already on.
+
+### What was actually implemented
+
+**A. One light appearance removed.**
+
+- `ThemeMode` now declares exactly `ORIGINAL_DARK` and `LIGHT_TEST_2`; `LEGACY_IDS` redirects every
+  old id (`"system"`/`"dark"` → dark, `"light"`/`"light_test_1"` → **Voxora Light**) so an existing
+  choice can never leave the app themeless.
+- `LightTest1Palette.kt` deleted, along with its scheme/semantics blocks in `Theme.kt`, its
+  `ThemeMode` entry, its `SettingsScreen` branch and its `settings_theme_light_test_1` string in both
+  locales. `LightTestPalettesTest` was replaced by a Voxora-Light-only `LightPaletteTest`.
+- The two survivors remain independent by construction: separate palette files, no shared constant or
+  mutable state, and no base-plus-overrides relationship. `themeguard.py` now enforces exactly two
+  modes and asserts that none of the removed candidate's values survives in code **or docs**.
+
+**B. Two semantic swaps, in the Dark palette only.**
+
+- `OriginalDarkPalette`: `Success` `#7DD3FC` and `Explanation` `#3DDC84`; `OnSurface` `#C4BBA8` and
+  `OnSurfaceVariant` `#F5F0E6`. Nothing else moved; the light palette was not touched.
+- The documented consequence is stated in the palette's KDoc and pinned by a test: after the text
+  swap the **primary content role is the dimmer of the two**, because the roles are ordered by purpose,
+  not by brightness.
+- `VoxoraBrand.waveGreen #3DDC97` was deliberately *not* swept up: it is a decorative waveform stop,
+  not the status role. `OriginalDarkPaletteTest` pins the swap as a swap and asserts neither role
+  equals `#3DDC97`.
+- Contrast was re-derived rather than assumed: every content/help role still clears AA on all three
+  dark surfaces.
+
+**C. "Your Books" is one expandable list.**
+
+- `ReaderLibrarySection` renders a single card holding every saved book. It is collapsed by default
+  and shows the selected book's compact summary (cover, title, real chunk position, state) plus its
+  Continue; it expands on a **downward vertical drag** or a tap and collapses on an upward drag.
+  The drag is confined to the header row so the page still scrolls normally elsewhere.
+- Selecting a book does **not** open it: it reveals the progress bar, "Chunk 12 of 210", the state and
+  "Last read …", together with Continue and Remove. Nothing loads and nothing makes sound until
+  Continue is pressed.
+- The action's wording follows the book's real state ("Start" / "Continue" / "Listen again"), and a
+  book whose copy is gone offers no action that could only fail.
+- No new persistence was introduced: the section reads the same `ReaderBook` records and calls the
+  same `onOpen`/`onRemove`/`onImport` callbacks. Three strings were added in both locales
+  (`reader_library_count`, `reader_library_active`, plus `expand`/`collapse`/`start`/`listen_again`).
+
+**D–F. The persisted chunk cache.**
+
+- New `ReaderChunkCache` (app, `reader/`, pure JVM): one directory per chunk under
+  `cacheDir/reader-chunks/`, holding the PCM and a record of the key plus every unit's boundary and
+  transcript.
+- **Reuse requires the whole key**: book, chunk index, chunk count, unit count, a hash of the units'
+  own text, output language, narration mode, voice and model. The unit-text hash is what makes a
+  re-extraction with different words a different chunk at the same index; the language/mode/voice/
+  model parts are what stop audio produced for one selection being replayed under another.
+- **All-or-nothing validation.** Every unit must be present once, in order, each ending further into
+  the file than the last, and the last exactly at the end of the audio. Anything else — truncated
+  audio, inconsistent boundaries, a blank transcript, an unreadable record — is deleted and treated
+  as a miss, never partially restored.
+- **Only a whole chunk is stored**, so a producer cancelled mid-unit cannot make a later Continue play
+  a truncated chunk as if it were complete.
+- **A restored chunk launches no producer at all**, and its transcripts are seeded into the display
+  cache *before* the slot is published. That ordering is load-bearing: a restored spool is complete
+  from the moment it exists, and a first-unit gate that found no rendering would report a perfectly
+  good chunk as *failed*.
+- **A restored chunk is replayed from unit zero or not at all**, so a mid-chunk resume re-synthesises
+  rather than playing unit zero's audio under a later unit's text.
+- **Stop → Continue is the case it exists for**, so the cache is written in the run's `finally` block
+  as well as at promotion — the run's own first chunk is only reachable there, and that is exactly
+  the chunk a reader who stops mid-listen is on.
+- **Bounded and deterministic**: two entries per book and a total byte budget, LRU eviction, and the
+  entry just written is never evicted. A store **renames** the spool's existing file instead of
+  copying it, so a ~10 MB chunk costs a directory entry rather than a disk write that would stall the
+  next chunk.
+- **Nothing here can fail a run**: a cache that cannot be read is a chunk that has to be synthesised,
+  never an error. Removing a book drops its entries with it.
+
+**G. Book Intelligence themes follow the reading language.**
+
+- The one-shot metadata-only prompt now asks for the record's subjects as short headings **in the
+  target language**, answered as `{"overview": …, "themes": […]}` with `responseMimeType: JSON`.
+- The themes are stored **inside** the per-language `BookIntelOverview`, which is what makes a
+  language switch structurally unable to show another language's themes. A plain-prose answer is
+  still accepted; a JSON answer with no usable `overview` is rejected rather than shown as prose.
+- `BookIntelCard` shows the generated headings in place of the catalogue's own when they exist, and
+  falls back to the catalogue's headings with the existing source-language note when they do not.
+- **Two latent defects were fixed on the way**: `BookIntelOverviewPrompt.VERSION` was documented as
+  part of the cache key but consulted nowhere (a prompt change would have been silently masked), and
+  `ReaderViewModel.observeLibraryForOverviews` tested "an entry exists" instead of
+  `isUsableFor(...)`, which would have skipped regeneration before the repository's own check ran.
+  A language-labelled code fence (` ```json `) was also not recognised, which would have shown the
+  raw fenced JSON on the card as prose.
+
+### Files and components changed
+
+- **Core:** `prefs/ThemeMode.kt`; `reader/BookIntelOverview.kt` (`themes`, `GeneratedOverview`,
+  `VERSION = 2`, JSON build/parse, theme sanitising, fence stripping); `reader/GeminiTextClient.kt`;
+  `reader/ReaderBookCodec.kt`.
+- **App:** `ui/theme/OriginalDarkPalette.kt`, `ui/theme/LightTest2Palette.kt`, `ui/theme/Theme.kt`
+  (and `LightTest1Palette.kt` deleted); `ui/SettingsScreen.kt`; `reader/ReaderController.kt`,
+  `reader/ReaderSpool.kt`, `reader/ReaderChunkCache.kt` (new), `reader/ReaderLibrarySection.kt`,
+  `reader/ReaderViewModel.kt`, `reader/BookIntelCard.kt`,
+  `reader/library/ReaderBookRepository.kt`; both `strings.xml` files.
+- **Tests:** `ThemeModeTest`, `OriginalDarkPaletteTest`, `LightPaletteTest` (new, replacing
+  `LightTestPalettesTest`), `BookIntelOverviewTest`, `ReaderBookOverviewTest`, `ReaderChunkCacheTest`
+  (new), `ReaderSpoolTest`.
+
+### Tests actually run
+
+`validate-cloud.sh` (pure JVM, kotlinc 2.0.21 + JUnit 4.13.2, `-ea`): **715 tests pass across 59
+classes** (up from 688 after Part G, and from 681 before this cycle). `validate-reader-android.sh`
+type-checks the Android-side Reader layers against `android.jar` with stubs: **OK**. All six guards
+pass: `themecheck.py`, `themeguard.py` (now two modes), `checkimports.py`, `stringcheck.py`
+(`values` 360 / `values-fa` 359 with only the `translatable="false"` key differing), `bidi_fa.py`,
+`dubguard.py`. Live Dub is untouched.
+
+### CI result
+
+See `CloudMD.md` — the run ids for this commit are recorded there rather than duplicated here.
+
+### Unresolved limitations
+
+- **No real-device testing was performed.** Every claim about how the new library feels, how the
+  drag-to-expand behaves under RTL, whether the Dark swap reads as intended, and whether Continue
+  actually plays from the cache on a device is a **DEVICE VERIFICATION PENDING** item.
+- **The cache's hit rate in real use is unmeasured.** The unit tests prove the reuse and eviction
+  rules; they cannot prove that a real Stop usually lands on a chunk whose producer had finished.
+- **`cacheDir` is the OS's to clear.** The cache is derived audio and is treated as such; a cleared
+  cache costs a re-synthesis, never a lost position.
+- **The themes are still unverified against a live model.** A model that ignores `responseMimeType`
+  still degrades to prose-without-themes, which the card renders as the catalogue's own headings.
+
+### Exact next action
+
+**Owner device verification of the whole cycle.** On a device: (1) confirm the Settings theme
+selector offers exactly two appearances and that an install whose saved preference was the removed
+one lands on Voxora Light rather than failing; (2) open "Your Books", drag the header down and up,
+select a book and confirm its real chunk and last-read appear and Continue resumes it; (3) play a
+chunk, let the next one prefetch, tap Stop, then Continue, and confirm the chunk resumes at the same
+place; (4) switch the output language and confirm the Book Intelligence themes change language
+without narration being disturbed.

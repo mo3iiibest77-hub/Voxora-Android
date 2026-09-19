@@ -163,7 +163,91 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
 > must not expire with any single feature. Add a rule to `AgentMD.md` only when it
 > applies to every future UI change; everything else belongs in `AGENTS.md`.
 
-### Last change (this session) — Live Dub synchronization rebuilt around a measured latency floor
+### Last change (this session) — two appearances, the Dark semantic swaps, a redesigned library, and a persisted chunk cache
+
+**DONE — four connected Reader/UI areas. Live Dub is untouched, and the surviving light appearance is
+unchanged.**
+
+**A. The experimental light variant is gone.** The repository had three `ThemeMode`s, read from the
+code rather than assumed: `ORIGINAL_DARK` ("Original Dark"), `LIGHT_TEST_1` ("Light Test 1", a
+Nova-inspired comparison candidate) and `LIGHT_TEST_2` ("Voxora Light" — the appearance the request
+called "Voxlerai"). `LIGHT_TEST_1` was removed completely: its palette file, its scheme and semantics
+blocks in `Theme.kt`, its `ThemeMode` entry, its `SettingsScreen` branch, its string in both locales
+and its test file. `ThemeMode` now declares exactly `ORIGINAL_DARK` and `LIGHT_TEST_2`, and
+`LEGACY_IDS` redirects every old id — including `"light"` and `"light_test_1"` — onto **Voxora
+Light**, so an existing choice can never leave the app themeless. The two survivors stay independent
+by construction (separate palettes, no shared constant, no base-plus-overrides), and `themeguard.py`
+now enforces two modes and asserts that none of the removed candidate's values survives in code **or
+docs**.
+
+**B. The Dark UI's two semantic swaps.** In `OriginalDarkPalette` and nowhere else: the status and
+explanation roles exchanged hues (`Success #7DD3FC`, `Explanation #3DDC84`) and the two text roles
+exchanged values (`OnSurface #C4BBA8`, `OnSurfaceVariant #F5F0E6`). The documented consequence is
+pinned by a test rather than left implicit: after the text swap the **primary content role is the
+dimmer of the two**, because the roles are ordered by purpose, not by brightness. `VoxoraBrand`'s
+decorative `waveGreen #3DDC97` is a different value and was deliberately not swept up; contrast was
+re-derived, and every content/help role still clears AA on all three dark surfaces. Nothing leaked
+into the light appearance.
+
+**C. "Your Books" is now one expandable list.** `ReaderLibrarySection` renders a single card holding
+every saved book, collapsed by default and showing the selected book's compact summary plus Continue.
+It expands on a **downward vertical drag** or a tap and collapses on an upward drag, with the gesture
+confined to the header row so the page still scrolls normally. **Selecting is not opening**: selecting
+reveals the progress bar, "Chunk 12 of 210", the state and "Last read …", with Continue and Remove;
+nothing loads and nothing makes sound until Continue is pressed. The action's wording follows the
+book's real state ("Start" / "Continue" / "Listen again"), and a book whose copy is gone offers no
+action that could only fail. No new persistence was introduced — the section reads the same records
+and calls the same callbacks.
+
+**D–F. Exact chunk resume, and a Stop → Continue that is not a fresh session.** Chunk-level resume and
+the rolling current+next prefetch already existed; the real gap was that `ReaderSpool` deleted its
+temp file at the end of every run, so Continue re-synthesised the chunk the reader was already on.
+New **`ReaderChunkCache`** (app, `reader/`, pure JVM) persists whole chunks under
+`cacheDir/reader-chunks/`: the PCM plus every unit's boundary and transcript. A stored chunk is reused
+only when the **whole key** matches (book, chunk index, chunk count, unit count, a hash of the units'
+own text, output language, narration mode, voice, model) and its unit boundaries validate — every unit
+present once, in order, the last landing exactly at the end of the audio. Anything else is deleted and
+treated as a miss, never partially restored. Only a whole chunk is stored; a restored chunk launches
+**no producer at all** and has its transcripts seeded into the display cache *before* the slot is
+published (a restored spool is complete from the moment it exists, so a gate that found no rendering
+would report a good chunk as failed). A restored chunk is replayed from unit zero or not at all. The
+cache is written in the run's `finally` block as well as at promotion, because the run's own first
+chunk is only reachable there and that is exactly the chunk a reader who stops mid-listen is on. It is
+bounded (two entries per book, a total byte budget, LRU, the entry just written never evicted) and a
+store **renames** the spool's file rather than copying it, so a ~10 MB chunk costs a directory entry
+instead of a disk write that would stall the next chunk. Nothing in it can fail a run: a cache that
+cannot be read is a chunk that has to be synthesised, never an error. Removing a book drops its
+entries with it.
+
+**G. Book Intelligence themes follow the reading language.** The one-shot metadata-only prompt now
+also asks for the record's subjects as short headings **in the target language**, answered as
+`{"overview": …, "themes": […]}` with `responseMimeType: JSON`. The themes are stored **inside** the
+per-language overview record, which is what makes a language switch structurally unable to show
+another language's themes. `BookIntelCard` shows them in place of the catalogue's own headings when
+they exist and falls back to the catalogue's headings (with the existing source-language note) when
+they do not. **Two latent defects were fixed on the way**: `BookIntelOverviewPrompt.VERSION` was
+documented as part of the cache key but consulted nowhere, so a prompt change would have been silently
+masked; and `ReaderViewModel.observeLibraryForOverviews` tested "an entry exists" instead of
+`isUsableFor(...)`, which would have skipped regeneration before the repository's own check ran. A
+language-labelled code fence (` ```json `) was also unrecognised, which would have put raw fenced JSON
+on the card as if it were prose.
+
+**Verification.** `validate-cloud.sh` (pure JVM, kotlinc + JUnit, `-ea`): **715 tests pass across 59
+classes**. `validate-reader-android.sh` type-checks the Android-side Reader layers: OK. All six guards
+pass — `themecheck.py`, `themeguard.py` (now exactly two modes), `checkimports.py`, `stringcheck.py`,
+`bidi_fa.py`, `dubguard.py`. **The local harness cannot compile Compose**, so `ReaderLibrarySection.kt`
+and the palette wiring are only proven by the CI `Assemble debug` job; **no real-device testing was
+performed** and every appearance/gesture/cache-hit claim is a device-verification item.
+
+**BLOCKED.** Real-device verification is unavailable from this environment; so is any live
+`generateContent` check, so the themes' real Persian output is unmeasured.
+
+**NEXT.** Owner device verification: the two-entry theme selector and the legacy-id redirect; drag the
+library header down and up, select a book, confirm its real chunk and last-read, and Continue; play a
+chunk, let the next prefetch, Stop, Continue, and confirm it resumes at the same place; switch the
+output language and confirm the themes change language without disturbing narration.
+
+### Last change (previous session) — Live Dub synchronization rebuilt around a measured latency floor
 
 **DONE — one focused change to the Live Dub synchronization layer. No Reader change, no theme/UI
 change, no `ExternalPlayer` change, and `DelayedScreenOverlay` stays dead.**
@@ -260,12 +344,13 @@ visual identity, Live Dub sync and Reader architecture were out of scope.
 - **A per-appearance `glow` role replaces the alpha-at-the-call-site.** The gold/indigo wash behind
   an icon or brand mark was `colors.primary.copy(alpha = 0.15f)` at ten call sites. That is exactly
   how a light screen would inherit the dark appearance's wash, so the wash is now the semantic role
-  `VoxoraColors.glow`: Original Dark `0x26D4AF37` (`#D4AF37` @15 % — unchanged), Light Test 1
-  `0x264F46E5` (`#4F46E5` @15 % — unchanged), Voxora Light `0x1F8B6914` (the supplied @12 %). Ten
+  `VoxoraColors.glow`: Original Dark `0x26D4AF37` (`#D4AF37` @15 % — unchanged) and Voxora Light
+  `0x1F8B6914` (the supplied @12 %). Ten
   call sites updated: `ReaderScreen` (4), `DubScreen` (1), `OnboardingScreen` (1), `SettingsScreen`
-  (1), `CloudAccountCard` (1), `HomeScreen` (2). `OriginalDarkPalette` and `LightTest1Palette` each
-  gained only this additive `Glow` constant; no existing value moved, so the dark and Light Test 1
-  appearances render identically to before.
+  (1), `CloudAccountCard` (1), `HomeScreen` (2). `OriginalDarkPalette` gained only this additive
+  `Glow` constant; no existing value moved, so the dark appearance renders identically to before.
+  *(At the time of this entry there were two light appearances; the second one was removed later —
+  see the entry for the two-theme consolidation.)*
 - **Strings and label.** `settings_theme_light_test_2` → "Voxora Light" / "روشن ⁨Voxora⁩";
   `settings_theme_help` trimmed to "Choose the look of Voxora." / "ظاهر ⁨Voxora⁩ را انتخاب کن." (the
   "test variants for comparison" wording is no longer true). The `LIGHT_TEST_2` preference id is kept
@@ -567,28 +652,32 @@ historical baseline, and two light candidates were added so the owner can compar
   `4228f1b` (*"feat: Voxora dark gold Material3 theme"*) plus the container/status ramp from `f25cc5b`:
   gold `#D4AF37` (`primary` and `secondary` identity), muted gold `#B8962E`, near-black page
   `#0A0A0B`, surface `#141416`, card `#1C1C1F`, warm text `#F5F0E6` / `#C4BBA8`, explanation
-  `#A79E8C` (replaced by the icy blue `#7DD3FC` in the next cycle — see above), status `#3DDC84` /
-  `#E6B422` / `#E85D5D`. No Google and no Nova colour language.
-- **Light Test 1 — "Voxora Light — Nova inspired"** — page `#F8F9FC`, white cards, indigo `#4F46E5`
-  primary, cyan `#0891B2`, violet `#7C3AED`, purple `#9333EA`, gradient `#22D3EE → #818CF8 → #A855F7`.
+  `#A79E8C` (replaced by the icy blue in the next cycle, and later exchanged with the status hue —
+  see above), status `#3DDC84` / `#E6B422` / `#E85D5D`. No Google and no Nova colour language.
+- **Light Test 1** — a second, Nova-inspired light candidate added in this cycle so the owner could
+  compare two light appearances on a device. **It was removed entirely in the next cycle** (see the
+  two-theme consolidation entry below); its values are recoverable from Git history at `bff6ca9` if
+  ever needed, and are deliberately not restated here so no stale hex can be copied out of this
+  document.
 - **Light Test 2** — shipped in this cycle as a second Nova-style palette. **That palette was deleted
   in the next cycle and replaced by "Voxora Contrast Light"** (see the section above); its values are
   recoverable from Git history at `bff6ca9` if ever needed, and are deliberately not restated here so
   no stale hex can be copied out of this document.
 
-Each theme is a **complete, independent palette** in its own file (`OriginalDarkPalette.kt`,
-`LightTest1Palette.kt`, `LightTest2Palette.kt`); they share no constant or mutable state and neither
-light theme is an override of the other. Removing either light test later means deleting its palette
-file, its scheme + semantics block in `Theme.kt`, its `ThemeMode` entry and its string — the dark
-theme and the other light theme are untouched. `Theme.kt` remains the only place a value becomes a
-`Color`; the four theme files are the only files allowed colour literals, guarded by `themecheck.py`.
+Each theme is a **complete, independent palette** in its own file; they share no constant or mutable
+state and no appearance is an override of another. Removing an appearance later means deleting its
+palette file, its scheme + semantics block in `Theme.kt`, its `ThemeMode` entry and its string — the
+other appearance is untouched. `Theme.kt` remains the only place a value becomes a `Color`; the theme
+files are the only files allowed colour literals, guarded by `themecheck.py`.
 
-**Theme selection and persistence.** `ThemeMode` is now `ORIGINAL_DARK` (default), `LIGHT_TEST_1`,
+**Theme selection and persistence.** `ThemeMode` was `ORIGINAL_DARK` (default), `LIGHT_TEST_1`,
 `LIGHT_TEST_2`, persisted through the existing `UserPrefs`/DataStore `theme_mode` key (stored as the
 enum's stable `id`, so reordering the enum cannot change a choice). `MainActivity` collects it and
-drives `VoxoraTheme(mode = …)`; the existing Settings `ThemeSelector` writes it and now labels the three
+drives `VoxoraTheme(mode = …)`; the existing Settings `ThemeSelector` writes it and now labels the
 options "Original Dark" / "Light Test 1" / "Light Test 2" (Persian: تاریک اصلی / روشن آزمایشی ۱ /
-روشن آزمایشی ۲). The choice survives app restart. `ThemeMode.normalize` is total and migrates the old
+روشن آزمایشی ۲). **`LIGHT_TEST_1` was removed in the next cycle** — see the two-theme consolidation
+entry below, which also records how the old preference ids migrate. The choice survives app restart.
+`ThemeMode.normalize` is total and migrates the old
 `system`/`dark`/`light` ids (`system`/`dark` → Original Dark, `light` → Light Test 1), so an existing
 install keeps a sensible appearance instead of losing its choice. The UI, layout, components and
 hierarchy are unchanged — only the colour system and the selector labels.

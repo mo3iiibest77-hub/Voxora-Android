@@ -66,6 +66,15 @@ class ReaderController @Inject constructor(
         onStoreFailure = { reason -> VoxoraLog.w("Reader", "Usage record dropped: $reason") },
     )
     private val extractor = TextExtractor(context)
+    /**
+     * The audio and transcripts of whole chunks, kept across runs.
+     *
+     * This is what makes Stop → Continue resume instead of re-synthesising: the chunk the reader was
+     * on is already on disk, so continuing plays it immediately and asks Gemini for nothing. It is
+     * only ever read while a chunk is being prepared and only ever written once a chunk has finished,
+     * so it is never on the audio path.
+     */
+    private val chunkCache = ReaderChunkCache(File(context.cacheDir, ReaderChunkCache.DIRECTORY))
     private val mutableState = MutableStateFlow(ReaderState())
     internal val state = mutableState.asStateFlow()
     private val mutableNarrationText = MutableStateFlow("")
@@ -489,14 +498,97 @@ class ReaderController @Inject constructor(
                 if (run == generation && position.revision == navigation) pause()
             }
         }
+        /**
+         * The cache key for one chunk of the loaded book, or null when there is nothing to key on.
+         *
+         * A document with no library record has no stable identity, so its chunks are never cached:
+         * keying them under a guess would let a later run replay audio for a different book.
+         */
+        fun cacheKeyFor(index: Int, units: List<String>): ReaderChunkCache.Key? {
+            val id = synchronized(lock) { bookId } ?: return null
+            return ReaderChunkCache.Key(
+                bookId = id,
+                chunk = index,
+                chunkCount = synchronized(lock) { queue.size },
+                unitCount = units.size,
+                unitHash = ReaderChunkCache.unitHash(units),
+                language = language,
+                mode = mode,
+                voice = voice,
+                model = READER_MODEL,
+            )
+        }
+
+        /**
+         * The stored audio for a chunk this run is about to prepare, when one exists under exactly
+         * the key this run would produce it under.
+         *
+         * Never throws: a cache that cannot be read is a chunk that has to be synthesised, never a
+         * failed run.
+         */
+        fun loadCached(index: Int, units: List<String>): ReaderChunkCache.Entry? {
+            val cacheKey = cacheKeyFor(index, units) ?: return null
+            return try {
+                chunkCache.load(cacheKey)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                VoxoraLog.w("Reader", "Cached chunk read failed chunk=${index + 1}: ${e.javaClass.simpleName}")
+                null
+            }
+        }
+
+        /**
+         * Persists a chunk whose producer has finished, so a later Continue replays it rather than
+         * paying for it again. A chunk that was itself restored from the cache is not re-stored.
+         *
+         * Never throws, for the same reason [loadCached] does not.
+         */
+        fun keepCached(index: Int, units: List<String>, spool: ReaderSpool) {
+            val cacheKey = cacheKeyFor(index, units) ?: return
+            try {
+                chunkCache.store(cacheKey, spool)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                VoxoraLog.w("Reader", "Cached chunk write failed chunk=${index + 1}: ${e.javaClass.simpleName}")
+            }
+        }
+
         fun prepare(index: Int, firstUnit: Int, attempts: Int): Slot {
             val units = synchronized(lock) {
                 checkOwned(run, position.revision)
                 queue.segments(index)
             }
-            val slot = Slot(index, units, ReaderSpool(context.cacheDir, firstUnit), attempts = attempts)
+            // A stored chunk may only be replayed from its first unit: the entry holds the whole
+            // chunk from unit zero, so starting mid-chunk from it would play unit zero's audio
+            // under a later unit's text.
+            val entry = if (firstUnit == 0) loadCached(index, units) else null
+            val restored = entry?.let { cached ->
+                try {
+                    val spool = ReaderSpool.fromCache(cached.audio, cached.committed, cached.ends)
+                    // Seeded before the slot is published, so the first-unit gate finds the
+                    // selected-language text immediately. A restored spool is complete from the
+                    // start, and a gate that found no rendering would report this chunk as failed.
+                    synchronized(lock) {
+                        val display = displayTexts.forMode(mode)
+                        cached.ends.forEach { end -> display.record(language, index, end.index, end.transcript) }
+                    }
+                    spool
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    VoxoraLog.w("Reader", "Cached chunk open failed chunk=${index + 1}: ${e.javaClass.simpleName}")
+                    null
+                }
+            }
+            val slot = Slot(index, units, restored ?: ReaderSpool(context.cacheDir, firstUnit), attempts = attempts)
             slots.add(slot)
-            slot.producer = launch { produce(slot, key, mode, language, voice, run, position.revision) }
+            // A restored chunk has nothing to produce, so it gets no producer at all: the consumer
+            // reads it exactly like a finished one, and no request is made for content already here.
+            if (restored == null) {
+                slot.producer = launch { produce(slot, key, mode, language, voice, run, position.revision) }
+            }
             return slot
         }
         fun prefetch(index: Int): Slot? {
@@ -545,6 +637,9 @@ class ReaderController @Inject constructor(
                     continue
                 }
                 current.producer?.join()
+                // The chunk has been heard in full and its producer has finished, so it is worth
+                // keeping: this is the chunk the reader would come back to after a Stop.
+                keepCached(current.index, current.units, current.spool)
                 current.spool.close()
                 slots.remove(current)
                 synchronized(lock) {
@@ -586,6 +681,12 @@ class ReaderController @Inject constructor(
                 output.stop()
                 slots.forEach { it.producer?.cancel() }
                 slots.forEach { it.producer?.join() }
+                // A chunk whose producer finished while the reader was listening is kept, so a Stop
+                // followed by Continue replays it from disk instead of paying Gemini for it again.
+                // The run's own first chunk is only reachable here, and that is exactly the chunk a
+                // reader who stops mid-listen is on. A chunk still being produced is not a whole
+                // chunk, and the cache refuses it rather than storing something truncated.
+                slots.forEach { keepCached(it.index, it.units, it.spool) }
                 slots.forEach { it.spool.close() }
                 // A run boundary is the natural point to force the batched usage record to disk,
                 // so a finished narration is fully accounted for even if the process dies later.

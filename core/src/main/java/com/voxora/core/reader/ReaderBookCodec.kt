@@ -86,14 +86,20 @@ object ReaderBookCodec {
     private fun encodeOverviews(overviews: List<BookIntelOverview>): JSONArray =
         JSONArray().also { array ->
             for (overview in overviews) {
-                array.put(
-                    JSONObject()
-                        .put("language", overview.language)
-                        .put("text", overview.text)
-                        .put("model", overview.model)
-                        .put("generatedAt", overview.generatedAt)
-                        .put("promptVersion", overview.promptVersion),
-                )
+                val json = JSONObject()
+                    .put("language", overview.language)
+                    .put("text", overview.text)
+                    .put("model", overview.model)
+                    .put("generatedAt", overview.generatedAt)
+                    .put("promptVersion", overview.promptVersion)
+                // Omitted when empty, so an overview generated before themes existed encodes
+                // exactly as it did before the field was added.
+                if (overview.themes.isNotEmpty()) {
+                    val themes = JSONArray()
+                    for (theme in overview.themes) themes.put(theme)
+                    json.put("themes", themes)
+                }
+                array.put(json)
             }
         }
 
@@ -162,6 +168,9 @@ object ReaderBookCodec {
                     // A record written before this field existed has no version, and `0` matches no
                     // real prompt, so such a text is regenerated once rather than shown as current.
                     promptVersion = json.optInt("promptVersion", 0),
+                    // Missing, empty or malformed means "no themes", which the card treats as a
+                    // reason to fall back to the catalogue's own headings — never as a failure.
+                    themes = json.stringList("themes"),
                 ),
             )
         }

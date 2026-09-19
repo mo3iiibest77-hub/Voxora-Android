@@ -119,6 +119,12 @@ private fun IdentifiedBook(book: ReaderBook, locale: Locale, outputLang: String)
     // The generated overview is per output language: this is the one that matches the language the
     // reader has chosen to hear the book in, and it is absent until one has been generated.
     val overview = remember(book.overviews, outputLang) { book.overviewFor(outputLang) }
+    // The catalogue's subject headings are always in the catalogue's own language ("Evolution",
+    // "Biology"), so when the overview carries headings rendered in the reading language those win.
+    // They live inside the per-language overview, which is why a language switch can never show the
+    // previous language's themes: the other language's overview is a different record entirely.
+    val generatedThemes = overview?.themes.orEmpty()
+    val displayedTopics = generatedThemes.ifEmpty { topics }
     val sourceLanguage = metadata.language
         ?.takeIf { !it.equals(outputLang, ignoreCase = true) }
         ?.let { languageName(it) }
@@ -236,7 +242,7 @@ private fun IdentifiedBook(book: ReaderBook, locale: Locale, outputLang: String)
         }
     }
 
-    if (topics.isNotEmpty()) {
+    if (displayedTopics.isNotEmpty()) {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
                 text = stringResource(R.string.reader_book_info_topics),
@@ -244,10 +250,20 @@ private fun IdentifiedBook(book: ReaderBook, locale: Locale, outputLang: String)
                 color = colors.onSurfaceVariant,
             )
             Text(
-                text = topics.joinToString(" · "),
+                text = displayedTopics.joinToString(" · "),
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.onSurface,
             )
+            // Only the catalogue's own subjects need the caveat: they are always in the catalogue's
+            // language. Themes rendered from the overview are already in the reading language, so
+            // the note is absent exactly when the displayed headings are.
+            if (generatedThemes.isEmpty() && sourceLanguage != null) {
+                Text(
+                    text = stringResource(R.string.reader_book_info_source_language, sourceLanguage),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = VoxoraColors.explanation,
+                )
+            }
         }
     }
 }

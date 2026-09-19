@@ -13,6 +13,7 @@ import com.voxora.core.gemini.ReaderLanguages
 import com.voxora.core.gemini.ReaderNarrationModes
 import com.voxora.core.gemini.ReaderVoice
 import com.voxora.core.prefs.UserPrefs
+import com.voxora.core.reader.BookIntelOverviewPrompt
 import com.voxora.core.reader.MetadataLookupState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -156,6 +157,12 @@ class ReaderViewModel @Inject constructor(
      * true even though no public catalogue carries a Persian description: the catalogue's own
      * description is translated and condensed, and clearly labelled as generated.
      *
+     * The staleness test is [BookIntelOverviewPrompt.isUsableFor], **not** "an entry exists". A
+     * record cached by an older prompt version is not usable, and testing only for presence would
+     * skip it here — before the repository's own check ever runs — so a prompt improvement would be
+     * silently masked by an answer that was already paid for. Both layers have to agree on what
+     * "cached" means.
+     *
      * Runs entirely beside playback. Nothing here gates narration, and a book with no catalogue
      * match, no API key or no network simply never gets an overview.
      */
@@ -165,7 +172,7 @@ class ReaderViewModel @Inject constructor(
                 .collect { (books, language) ->
                     for (book in books) {
                         if (book.metadata == null) continue
-                        if (book.overviewFor(language) != null) continue
+                        if (BookIntelOverviewPrompt.isUsableFor(book.overviewFor(language), language)) continue
                         if (!overviewStarted.add("${book.id}|$language")) continue
                         launch(Dispatchers.IO) { runOverview(book.id, language) }
                     }

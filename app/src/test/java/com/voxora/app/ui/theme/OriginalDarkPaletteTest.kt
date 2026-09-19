@@ -6,10 +6,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The Original Voxora Dark theme is restored from the verified historical implementation, not
- * guessed. These tests pin the exact values from Git commits `4228f1b` ("feat: Voxora dark gold
- * Material3 theme") and `f25cc5b`, so a later edit cannot quietly drift the product's primary
- * identity back toward a Google- or Nova-style palette.
+ * The Original Voxora Dark theme: the restored historical identity, plus the owner's two semantic
+ * redesign swaps.
+ *
+ * The gold identity, the surfaces and the surface ramp are pinned to the values verified against
+ * Git (`4228f1b` "feat: Voxora dark gold Material3 theme", `f25cc5b`), so a later edit cannot
+ * quietly drift the product's primary identity back toward a Google- or Nova-style palette. On top
+ * of that, the two swaps the owner asked for are pinned explicitly: the status and explanation hues
+ * exchanged places, and the two text roles exchanged their values. Those two tests fail if either
+ * swap is reverted.
  */
 class OriginalDarkPaletteTest {
 
@@ -58,24 +63,45 @@ class OriginalDarkPaletteTest {
     }
 
     @Test
-    fun theTextColoursAreTheHistoricalWarmValues() {
-        assertEquals(0xFFF5F0E6, OriginalDarkPalette.OnSurface)
-        assertEquals(0xFFC4BBA8, OriginalDarkPalette.OnSurfaceVariant)
+    fun theTwoTextRolesCarryTheSwappedValues() {
+        // The redesign moved primary headings onto the khaki and supporting text onto the cream.
+        assertEquals(0xFFC4BBA8, OriginalDarkPalette.OnSurface)
+        assertEquals(0xFFF5F0E6, OriginalDarkPalette.OnSurfaceVariant)
+    }
+
+    @Test
+    fun primaryContentIsDeliberatelyDimmerThanSupportingContent() {
+        // The documented consequence of the text swap: the roles are ordered by purpose, not by
+        // luminance. If someone "fixes" this by brightening OnSurface, that is a design change and
+        // this test is where it has to be a conscious one.
+        val primary = PaletteContrast.luminance(OriginalDarkPalette.OnSurface)
+        val supporting = PaletteContrast.luminance(OriginalDarkPalette.OnSurfaceVariant)
+        assertTrue(
+            "OnSurface ($primary) is expected to be the dimmer of the two text roles",
+            primary < supporting,
+        )
     }
 
     @Test
     fun theStatusColoursAreTheHistoricalValues() {
-        assertEquals(0xFF3DDC84, OriginalDarkPalette.Success)
+        // Success now carries the icy blue — see the semantic swap below.
+        assertEquals(0xFF7DD3FC, OriginalDarkPalette.Success)
         assertEquals(0xFFE6B422, OriginalDarkPalette.Warning)
         assertEquals(0xFFE85D5D, OriginalDarkPalette.Danger)
         assertEquals(0xFFE85D5D, OriginalDarkPalette.Error)
     }
 
     @Test
-    fun theExplanationRoleIsTheOwnersDedicatedIcyElectricBlue() {
-        // The one deliberate change from the historical palette: the warm tan help colour read as a
-        // second gold accent, so guidance text is now a dedicated icy/electric blue.
-        assertEquals(0xFF7DD3FC, OriginalDarkPalette.Explanation)
+    fun theStatusAndExplanationRolesExchangedTheirHues() {
+        // The semantic swap, pinned as a swap rather than as two loose values: status took the icy
+        // blue and guidance took the green. Reverting either half fails here.
+        assertEquals(0xFF7DD3FC, OriginalDarkPalette.Success)
+        assertEquals(0xFF3DDC84, OriginalDarkPalette.Explanation)
+        // The decorative waveform stop `VoxoraBrand.waveGreen` is a *different* value (#3DDC97) and
+        // is deliberately not swept up in the swap. It is asserted here by value because
+        // `VoxoraBrand` lives in the Compose-only Theme.kt, which this pure-JVM suite cannot compile.
+        assertFalse(OriginalDarkPalette.Explanation == 0xFF3DDC97)
+        assertFalse(OriginalDarkPalette.Success == 0xFF3DDC97)
     }
 
     @Test
@@ -137,10 +163,10 @@ class OriginalDarkPaletteTest {
 
     @Test
     fun theExplanationRoleIsDistinctFromEveryContentAndStatusRole() {
-        // The historical "explanation is dimmer than secondary content" ordering does not hold for
-        // the icy blue, which is brighter than the warm secondary text. The contract that replaces
-        // it is distinctness plus dedicated use: guidance is the only role with this value, so a
-        // screen that asks for "help" never accidentally gets content or a status tone.
+        // Guidance is kept distinct by hue and by dedicated use rather than by being the dimmest
+        // role: after the text swap it is neither the brightest nor the dimmest of the text tones,
+        // so the contract that matters is that it shares its value with nothing else. A screen that
+        // asks for "help" must never accidentally get content or a status tone.
         val others = listOf(
             OriginalDarkPalette.OnSurface,
             OriginalDarkPalette.OnSurfaceVariant,
