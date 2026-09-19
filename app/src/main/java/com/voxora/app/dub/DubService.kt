@@ -24,8 +24,13 @@ import com.voxora.app.dub.sync.ExternalPlayer
 import com.voxora.app.dub.sync.LatencyTimeline
 import com.voxora.app.dub.sync.MediaSessionExternalPlayer
 import com.voxora.app.dub.sync.MonotonicClock
+import com.voxora.app.dub.sync.PipelineLatencyEstimator
+import com.voxora.app.dub.sync.PlaybackRatePolicy
 import com.voxora.app.dub.sync.PlaybackTimeline
+import com.voxora.app.dub.sync.SourceClock
 import com.voxora.app.dub.sync.SyncDecision
+import com.voxora.app.dub.sync.SyncDiagnostics
+import com.voxora.app.dub.sync.SyncSnapshot
 import com.voxora.app.dub.sync.SyncState
 import com.voxora.app.util.StatusToast
 import com.voxora.app.util.VoxoraLog
@@ -75,16 +80,30 @@ class DubService : Service() {
     private lateinit var externalPlayer: ExternalPlayer
     private lateinit var sync: DubSyncController
 
-    /** Source audio content captured, in nanoseconds. Advanced only while the source is audible. */
-    private val sourceContentNanos = AtomicLong(0L)
+    /** The source clock, created once the capture reports the rate it opened the record at. */
+    @Volatile
+    private var sourceClock: SourceClock? = null
+
+    /** The learned latency floor, shared with the controller and read by the diagnostic line. */
+    private val latencyEstimator = PipelineLatencyEstimator()
+
+    /** The bounded playback-rate trim, applied to the output to drain small backlogs gently. */
+    private val ratePolicy = PlaybackRatePolicy()
 
     /** Chunks the ordered consumer actually received, for accounting Gemini's drops. */
     private val collectedDubChunks = AtomicLong(0L)
 
+    /** EWMA of a dubbed chunk's duration, used to convert in-flight chunks to audio time. */
+    @Volatile
+    private var dubChunkEwmaNanos: Double = 0.0
+
+    /** Rate limit for the `[DUB_SYNC]` diagnostic line. */
+    private var lastDubSyncLogNanos = Long.MIN_VALUE
+
     /** Guards the one-shot "first audio actually left the speaker" instrumentation mark. */
     private val actualPlaybackMarked = AtomicBoolean(false)
 
-    private val capture = SystemAudioCapture { pcm ->
+    private val capture = SystemAudioCapture { pcm, stamp ->
         var sum = 0.0
         for (s in pcm) sum += s * s
         val rms = if (pcm.isNotEmpty()) sqrt(sum / pcm.size).toFloat() else 0f
@@ -92,14 +111,20 @@ class DubService : Service() {
         val prev = _audioLevel.value
         _audioLevel.value = prev * 0.55f + level * 0.45f
         timeline.mark(DubEvent.SOURCE_CHUNK)
-        // The source content clock advances only while the source is actually audible and not
-        // held by a correction. Counting silence would make a paused source look like it was
-        // still moving, and the synchronizer would try to "catch up" forever.
-        if (rms >= SOURCE_SILENCE_RMS && !sync.isHoldingSource) {
-            sourceContentNanos.addAndGet(
-                pcm.size * 1_000_000_000L / GeminiLiveConfig.INPUT_SAMPLE_RATE,
-            )
-        }
+        // The source content clock advances only while the source is actually audible, the source
+        // is not held by a correction, and Gemini is actually accepting audio. Counting silence
+        // would make a paused source look like it was still moving; counting the pre-connection
+        // setup would inflate the measured latency by the whole handshake, because that audio is
+        // dropped by `sendPcm16k` and never translated. The frame count and capture time come from
+        // the device itself (`AudioRecord.getTimestamp`) whenever it offers them, so the clock is
+        // the platform's own rather than a sum of chunk lengths.
+        sourceClock?.onCapture(
+            frames = stamp.frames,
+            capturedAtNanos = stamp.capturedAtNanos,
+            nowNanos = stamp.nowNanos,
+            fromDevice = stamp.fromDevice,
+            counts = rms >= SOURCE_SILENCE_RMS && !sync.isHoldingSource && gemini.isReady,
+        )
         timeline.mark(DubEvent.PCM_SENT)
         gemini.sendPcm16k(pcm)
     }
@@ -119,7 +144,11 @@ class DubService : Service() {
         timeline = LatencyTimeline(clock, log = { VoxoraLog.d("DubSync", it) })
         playbackTimeline = PlaybackTimeline(log = { VoxoraLog.i("DubPlayback", it) })
         externalPlayer = MediaSessionExternalPlayer(applicationContext)
-        sync = DubSyncController(externalPlayer, log = { VoxoraLog.i("DubSync", it) })
+        sync = DubSyncController(
+            externalPlayer,
+            log = { VoxoraLog.i("DubSync", it) },
+            latency = latencyEstimator,
+        )
         createChannel()
 
         gemini.onFirstAudio = { timeline.mark(DubEvent.GEMINI_FIRST_AUDIO) }
@@ -139,6 +168,9 @@ class DubService : Service() {
                         // counters into a session that no longer matches them.
                         playbackTimeline.reset(clock.nowNanos(), playback.playedNanos())
                         sync.onGeminiReconnect(clock.nowNanos())
+                        ratePolicy.reset()
+                        dubChunkEwmaNanos = 0.0
+                        playback.setRate(1.0f)
                         DubUiStatus.Connecting
                     }
                     is GeminiStatus.Error -> DubUiStatus.Error(mapError(st.message))
@@ -168,10 +200,15 @@ class DubService : Service() {
                 val durationNanos =
                     samples.size * 1_000_000_000L / GeminiLiveConfig.OUTPUT_SAMPLE_RATE
                 timeline.mark(DubEvent.DUB_CHUNK, now)
+                // Audio still sitting in Gemini's hand-off buffer is received but not scheduled,
+                // so the timeline cannot see it on its own. Report it, or a full buffer would be
+                // invisible delay — which is exactly what it was before.
+                val handoffNanos = handoffBacklogNanos(durationNanos)
                 val action = playbackTimeline.onChunkArrived(
                     now,
                     durationNanos,
                     playback.playedNanos(),
+                    handoffNanos,
                 )
                 if (action == ChunkAction.PLAY) {
                     playback.writeFloats(samples)
@@ -186,6 +223,25 @@ class DubService : Service() {
                 markActualPlayback()
             }
         }
+    }
+
+    /**
+     * The audio still queued in Gemini's hand-off buffer, in nanoseconds.
+     *
+     * The buffer reports no occupancy, but the difference between what the session emitted and what
+     * this consumer has collected is the number of chunks in flight (the current one included), and
+     * a running average of the chunk duration turns that into audio time. The count is clamped to
+     * the buffer's capacity so chunks it discarded are never mistaken for queued audio.
+     */
+    private fun handoffBacklogNanos(latestDurationNanos: Long): Long {
+        dubChunkEwmaNanos = if (dubChunkEwmaNanos <= 0.0) {
+            latestDurationNanos.toDouble()
+        } else {
+            dubChunkEwmaNanos * 0.8 + latestDurationNanos * 0.2
+        }
+        val inFlight = (gemini.emittedAudioChunks - collectedDubChunks.get() - 1L)
+            .coerceIn(0L, GeminiLiveSession.AUDIO_HANDOFF_CAPACITY.toLong())
+        return (inFlight * dubChunkEwmaNanos).toLong()
     }
 
     /**
@@ -283,7 +339,8 @@ class DubService : Service() {
             gemini.connect(apiKey, lang)
             VoxoraLog.i("DubService", "gemini.connect called, starting capture...")
             capture.start(proj, scope, applicationInfo.uid)
-            VoxoraLog.i("DubService", "capture started")
+            sourceClock = SourceClock(capture.openedSampleRate)
+            VoxoraLog.i("DubService", "capture started at ${capture.openedSampleRate}Hz")
             startSyncLoop()
             _status.value = DubUiStatus.Connecting
             postUiUpdate()
@@ -305,8 +362,11 @@ class DubService : Service() {
         syncJob?.cancel()
         timeline.reset()
         actualPlaybackMarked.set(false)
-        sourceContentNanos.set(0L)
+        sourceClock?.reset()
         collectedDubChunks.set(0L)
+        dubChunkEwmaNanos = 0.0
+        ratePolicy.reset()
+        lastDubSyncLogNanos = Long.MIN_VALUE
         lastSyncState = SyncState.IDLE
         val startedAt = clock.nowNanos()
         playbackTimeline.start(startedAt, playback.playedNanos())
@@ -319,36 +379,86 @@ class DubService : Service() {
                 // The dub's content clock is the *playhead*, not the write cursor. Audio sitting
                 // in the output buffer has been written but not heard, and counting it as
                 // progress is exactly how a pipeline convinces itself it is in sync when it is
-                // not.
+                // not. The source clock is the device's own capture position.
                 val played = playback.playedNanos()
                 playbackTimeline.onPlayed(played)
-                val decision = sync.tick(now, sourceContentNanos.get(), played)
+                val sourceNanos = sourceClock?.contentNanos ?: 0L
+                val decision = sync.tick(now, sourceNanos, played)
                 when (decision) {
                     SyncDecision.PAUSE_SOURCE -> timeline.mark(DubEvent.SOURCE_PAUSE, now)
                     SyncDecision.RESUME_SOURCE -> timeline.mark(DubEvent.SOURCE_RESUME, now)
                     else -> Unit
                 }
+                // Drain a small backlog with a gentle rate trim before the timeline has to drop
+                // audio. The policy returns exactly 1.0 whenever nothing is queued, so this can
+                // never speed the dub past what the model has produced.
+                playback.setRate(
+                    ratePolicy.rateFor(now, sync.excessNanos, playbackTimeline.totalBacklogNanos),
+                )
                 _syncState.value = sync.state
-                val latencyMs = sync.baselineLatencyNanos / 1_000_000
+                val stateChanged = sync.state != lastSyncState
+                lastSyncState = sync.state
+                val floorMs = sync.floorLatencyNanos / 1_000_000
                 // The gap between what has been handed to the output and what the device has
                 // presented is the output buffer's own contribution to the delay. It is reported
                 // separately from the timeline's backlog so the two cannot be confused: one is
                 // the buffer the platform is holding, the other is audio the app is holding.
                 val bufferMs = (playback.writtenNanos() - played) / 1_000_000
-                val stateChanged = sync.state != lastSyncState
-                lastSyncState = sync.state
                 timeline.maybeLog(
                     now,
-                    context = "state=${sync.state} latency=${latencyMs}ms " +
-                        "backlog=${playbackTimeline.backlogNanos / 1_000_000}ms " +
+                    context = "state=${sync.state} floor=${floorMs}ms " +
+                        "excess=${sync.excessNanos / 1_000_000}ms " +
+                        "backlog=${playbackTimeline.totalBacklogNanos / 1_000_000}ms " +
                         "buffer=${bufferMs.coerceAtLeast(0)}ms " +
                         "tolerance=${playbackTimeline.toleranceNanos / 1_000_000}ms " +
+                        "rate=${playback.currentRate()} " +
                         "drops=${playbackTimeline.dropCount} " +
                         "underruns=${playbackTimeline.underrunCount}",
                     force = stateChanged,
                 )
+                logDubSync(now, sourceNanos, played, force = stateChanged)
             }
         }
+    }
+
+    /**
+     * Emits the one-line `[DUB_SYNC]` diagnostic, at most once a second and forced on a state
+     * change.
+     *
+     * Every number is measured, or explicitly rendered unavailable when the device cannot report
+     * it. Nothing here is inferred, which is what makes the line trustworthy when deciding where
+     * the delay actually is.
+     */
+    private fun logDubSync(nowNanos: Long, sourceNanos: Long, dubNanos: Long, force: Boolean) {
+        if (!force && lastDubSyncLogNanos != Long.MIN_VALUE &&
+            nowNanos - lastDubSyncLogNanos < DUB_SYNC_INTERVAL_NANOS
+        ) {
+            return
+        }
+        lastDubSyncLogNanos = nowNanos
+        val floor = sync.floorLatencyNanos
+        val snapshot = SyncSnapshot(
+            sourceNanos = sourceNanos,
+            dubNanos = dubNanos,
+            driftNanos = sourceNanos - dubNanos,
+            estimatedPipelineLatencyNanos = latencyEstimator.currentNanos,
+            floorNanos = if (floor < 0L) 0L else floor,
+            excessNanos = sync.excessNanos,
+            captureTimestampNanos = sourceClock?.captureLatencyNanos(nowNanos),
+            geminiFirstAudioNanos = timeline.firstElapsedNanos(
+                DubEvent.PCM_SENT,
+                DubEvent.GEMINI_FIRST_AUDIO,
+            ),
+            handoffNanos = playbackTimeline.handoffBacklogNanos,
+            outputQueuedNanos = playbackTimeline.scheduledNanos,
+            outputPlayedNanos = playbackTimeline.playedNanos,
+            bufferNanos = (playback.writtenNanos() - dubNanos).coerceAtLeast(0L),
+            rate = playback.currentRate(),
+            correction = if (sync.state == SyncState.IDLE) "none" else sync.state.name,
+            drops = playbackTimeline.dropCount,
+            underruns = playbackTimeline.underrunCount,
+        )
+        VoxoraLog.i("DUB_SYNC", SyncDiagnostics.format(snapshot))
     }
 
     private fun setErrorAndStop(message: String) {
@@ -509,6 +619,9 @@ class DubService : Service() {
 
         /** How often the synchronizer is allowed to look at the clocks. */
         private const val SYNC_TICK_MS = 250L
+
+        /** How often the `[DUB_SYNC]` diagnostic line may be emitted. */
+        private const val DUB_SYNC_INTERVAL_NANOS = 1_000_000_000L
 
         /** Below this RMS a captured chunk is treated as silence, not as source progress. */
         private const val SOURCE_SILENCE_RMS = 0.004f

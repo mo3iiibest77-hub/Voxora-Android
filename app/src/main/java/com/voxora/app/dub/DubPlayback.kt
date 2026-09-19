@@ -50,11 +50,19 @@ class DubPlayback(context: Context? = null) {
     /** 0..100 software gain for dub (volume keys) */
     private val dubVolume = AtomicInteger(100)
 
+    /**
+     * The playback-rate trim currently applied to the output, as a multiple of the output sample
+     * rate. `1.0` means no trim. Read by the diagnostics line and written by the synchronizer.
+     */
+    @Volatile
+    private var appliedRate = 1.0f
+
     fun start() {
         VoxoraLog.i("Playback", "start()")
         stop()
         writtenFrames.set(0L)
         headState = PlaybackHeadState()
+        appliedRate = 1.0f
         val attrs = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_ASSISTANT)
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
@@ -172,6 +180,32 @@ class DubPlayback(context: Context? = null) {
         }
     }
 
+    /**
+     * Applies a bounded playback-rate trim to the output.
+     *
+     * This is the *gentle* half of the correction: playing a few percent fast drains a small
+     * backlog without skipping the audio a drop would discard. It is deliberately tiny, clamped,
+     * and best-effort — a device whose track refuses the rate keeps playing at `1.0` rather than
+     * failing, and [currentRate] then reports what is actually applied rather than what was asked
+     * for.
+     */
+    fun setRate(rate: Float) {
+        val wanted = rate.coerceIn(MIN_RATE, MAX_RATE)
+        val t = track ?: return
+        if (wanted == appliedRate) return
+        val ok = try {
+            t.setPlaybackRate((GeminiLiveConfig.OUTPUT_SAMPLE_RATE * wanted).toInt()) ==
+                AudioTrack.SUCCESS
+        } catch (e: Exception) {
+            VoxoraLog.w("Playback", "setPlaybackRate failed: ${e.message}")
+            false
+        }
+        appliedRate = if (ok) wanted else 1.0f
+    }
+
+    /** The rate the output is actually running at. Always `1.0` before [start] and after [stop]. */
+    fun currentRate(): Float = appliedRate
+
     fun stop() {
         VoxoraLog.i("Playback", "stop()")
         playing.set(false)
@@ -185,6 +219,7 @@ class DubPlayback(context: Context? = null) {
         }
         track = null
         headState = PlaybackHeadState()
+        appliedRate = 1.0f
         abandonFocus()
         restoreSourceMusic()
     }
@@ -334,5 +369,9 @@ class DubPlayback(context: Context? = null) {
 
         /** Floor for the output buffer: ~125 ms of 24 kHz mono 16-bit audio. */
         private val MIN_BUFFER_BYTES = GeminiLiveConfig.OUTPUT_SAMPLE_RATE * 2 / 8
+
+        /** The hard clamp on the playback-rate trim, whatever the policy asks for. */
+        private const val MIN_RATE = 0.95f
+        private const val MAX_RATE = 1.05f
     }
 }

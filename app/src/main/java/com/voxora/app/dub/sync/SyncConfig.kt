@@ -3,45 +3,37 @@ package com.voxora.app.dub.sync
 /**
  * Every bound the adaptive synchronizer is allowed to use.
  *
- * There is deliberately **no** "the model takes 3 seconds" constant here. The constant offset
- * between the source and the dubbed audio is the model's own latency, and it is *measured* at
- * run time ([DubSyncController] learns it as a baseline) rather than assumed. What these
- * values bound is the **drift** — the amount by which the dub falls *behind* the latency the
- * pipeline actually has — and how aggressively the controller is allowed to react to it.
+ * There is deliberately **no** "the model takes 3 seconds" constant here. The pipeline's latency is
+ * *measured* at run time ([PipelineLatencyEstimator] learns its floor) rather than assumed, and it
+ * is reported as [SyncState.SYNCED] because it is what the pipeline is. What these values bound is
+ * the **excess** — the avoidable delay above that floor — and how aggressively the controller may
+ * react to it.
  *
- * The units are nanoseconds of monotonic time because that is what [MonotonicClock] returns;
- * media content positions are also expressed in nanoseconds of audio so the two can be
- * subtracted directly.
+ * The units are nanoseconds of monotonic time because that is what [MonotonicClock] returns; media
+ * content positions are also expressed in nanoseconds of audio so the two can be subtracted
+ * directly.
  *
- * All values are conservative on purpose: a slightly larger but stable offset is a better
- * product than a pipeline that keeps pausing the user's video.
+ * All values are conservative on purpose: a slightly larger but stable offset is a better product
+ * than a pipeline that keeps pausing the user's video.
  */
 data class SyncConfig(
     /**
-     * How long the source/dub offset must hold still before it is accepted as "the pipeline's
-     * latency". The offset climbs from zero to the model latency and then plateaus; this is
-     * the length of the plateau that confirms we have arrived.
-     */
-    val stabilityWindowNanos: Long = 1_200_000_000L,
-
-    /** Two consecutive offsets within this distance of each other count as "holding still". */
-    val stabilityEpsilonNanos: Long = 150_000_000L,
-
-    /**
-     * Hard ceiling on measurement. If the offset never settles (a very jittery network) we
-     * accept whatever we have and start monitoring rather than waiting forever.
+     * Hard ceiling on measurement. The floor is learned as soon as dubbed audio is flowing and the
+     * source clock is advancing, so this only matters for a source that never advances (for example
+     * a muted app): after this long the current offset is accepted as the floor rather than leaving
+     * the controller measuring forever.
      */
     val maxWarmUpNanos: Long = 8_000_000_000L,
 
-    /** Drift below this is noise (jitter, scheduling, chunk granularity) and is ignored. */
+    /** Excess below this is noise (jitter, scheduling, chunk granularity) and is ignored. */
     val driftToleranceNanos: Long = 250_000_000L,
 
-    /** The smallest drift worth pausing the user's source for. Must exceed the tolerance. */
+    /** The smallest excess worth pausing the user's source for. Must exceed the tolerance. */
     val minCorrectionNanos: Long = 400_000_000L,
 
     /**
-     * The longest a single correction may hold the source. A correction that has not restored
-     * the offset by now is not going to, and holding the source longer is worse than the drift.
+     * The longest a single correction may hold the source. A correction that has not restored the
+     * offset by now is not going to, and holding the source longer is worse than the drift.
      */
     val maxPauseNanos: Long = 5_000_000_000L,
 
@@ -58,7 +50,8 @@ data class SyncConfig(
         require(minCorrectionNanos >= driftToleranceNanos) {
             "minCorrectionNanos ($minCorrectionNanos) must be >= driftToleranceNanos ($driftToleranceNanos)"
         }
-        require(maxPauseNanos > 0 && correctionCooldownNanos > 0 && stallTimeoutNanos > 0) {
+        require(maxWarmUpNanos > 0 && maxPauseNanos > 0 && correctionCooldownNanos > 0 &&
+            stallTimeoutNanos > 0) {
             "sync timeouts must be positive"
         }
         require(maxCorrectionsPerMinute > 0) { "maxCorrectionsPerMinute must be positive" }

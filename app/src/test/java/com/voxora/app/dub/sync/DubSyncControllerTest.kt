@@ -99,14 +99,14 @@ class DubSyncControllerTest {
     }
 
     @Test
-    fun `small latency is absorbed into the baseline, not corrected`() {
+    fun `small latency is measured as the floor, not corrected`() {
         val sim = Sim()
         sim.start(latencyNanos = 200 * MS)
         sim.advance(10 * SEC)
 
         assertEquals(SyncState.SYNCED, sim.controller.state)
         assertEquals(0, sim.player.pauseCount)
-        assertNear(200 * MS, sim.controller.baselineLatencyNanos, 60 * MS)
+        assertNear(200 * MS, sim.controller.floorLatencyNanos, 60 * MS)
     }
 
     /**
@@ -115,7 +115,7 @@ class DubSyncControllerTest {
      * is precisely what a hardcoded "wait three seconds" would get wrong.
      */
     @Test
-    fun `three second latency becomes the measured baseline, with no correction`() {
+    fun `three second latency becomes the measured floor, with no correction`() {
         val sim = Sim()
         sim.start(latencyNanos = 3 * SEC)
         sim.advance(14 * SEC)
@@ -123,21 +123,21 @@ class DubSyncControllerTest {
         assertEquals(SyncState.SYNCED, sim.controller.state)
         assertEquals(0, sim.player.pauseCount)
         assertEquals(0, sim.controller.correctionCount)
-        assertNear(3 * SEC, sim.controller.baselineLatencyNanos, 100 * MS)
+        assertNear(3 * SEC, sim.controller.floorLatencyNanos, 100 * MS)
     }
 
     @Test
-    fun `the baseline is measured, so an unusual latency is learned too`() {
+    fun `the floor is measured, so an unusual latency is learned too`() {
         val slow = Sim()
         slow.start(latencyNanos = 4_500 * MS)
         slow.advance(16 * SEC)
-        assertNear(4_500 * MS, slow.controller.baselineLatencyNanos, 150 * MS)
+        assertNear(4_500 * MS, slow.controller.floorLatencyNanos, 150 * MS)
         assertEquals(0, slow.player.pauseCount)
 
         val fast = Sim()
         fast.start(latencyNanos = 700 * MS)
         fast.advance(10 * SEC)
-        assertNear(700 * MS, fast.controller.baselineLatencyNanos, 100 * MS)
+        assertNear(700 * MS, fast.controller.floorLatencyNanos, 100 * MS)
         assertEquals(0, fast.player.pauseCount)
     }
 
@@ -157,6 +157,41 @@ class DubSyncControllerTest {
 
         assertEquals(SyncState.SYNCED, sim.controller.state)
         assertEquals(0, sim.player.pauseCount)
+    }
+
+    /**
+     * The property that separates a floor from the old baseline: a burst is corrected *back* to the
+     * pipeline's demonstrated best, so it can never become the new normal.
+     */
+    @Test
+    fun `a burst cannot raise the target, so the floor stays at the pipeline's best`() {
+        val sim = Sim()
+        sim.start(latencyNanos = 2_500 * MS)
+        sim.advance(10 * SEC)
+        val floorBefore = sim.controller.floorLatencyNanos
+        assertNear(2_500 * MS, floorBefore, 100 * MS)
+
+        sim.injectSource(3 * SEC)
+        sim.advance(8 * SEC)
+
+        assertTrue(
+            "the floor must not be raised by a burst, was $floorBefore " +
+                "now ${sim.controller.floorLatencyNanos}",
+            sim.controller.floorLatencyNanos <= floorBefore + 50 * MS,
+        )
+    }
+
+    @Test
+    fun `the reported excess is the delay above the floor`() {
+        val sim = Sim()
+        sim.start(latencyNanos = 2 * SEC)
+        sim.advance(8 * SEC)
+        assertEquals(0L, sim.controller.excessNanos)
+
+        sim.injectSource(1 * SEC)
+        sim.advance(250 * MS)
+
+        assertTrue("expected a positive excess", sim.controller.excessNanos >= 900 * MS)
     }
 
     // ---------------------------------------------------------------- correction
@@ -381,12 +416,12 @@ class DubSyncControllerTest {
         assertFalse(sim.controller.isHoldingSource)
         assertEquals(1, sim.player.playCount)
         assertEquals(SyncState.WARMING_UP, sim.controller.state)
-        assertEquals(-1L, sim.controller.baselineLatencyNanos)
+        assertEquals(-1L, sim.controller.floorLatencyNanos)
 
         // It settles again on the new connection rather than staying in warm-up forever.
         sim.advance(10 * SEC)
         assertEquals(SyncState.SYNCED, sim.controller.state)
-        assertTrue(sim.controller.baselineLatencyNanos > 0L)
+        assertTrue(sim.controller.floorLatencyNanos > 0L)
     }
 
     @Test

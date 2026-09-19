@@ -53,6 +53,18 @@ class PlaybackTimelineTest {
             return action
         }
 
+        /** An arrival that also reports the audio still sitting in the Gemini hand-off buffer. */
+        fun arriveWithHandoff(duration: Long, handoff: Long): ChunkAction {
+            val action = timeline.onChunkArrived(now, duration, played, handoff)
+            if (action == ChunkAction.PLAY) {
+                written += duration
+                playedChunks++
+            } else {
+                droppedChunks++
+            }
+            return action
+        }
+
         /**
          * A healthy pipeline: the output is primed with a cushion, then chunks arrive at exactly
          * the rate they are consumed.
@@ -146,6 +158,41 @@ class PlaybackTimelineTest {
         sim.burst(30)
 
         assertTrue("some of the burst must still play", sim.playedChunks > playedBefore)
+    }
+
+    /**
+     * The hand-off buffer used to be invisible: audio received from Gemini but not yet scheduled was
+     * not in the backlog, so a full buffer added delay nothing measured. It is now part of the
+     * decision.
+     */
+    @Test
+    fun `audio still in the hand-off buffer counts towards the backlog`() {
+        val sim = Sim()
+        sim.start()
+        sim.steady(60)
+        assertTrue(
+            "the output backlog alone is inside the tolerance",
+            sim.timeline.backlogNanos <= sim.timeline.toleranceNanos,
+        )
+
+        val action = sim.arriveWithHandoff(chunk, sim.config.maxToleranceNanos)
+
+        assertEquals(ChunkAction.DROP, action)
+        assertTrue(sim.timeline.handoffBacklogNanos > 0L)
+        assertEquals(
+            "the total backlog must include the hand-off buffer",
+            sim.timeline.backlogNanos + sim.timeline.handoffBacklogNanos,
+            sim.timeline.totalBacklogNanos,
+        )
+    }
+
+    @Test
+    fun `a chunk arriving with an empty hand-off is played`() {
+        val sim = Sim()
+        sim.start()
+        sim.steady(60)
+
+        assertEquals(ChunkAction.PLAY, sim.arriveWithHandoff(chunk, 0L))
     }
 
     @Test

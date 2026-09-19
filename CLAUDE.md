@@ -163,7 +163,68 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
 > must not expire with any single feature. Add a rule to `AgentMD.md` only when it
 > applies to every future UI change; everything else belongs in `AGENTS.md`.
 
-### Last change (this session) — the independent Voxora Light appearance, the permanent Persian standard, and the accent-wash token
+### Last change (this session) — Live Dub synchronization rebuilt around a measured latency floor
+
+**DONE — one focused change to the Live Dub synchronization layer. No Reader change, no theme/UI
+change, no `ExternalPlayer` change, and `DelayedScreenOverlay` stays dead.**
+
+**The diagnosis (from the actual code).** Sample/frame/byte accounting was verified correct and there
+is no fixed offset anywhere, so the ~4 s was **not** a unit or clock-arithmetic bug. It was:
+
+1. **No latency floor.** `DubSyncController` learned the current steady-state offset as a `baseline`
+   and reported `SYNCED` for *any* constant (AGENTS §6 said so explicitly: "200 ms, 3 s or 4.5 s all
+   report SYNCED with zero corrections"). So the pipeline's latency was never attacked — and any
+   avoidable delay that had already settled when the baseline was learned became permanent.
+2. **A fabricated source clock.** `sourceContentNanos` was a silence-gated sum of captured chunk
+   durations, not anchored to monotonic time; `AudioRecord.getTimestamp()` was never read.
+3. **A second, completely invisible backlog.** `GeminiLiveSession`'s hand-off flow held up to 12
+   chunks, and `PlaybackTimeline` only saw chunks that reached it — so received-but-unscheduled
+   audio added up to ~1.2 s of delay that nothing measured. **The largest avoidable term.**
+4. The playback tolerance adapted up to 800 ms and the baseline was learned after it settled.
+5. The baseline also included the one-time connection setup, overstating the logged latency.
+
+Dominant term is Gemini's server-side translation latency (irreducible from the client); roughly
+1–1.5 s was local and removable.
+
+**What changed.**
+
+- **A real source clock.** New `SourceClock` advances from the device's own cumulative capture frame
+  position (`AudioRecord.getTimestamp`, `TIMEBASE_MONOTONIC`) instead of a sum of chunk lengths, and
+  exposes the capture pipeline's own latency. It counts only audio that is audible, not held by a
+  correction, and actually being sent (`GeminiLiveSession.isReady`) — counting the pre-connection
+  setup would inflate the measured latency by the whole handshake.
+- **A latency floor instead of a baseline.** New `PipelineLatencyEstimator` keeps the smallest offset
+  in a sliding 30 s window, sampled only while the pipeline is active. `DubSyncController` now
+  corrects `excess = offset − floor`. A constant latency is still `SYNCED` with zero corrections, but
+  a burst can no longer raise the target, and the app's own buffering is corrected away.
+- **The invisible buffer is gone and counted.** The hand-off is 4 chunks, and `DubService` reports
+  its occupancy (`emittedAudioChunks` minus collected, clamped to capacity) into
+  `PlaybackTimeline.onChunkArrived`, so the drop decision uses the **total** unheard audio.
+- **A bounded rate trim.** New `PlaybackRatePolicy` returns 1.0 inside an 80 ms dead band and whenever
+  nothing is queued, and ramps to at most 1.03 with a 2 s cooldown; `DubPlayback.setRate` applies it
+  best-effort. Order is: bound the backlog, trim the rate, pause the source, never seek.
+- **Tolerance ceiling 800 ms → 450 ms** (initial 300 ms, floor 200 ms), so a jittery session cannot
+  sit most of a second further behind.
+- **The `[DUB_SYNC]` line.** New `SyncDiagnostics` formats sourceMs / dubMs / driftMs /
+  estimatedPipelineLatencyMs / floorMs / excessMs / captureTimestampMs / geminiFirstAudioMs /
+  handoffMs / outputQueuedMs / outputPlayedMs / bufferMs / rate / correction / drops / underruns,
+  rate-limited to one per second and forced on a state change. An unavailable device measurement
+  renders `—`, never `0`.
+
+**Verification.** `validate-sync.sh` — **100 tests pass** (was 72; +28 for the new classes and the
+floor model), including the updated `DubSyncControllerTest` and `PlaybackTimelineTest`.
+`validate-dubservice.sh` and `validate-android-dub.sh` type-check the Android edge files
+(`DubService`, `SystemAudioCapture`, `DubPlayback`, `GeminiLiveSession`) against `android.jar`.
+`validate-cloud.sh` — **489 tests pass** (no regression). All six guards pass, with `dubguard.py`
+extended to cover the four new pure files.
+
+**Not verified on a device.** The measured floor, the actual share of the ~4 s that is Gemini versus
+local, the rate trim's pitch effect on devices whose `AudioTrack` resamples, and the capture
+timestamp on devices that do not report one are all owner-verification items. **Do not claim the
+delay is eliminated** — the app-added latency is removed, and the remainder is the pipeline's floor,
+which only Gemini or the network can lower.
+
+### Last change (previous session) — the independent Voxora Light appearance, the permanent Persian standard, and the accent-wash token
 
 **DONE — the `LIGHT_TEST_2` slot now holds the final Voxora Light appearance, built as a completely
 independent light UI variant. No Live Dub change, no Reader architecture change, and the existing

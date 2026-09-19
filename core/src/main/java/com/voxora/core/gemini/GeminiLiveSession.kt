@@ -41,12 +41,13 @@ class GeminiLiveSession(
     // What changed is that a drop is no longer invisible — `emittedAudioChunks` below is compared
     // with what the consumer received, and Live Dub reports the difference.
     //
-    // The capacity is deliberately small. It used to be 48 chunks, which is about 2.9s of audio:
-    // a burst could sit in this buffer entirely unnoticed while the dub fell seconds behind. The
-    // playback timeline now owns backlog policy, and this buffer is only a hand-off, so it is
-    // sized to roughly the timeline's own tolerance rather than generously.
+    // The capacity is deliberately tiny. It used to be 48 chunks (~2.9s), then 12 (~0.7s): any
+    // audio sitting here has been received but not yet scheduled, so it is pure added delay, and
+    // because `PlaybackTimeline` only sees chunks that reach it, this buffer was invisible to the
+    // synchronization model. Four chunks is enough to decouple the socket thread from the consumer
+    // and no more; the caller accounts for what is still in flight.
     private val _audioOut = MutableSharedFlow<FloatArray>(
-        extraBufferCapacity = 12,
+        extraBufferCapacity = AUDIO_HANDOFF_CAPACITY,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
     val audioOut: SharedFlow<FloatArray> = _audioOut.asSharedFlow()
@@ -73,6 +74,15 @@ class GeminiLiveSession(
 
     private var ws: WebSocket? = null
     private val ready = AtomicBoolean(false)
+
+    /**
+     * True once the setup handshake has completed and audio is actually being sent.
+     *
+     * The source clock must not count audio captured before this: [sendPcm16k] drops it, so it will
+     * never be translated, and counting it would make the measured pipeline latency look larger
+     * than the audio's real lag by the whole connection setup time.
+     */
+    val isReady: Boolean get() = ready.get()
     private val closedByUs = AtomicBoolean(false)
     private var apiKey: String = ""
     private var targetLanguage: String = "fa"
@@ -236,6 +246,13 @@ class GeminiLiveSession(
     }
 
     companion object {
+        /**
+         * How many dubbed chunks the hand-off buffer may hold before it starts dropping the
+         * oldest. Small on purpose: the buffer is a hand-off, not a queue, and the caller accounts
+         * for the chunks still in flight so it cannot hide latency from the synchronizer.
+         */
+        const val AUDIO_HANDOFF_CAPACITY = 4
+
         fun defaultClient(): OkHttpClient =
             OkHttpClient.Builder()
                 .readTimeout(0, TimeUnit.MILLISECONDS)

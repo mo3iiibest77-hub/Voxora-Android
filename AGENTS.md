@@ -618,26 +618,60 @@ this cycle is the one sanctioned change to them, and it is described here.
 ### The problem, stated correctly
 
 The source (video, podcast, music) plays in real time. Voxora captures it, sends it to Gemini and
-plays the translation back, so the dubbed audio is always **behind the source by the model's
-latency `L`**. The audible defect is not `L`; it is **drift** — when the dub cannot keep up, the gap
-grows without bound. A constant offset is what the pipeline *is*.
+plays the translation back, so the dubbed audio is always **behind the source by the pipeline's
+latency `L`** — most of it Gemini's own translation time. `L` itself cannot be removed from the
+client. The audible defect is the **avoidable delay on top of `L`**: an output backlog, an oversized
+hand-off buffer, a tolerance that adapted upward. That delay is what the user actually hears as
+"the dub is 4 seconds behind", and it is what this layer removes.
 
-### The model
+### The model: a measured floor, not an accepted baseline
 
-Both sides have a **content clock** in nanoseconds of audio: how much source audio was captured, and
-how much dubbed audio was written to the output. Their difference is the offset. In a healthy
-pipeline both advance at real time, so the offset is constant and equal to `L`. `DubSyncController`
-**measures** that constant as a baseline — it is never assumed, and there is deliberately no
-"3 second" constant anywhere in `dub/` or in `GeminiLiveConfig`. Drift is `offset − baseline`; when
-the dub falls behind, the offset rises above the baseline and the controller pauses the source,
-letting the dub drain its backlog until the offset returns to the baseline, then resumes.
+Both sides have a **content clock** in nanoseconds of audio: how much source audio was captured
+(`SourceClock`, from the device's own capture frame position) and how much dubbed audio the device
+has actually presented (`DubPlayback.playedNanos`, from `AudioTrack.playbackHeadPosition`). Their
+difference is the offset. In a healthy pipeline both advance at real time, so the offset is constant.
 
-- `SyncConfig` holds only bounds (stability window, tolerance, minimum correction, maximum pause,
+The earlier version of this layer learned that constant as a **baseline** and corrected only
+deviations from it. That is correct for drift and wrong for everything else: whatever avoidable delay
+had settled by the time the baseline was learned — a full hand-off buffer, an output backlog, a
+tolerance that had adapted to 800 ms — became permanent, and a constant 4 s offset reported
+`SYNCED` forever.
+
+The model now learns a **[`PipelineLatencyEstimator`] floor** instead: the *smallest* offset seen in
+a sliding 30 s window, sampled only while the pipeline is genuinely active. The floor is the best the
+pipeline has demonstrated, and everything above it is delay the app introduced:
+
+```
+excess = offset − floor
+```
+
+`excess` is what `DubSyncController` corrects, by pausing the source so the dub drains its backlog
+until the offset is back at the floor. A constant pipeline latency is still reported
+`SyncState.SYNCED` — it is the pipeline, not a fault — but it can no longer be an inflated baseline,
+because the floor keeps moving down as the app's own buffering is removed.
+
+- `SyncConfig` holds only bounds (warm-up ceiling, tolerance, minimum correction, maximum pause,
   cooldown, rate budget, stall timeout). It has no latency constant.
-- The baseline is learned by waiting for the offset to **hold still**; a jittery pipeline that never
-  settles is accepted after `maxWarmUpNanos` rather than waiting forever.
-- A constant latency of 200 ms, 3 s or 4.5 s all report `SYNCED` with **zero** corrections. That is
-  the contract, and `DubSyncControllerTest` pins each case.
+- A constant latency of 200 ms, 3 s or 4.5 s all report `SYNCED` with **zero** corrections, and the
+  floor equals that latency. `DubSyncControllerTest` pins each case.
+- A burst of late audio raises the *current* offset but **cannot raise the floor**, so it can never
+  become the new normal; the controller corrects back down to the demonstrated best.
+- `SourceClock` counts only audio that is actually audible, not held by a correction, and actually
+  being sent (`GeminiLiveSession.isReady`). Counting the pre-connection setup would inflate the
+  measured latency by the whole handshake, because `sendPcm16k` drops that audio.
+
+### The correction order: bound the backlog, then trim the rate, never seek
+
+1. **The playback timeline bounds the backlog** — see the next section.
+2. **`PlaybackRatePolicy` trims the output rate** by at most three percent to drain a small excess
+   without skipping audio. It returns exactly `1.0` inside an 80 ms dead band and whenever nothing
+   is queued (speeding up with nothing to drain would only underrun), moves at most one step per two
+   seconds, and is clamped. `DubPlayback.setRate` applies it best-effort: a track that refuses the
+   rate keeps playing at `1.0`, and `currentRate()` reports what is actually applied.
+3. **The controller pauses the source** only for excess above `minCorrectionNanos`, subject to the
+   cooldown and the per-minute budget.
+4. **Nothing ever seeks or flushes the output.** Dropping the arriving chunk bounds the delay; it
+   deliberately does not jump the content forward.
 
 ### The dub-side playhead, and why both halves are needed
 
@@ -655,24 +689,33 @@ up permanently further behind. That is the failure mode `PlaybackTimeline` exist
   contribution to the delay and is logged separately as `buffer`.
 - In a healthy pipeline the backlog sits at the output buffer's own occupancy and holds still. When
   Gemini bursts, it spikes past the **tolerance**; the timeline then refuses to feed the output until
-  it is back inside, so the surplus is discarded instead of being played out. Because the consumer
-  receives oldest-first, refusing the chunk it is holding is exactly "discard the oldest queued
-  audio" — the content jumps forward instead of the dub falling further behind.
+  it is back inside, so the surplus is discarded instead of being played out. The consumer receives
+  oldest-first, so refusing the arriving chunk **bounds** the total delay rather than reducing it —
+  the queued audio already in the output buffer still plays. That is the deliberate trade: bound the
+  lag, never seek the content forward. The controller's source pause is what actually drains it.
+- The timeline's decision uses the **total** unheard audio: the output backlog *plus*
+  `handoffBacklogNanos`, the audio still queued in Gemini's hand-off flow. That buffer reports no
+  occupancy, so `DubService` estimates it from the difference between `emittedAudioChunks` and the
+  chunks the consumer has collected, clamped to the buffer's capacity. Leaving it out was how a full
+  hand-off buffer added delay that nothing measured — the single largest avoidable term found.
 - The tolerance **adapts**: running dry means it was too tight, so it loosens by one step; a quiet
   stretch tightens it again. Both moves are clamped (`minToleranceNanos`..`maxToleranceNanos`) and
-  rate-limited by `adaptationCooldownNanos`, so one burst cannot make the buffer oscillate. There is
-  no fixed backlog constant, for the same reason there is no fixed latency constant.
+  rate-limited by `adaptationCooldownNanos`, so one burst cannot make the buffer oscillate. The
+  ceiling is 450 ms (it was 800 ms), because a jittery session must not sit most of a second further
+  behind for its whole run. There is no fixed backlog constant, for the same reason there is no
+  fixed latency constant.
 - `DubService` must ask `PlaybackTimeline.onChunkArrived` about **every** chunk and branch on
   `ChunkAction.PLAY`; writing straight from the Gemini flow bypasses the policy. `dubguard.py`
   enforces this, along with the playhead requirement and the purity of the timeline.
 - On a Gemini reconnect the timeline is **rebased**, not zeroed: the audio in flight is gone, but the
   output track is still playing, and zeroing the playhead would make the backlog look enormous and
-  discard audio that should have played.
+  discard audio that should have played. The rate trim is reset to `1.0` at the same time.
 - The timeline is **thread-safe**: the audio consumer calls `onChunkArrived` while the synchronizer's
   tick calls `onPlayed`, so every mutator is `@Synchronized` and every reported counter is `@Volatile`.
   A lost update would let the backlog grow unbounded — the one thing this class exists to prevent.
-- `GeminiLiveSession`'s hand-off buffer was cut from 48 chunks (~2.9 s, enough to hide a burst
-  entirely) to 12. The timeline owns backlog policy now; that buffer is only a hand-off.
+- `GeminiLiveSession`'s hand-off buffer was cut from 48 chunks (~2.9 s) to 12 and is now **4**. It is
+  a hand-off, not a queue; the timeline owns backlog policy, and the caller accounts for what is
+  still in flight so the buffer can never hide latency again.
 
 **This is additive, not a replacement.** `DubSyncController` still owns source-side drift and the
 `ExternalPlayer` seam is unchanged. The two compose: the timeline bounds the backlog locally and
@@ -717,7 +760,25 @@ is. Gemini's `DROP_OLDEST` buffer cannot report drops through `tryEmit`, so
 is reported as `DROPPED n` instead of being silent; chunks discarded by the playback timeline are
 counted separately as `dropped n`.
 
-### Three pipeline bugs fixed with this work
+`SyncDiagnostics` formats the single `[DUB_SYNC]` line, emitted at most once a second and forced on a
+state change, with every number measured or explicitly unavailable:
+
+```
+[DUB_SYNC] sourceMs=… dubMs=… driftMs=… estimatedPipelineLatencyMs=… floorMs=… excessMs=…
+           captureTimestampMs=… geminiFirstAudioMs=… handoffMs=… outputQueuedMs=…
+           outputPlayedMs=… bufferMs=… rate=… correction=… drops=… underruns=…
+```
+
+- `captureTimestampMs` is `AudioRecord.getTimestamp`'s age — the capture pipeline's own contribution,
+  and the only field a device may legitimately not provide. It renders `—`, never `0`: "the platform
+  did not tell us" and "the value is zero" are different answers.
+- `floorMs` and `excessMs` are the model: the pipeline's demonstrated best, and the avoidable delay
+  above it. `driftMs` is the raw offset. Comparing them is how the line answers "is the 4 s the
+  model, or is it us?".
+- `handoffMs` is the previously invisible Gemini hand-off backlog; `bufferMs` is the output buffer's
+  occupancy. They are reported separately because they are different buffers with different owners.
+
+### Five pipeline bugs fixed with this work
 
 1. `DubService` launched a **new coroutine per audio emission** to write to the track, so chunks
    could be written out of order under load. There is now one ordered consumer, and
@@ -727,6 +788,13 @@ counted separately as `dropped n`.
    at ~125 ms.
 3. The dub's content clock was the **write cursor**, so audio sitting unplayed in the output buffer
    counted as progress and the pipeline could not see its own backlog. It is now the playhead.
+4. The model accepted the current offset as a **baseline**, so any avoidable delay that had already
+   settled became permanent and a constant 4 s reported `SYNCED`. It now targets a measured
+   **floor**, so the app's own buffering is corrected away instead of accepted.
+5. The Gemini **hand-off buffer was invisible** to the model: the `PlaybackTimeline` only saw chunks
+   that reached it, so up to 12 chunks of received-but-unscheduled audio added delay nothing
+   measured. The buffer is now 4 chunks and its occupancy is part of the drop decision and the
+   `[DUB_SYNC]` line.
 
 The source ducking rule (~28 %, never silent) is `SourceVolumeDuck`, pure and unit-tested; the
 original level is saved and restored exactly. Volume keys still control the dub through the local
@@ -981,7 +1049,11 @@ A task is NOT done until:
   - `LogSeverityTest` (app) — the severity → role mapping behind the Logs colours: INFO → success, WARN → warning, ERROR → danger, DEBUG → neutral, every severity the product emits has a role, DEBUG is the only neutral one, an unrecognised severity is neutral and **never** success, and the lookup is case-insensitive (see §9).
   - `LogLineFormatTest` (app) — the one line shape every copy path shares: timestamp then level then `[tag]` then message, millisecond precision, every level padded to the same width so the tag starts in one column, the message appended verbatim (a log line is evidence), and empty fields still producing the shape. Pins the default `TimeZone` to UTC and restores it, so the expected string does not depend on where the suite runs (see §9).
   - `ChunkQueueTest`, `ReaderSpoolTest` — chunking and spool contracts.
-  - `DubSyncControllerTest` (app) — the adaptive synchronizer, driven by a fake clock and a fake player through a small pipeline model, with **no Android and no coroutines**. Pins: zero, small, 3 s, 4.5 s and 700 ms latencies all become a measured baseline with **zero** corrections; a wobble inside the tolerance stays synced; a drift spike pauses the source once and resumes when caught up; a correction is bounded by `maxPauseNanos`; corrections are rate-limited and spaced by the cooldown; a controllable playing source may be corrected (the video fallback); a user pause is never fought and a user resume re-engages; an uncontrollable source is audio-only and never paused; losing the session releases the source; a stalled dub withdraws the claim and never leaves the source paused; stopping while synchronized leaves the source alone, stopping while correcting resumes it; and a Gemini reconnect releases the source, re-measures and settles (see §6).
+  - `DubSyncControllerTest` (app) — the adaptive synchronizer, driven by a fake clock and a fake player through a small pipeline model, with **no Android and no coroutines**. Pins: zero, small, 3 s, 4.5 s and 700 ms latencies all become a measured **floor** with **zero** corrections; a wobble inside the tolerance stays synced; a burst cannot raise the floor (it is corrected back to the demonstrated best) while the reported excess is the delay above it; a drift spike pauses the source once and resumes when caught up; a correction is bounded by `maxPauseNanos`; corrections are rate-limited and spaced by the cooldown; a controllable playing source may be corrected (the video fallback); a user pause is never fought and a user resume re-engages; an uncontrollable source is audio-only and never paused; losing the session releases the source; a stalled dub withdraws the claim and never leaves the source paused; stopping while synchronized leaves the source alone, stopping while correcting resumes it; and a Gemini reconnect releases the source, re-measures and settles (see §6).
+  - `SourceClockTest` (app) — the source clock's contract: the content clock converts the device frame count to audio time; frames captured while silent do not advance it; uneven reads lose no frames; the capture latency is the device timestamp subtracted from now; without a device timestamp the latency is **unavailable, never zero**; a frame counter that goes backwards cannot shrink the clock; and `reset` clears the run (see §6).
+  - `PipelineLatencyEstimatorTest` (app) — the floor's contract: there is no floor before the first sample; the floor is the smallest offset in the window; **a burst raises the current offset but never the floor**; the floor forgets an old sample once the window has passed; the current offset is smoothed rather than raw; excess is zero when the offset holds at the floor; and `reset` clears it (see §6).
+  - `PlaybackRatePolicyTest` (app) — the rate trim's contract: an excess inside the dead band leaves the rate at unity; an excess **with a backlog** ramps it to the ceiling; an excess with **nothing queued** keeps it at unity (speeding up with nothing to drain would only underrun); it moves at most one step per cooldown; it returns to unity when the excess clears; it never leaves its bounds; and `reset` returns to unity (see §6).
+  - `SyncDiagnosticsTest` (app) — the diagnostic line's contract: every requested field is present; an unavailable device measurement renders as unavailable rather than a fabricated zero; and the rate uses a dot whatever the device locale (see §6).
   - `SourceVolumeDuckTest` (app) — the source ducking contract: the source is reduced but never muted, a low level keeps one audible step, there is nothing to duck into at the bottom of the range, an unusable range is left alone, restoring returns exactly the saved level, and every duckable level produces a strictly lower positive level (see §6).
   - `LatencyTimelineTest` (app) — the instrumentation contract: first and last occurrences tracked separately, a missing stage reported as absent rather than zero, a backwards timestamp reported as absent rather than negative, the summary naming every stage and its milliseconds, the write/played stages kept distinct, accounted drops, rate-limited logging with a forced override, the context appended verbatim, `reset`, and marking through the injected monotonic clock (see §6).
   - `PlaybackTimelineTest` (app) — the dub playhead and backlog contract, driven by a fake clock and a fake device playhead: a steady realtime stream is played in full with no drops and no starvation; the backlog reflects the output buffer rather than the write cursor; a burst is trimmed back inside the tolerance instead of becoming permanent delay, while still playing what it can; a single late chunk is absorbed without discarding anything; variable chunk sizes accumulate no backlog; running dry loosens the tolerance and a quiet stretch tightens it back, both clamped; a reconnect rebases the playhead rather than reporting a phantom backlog and does not carry the previous session's counters; a playhead that goes backwards is rebased; stopping withdraws the policy; discarded audio is accounted exactly; a concurrent arrival/playhead smoke test asserts the backlog stays bounded with two threads mutating the timeline at once; and the configuration rejects an underrun threshold that would make a healthy pipeline look starved (see §6).
@@ -1014,20 +1086,28 @@ A task is NOT done until:
 
 ---
 
-*Last updated: auto-generated by Claude for Voxora project — the `LIGHT_TEST_2` slot now holds the
-final **Voxora Light** appearance (warm cream, gold leaf, warm brown shadows, gold-at-12 % glow),
-built as a completely independent light UI variant with the owner's palette used verbatim and its
-measured WCAG shortfalls documented rather than designed around; the accent wash behind icons became
-the per-appearance `VoxoraColors.glow` role so a light screen can never inherit the dark gold wash;
-the canonical Persian writing/localization standard was made permanent project law (§10 here and
-`AgentMD.md` §2); and earlier in the line, the bundled Vazirmatn type stack removed so the app renders
-with the platform font through the stock Material 3 type scale, the Persian strings audited and
-bidi-isolated for mixed Persian/Latin text, and Live Dub given an adaptive source/dub synchronization
-layer that measures the pipeline's own latency (no fixed delay), corrects drift through an opt-in
-media-session layer, accounts for dropped audio, and logs monotonic stage timings — together with two
-real latency fixes: the per-emission audio coroutine replaced by one ordered consumer, and the
-one-second `AudioTrack` buffer reduced to ~125 ms. The standing rules for future UI work live in
-`AgentMD.md`; the Live Dub contract is §6 here. **No real-device testing was performed for the Live
-Dub synchronization work or for the Voxora Light appearance** — the sync behaviour, the media-session
-pause/resume, the measured latency, the light appearance's on-device look and the gold-on-cream
-legibility at small sizes are device-verification items.*
+*Last updated: auto-generated by Claude for Voxora project — Live Dub's synchronization was rebuilt
+around a **measured latency floor** instead of an accepted baseline: the source clock now comes from
+the device's own capture frame position and `AudioRecord.getTimestamp`, the model corrects the
+*excess above the floor* rather than any deviation from whatever offset happened to settle, the
+Gemini hand-off buffer was cut to 4 chunks and its occupancy is now counted (it was the largest
+invisible delay), the playback tolerance ceiling dropped from 800 ms to 450 ms, a bounded ±3 %
+playback-rate trim drains small backlogs without skipping audio, and a rate-limited `[DUB_SYNC]` line
+reports every stage with real numbers; the `LIGHT_TEST_2` slot holds the final **Voxora Light**
+appearance (warm cream, gold leaf, warm brown shadows, gold-at-12 % glow), built as a completely
+independent light UI variant with the owner's palette used verbatim and its measured WCAG shortfalls
+documented rather than designed around; the accent wash behind icons became the per-appearance
+`VoxoraColors.glow` role so a light screen can never inherit the dark gold wash; the canonical Persian
+writing/localization standard was made permanent project law (§10 here and `AgentMD.md` §2); and
+earlier in the line, the bundled Vazirmatn type stack removed so the app renders with the platform
+font through the stock Material 3 type scale, the Persian strings audited and bidi-isolated for mixed
+Persian/Latin text, and Live Dub given an adaptive source/dub synchronization layer that measures the
+pipeline's own latency (no fixed delay), corrects drift through an opt-in media-session layer,
+accounts for dropped audio, and logs monotonic stage timings — together with two real latency fixes:
+the per-emission audio coroutine replaced by one ordered consumer, and the one-second `AudioTrack`
+buffer reduced to ~125 ms. The standing rules for future UI work live in `AgentMD.md`; the Live Dub
+contract is §6 here. **No real-device testing was performed for the Live Dub synchronization work or
+for the Voxora Light appearance** — the sync behaviour, the media-session pause/resume, the measured
+floor and the actual share of the delay that is Gemini's, the rate trim's pitch effect on devices
+that resample, the light appearance's on-device look and the gold-on-cream legibility at small sizes
+are all device-verification items.*

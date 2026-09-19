@@ -39,6 +39,14 @@ enum class ChunkAction { PLAY, DROP }
  * rather than from bytes written is what makes it honest: a chunk sitting in the output buffer is
  * delay, and counting it as progress is how a pipeline convinces itself it is in sync.
  *
+ * ## The hand-off backlog
+ *
+ * There is a second buffer upstream of this class: the Gemini hand-off flow. Audio sitting there has
+ * been received but has not reached [onChunkArrived], so it is invisible unless the caller reports
+ * it. [handoffBacklogNanos] is that report, and the drop decision uses `backlogNanos +
+ * handoffBacklogNanos` — the *total* unheard audio. Leaving it out was how a full hand-off buffer
+ * could add seconds of delay that nothing measured.
+ *
  * ## Adaptation
  *
  * The tolerance is not fixed. Running dry means it was too tight, so it loosens by one step; a
@@ -70,6 +78,18 @@ class PlaybackTimeline(
     /** The current added delay: accepted-but-not-yet-heard audio. */
     val backlogNanos: Long
         get() = (scheduledNanos - playedNanos).coerceAtLeast(0L)
+
+    /**
+     * Audio received from Gemini but still sitting in the hand-off buffer, as last reported by the
+     * consumer. Not part of [backlogNanos] (it has not been scheduled yet) but part of the delay.
+     */
+    @Volatile
+    var handoffBacklogNanos: Long = 0L
+        private set
+
+    /** The total unheard dubbed audio: the output backlog plus the hand-off buffer. */
+    val totalBacklogNanos: Long
+        get() = (backlogNanos + handoffBacklogNanos).coerceAtLeast(0L)
 
     /** The backlog the timeline is currently willing to tolerate before it discards audio. */
     @Volatile
@@ -127,6 +147,7 @@ class PlaybackTimeline(
     fun reset(nowNanos: Long, absolutePlayedNanos: Long = 0L) {
         scheduledNanos = 0L
         playedNanos = 0L
+        handoffBacklogNanos = 0L
         droppedNanos = 0L
         dropCount = 0L
         underrunCount = 0L
@@ -163,27 +184,31 @@ class PlaybackTimeline(
      *
      * [durationNanos] is the chunk's own length in nanoseconds of audio; [absolutePlayedNanos]
      * is the device's current playback position, which the caller reads from the output track.
+     * [handoffBacklogNanos] is the audio still queued in the Gemini hand-off buffer, so the
+     * decision is made against the *total* unheard audio rather than only the output backlog.
      */
     @Synchronized
     fun onChunkArrived(
         nowNanos: Long,
         durationNanos: Long,
         absolutePlayedNanos: Long,
+        handoffBacklogNanos: Long = 0L,
     ): ChunkAction {
         if (!started || durationNanos <= 0L) return ChunkAction.PLAY
 
         onPlayed(absolutePlayedNanos)
+        this.handoffBacklogNanos = handoffBacklogNanos.coerceAtLeast(0L)
 
         // Starvation is measured *before* this chunk is counted: a backlog already at the floor
         // when new audio arrives means the output had run dry, so the tolerance was too tight.
-        if (lastArrivalNanos >= 0L && backlogNanos <= config.underrunNanos) {
+        if (lastArrivalNanos >= 0L && totalBacklogNanos <= config.underrunNanos) {
             underrunCount++
             loosen(nowNanos)
         }
         lastArrivalNanos = nowNanos
 
         scheduledNanos += durationNanos
-        val backlog = backlogNanos
+        val backlog = totalBacklogNanos
         if (backlog > peakBacklogNanos) peakBacklogNanos = backlog
 
         if (backlog > toleranceNanos) {
@@ -194,7 +219,8 @@ class PlaybackTimeline(
             dropCount++
             log(
                 "playback: dropped ${durationNanos / 1_000_000}ms — backlog " +
-                    "${backlog / 1_000_000}ms over tolerance ${toleranceNanos / 1_000_000}ms",
+                    "${backlog / 1_000_000}ms (handoff ${this.handoffBacklogNanos / 1_000_000}ms) " +
+                    "over tolerance ${toleranceNanos / 1_000_000}ms",
             )
             return ChunkAction.DROP
         }
