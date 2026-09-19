@@ -254,6 +254,7 @@
     <string name="reader_partial_audio">روایت در میانهٔ این قطعه قطع شد. صدای دریافت‌شده پخش شده است. موقعیتت حفظ می‌شود؛ با زدن پخش، این قطعه از ابتدا دوباره روایت می‌شود.</string>
     <string name="reader_retry_unit">روایت این قطعه ممکن نشد. موقعیتت حفظ می‌شود. اتصال، کلید و دسترسی به مدل را بررسی کن و برای تلاش دوباره پخش را بزن.</string>
     <string name="reader_document_failed">خواندن این فایل ممکن نشد. یک فایل متنی ⁨UTF-8⁩ یا ⁨PDF⁩ بدون رمز با متن قابل انتخاب (تا 20 مگابایت) انتخاب کن. ⁨PDF⁩ اسکن‌شده به ⁨OCR⁩ نیاز دارد.</string>
+    <string name="reader_book_unavailable">نسخهٔ ذخیره‌شدهٔ این کتاب دیگر روی این دستگاه نیست. فایل را دوباره وارد کن یا کتاب را حذف کن.</string>
     <string name="reader_preview_source">این قطعهٔ انتخاب‌شده از متن اصلی است. برجسته‌سازی بر اساس صدای واقعاً پخش‌شده تغییر می‌کند، نه زمان‌بندی تخمینی ترجمه.</string>
     <string name="reader_preview_next">قطعهٔ بعدی قابل مشاهده است و هنگام پخش هم می‌توانی انتخابش کنی.</string>
     <string name="settings_cloud_account">حساب ⁨Google⁩</string>
@@ -326,6 +327,7 @@
     <string name="reader_library_not_started">شروع نشده</string>
     <string name="reader_library_in_progress">در جریان</string>
     <string name="reader_library_completed">تمام‌شده</string>
+    <string name="reader_library_unavailable">در دسترس نیست</string>
     <string name="reader_library_last_read">آخرین بار %1$s</string>
 
     <!-- How long ago a book was read -->
@@ -346,6 +348,9 @@
     <string name="reader_book_info_synopsis">خلاصهٔ داستان</string>
     <string name="reader_book_info_description">دربارهٔ این اثر</string>
     <string name="reader_book_info_topics">درون‌مایه‌ها و موضوع‌ها</string>
+    <string name="reader_book_info_generated">نمای کلی تولیدشده با هوش مصنوعی</string>
+    <string name="reader_book_info_generated_note">از فرادادهٔ فهرست کتاب و به زبان خواندنت نوشته شده است؛ یک خلاصهٔ تولیدشده است، نه یک واقعیتِ ثبت‌شده در فهرست.</string>
+    <string name="reader_book_info_source_language">متن خودِ فهرست به %1$s است.</string>
     <string name="reader_book_cover">جلد</string>
     <string name="reader_book_fact_author">نویسنده</string>
     <string name="reader_book_fact_publisher">ناشر</string>

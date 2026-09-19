@@ -255,6 +255,7 @@
     <string name="reader_partial_audio">Narration stopped partway through this segment. Received audio has finished playing. Your position is kept; Play retries this segment from its beginning.</string>
     <string name="reader_retry_unit">This segment could not be narrated. Your position is kept. Check your connection, key and model access, then press Play to retry.</string>
     <string name="reader_document_failed">Could not read this document. Choose an accessible UTF-8 TXT or unlocked, selectable-text PDF (up to 20 MB). Scanned PDFs need OCR.</string>
+    <string name="reader_book_unavailable">This book\'s saved copy is no longer on this device. Import the file again, or remove the book.</string>
     <string name="reader_preview_source">This is the selected source segment. The highlight follows the audio actually played, not an estimated translation timeline.</string>
     <string name="reader_preview_next">The next segment remains visible and can be selected during playback.</string>
     <string name="settings_cloud_account">Google account</string>
@@ -327,6 +328,7 @@
     <string name="reader_library_not_started">Not started</string>
     <string name="reader_library_in_progress">In progress</string>
     <string name="reader_library_completed">Completed</string>
+    <string name="reader_library_unavailable">Not available</string>
     <string name="reader_library_last_read">Last read %1$s</string>
 
     <!-- How long ago a book was read -->
@@ -347,6 +349,9 @@
     <string name="reader_book_info_synopsis">Synopsis</string>
     <string name="reader_book_info_description">About the work</string>
     <string name="reader_book_info_topics">Themes and subjects</string>
+    <string name="reader_book_info_generated">AI-generated overview</string>
+    <string name="reader_book_info_generated_note">Written from the catalogue record, in your reading language. It is a generated summary, not a catalogue fact.</string>
+    <string name="reader_book_info_source_language">The catalogue\'s own text is in %1$s.</string>
     <string name="reader_book_cover">Cover</string>
     <string name="reader_book_fact_author">Author</string>
     <string name="reader_book_fact_publisher">Publisher</string>

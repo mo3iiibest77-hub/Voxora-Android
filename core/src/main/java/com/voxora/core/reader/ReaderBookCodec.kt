@@ -79,6 +79,23 @@ object ReaderBookCodec {
         .put("lookup", book.lookup.id)
         .put("signals", book.signals?.let(::encodeSignals))
         .put("metadata", book.metadata?.let(::encodeMetadata))
+        // Omitted entirely when empty, so a record that never generated an overview encodes
+        // exactly as it did before this field existed.
+        .also { json -> book.overviews.takeIf { it.isNotEmpty() }?.let { json.put("overviews", encodeOverviews(it)) } }
+
+    private fun encodeOverviews(overviews: List<BookIntelOverview>): JSONArray =
+        JSONArray().also { array ->
+            for (overview in overviews) {
+                array.put(
+                    JSONObject()
+                        .put("language", overview.language)
+                        .put("text", overview.text)
+                        .put("model", overview.model)
+                        .put("generatedAt", overview.generatedAt)
+                        .put("promptVersion", overview.promptVersion),
+                )
+            }
+        }
 
     private fun encodeSignals(signals: BookSignals): JSONObject = JSONObject()
         .put("isbn13", signals.isbn13)
@@ -125,7 +142,30 @@ object ReaderBookCodec {
             metadata = entry.optJSONObject("metadata")?.let(::decodeMetadata),
             lookup = MetadataLookupState.normalize(entry.optionalString("lookup")),
             signals = entry.optJSONObject("signals")?.let(::decodeSignals),
+            overviews = entry.optJSONArray("overviews")?.let(::decodeOverviews) ?: emptyList(),
         )
+    }
+
+    /** Decodes cached overviews, dropping any entry that is missing what it needs to be shown. */
+    private fun decodeOverviews(array: JSONArray): List<BookIntelOverview> {
+        val overviews = ArrayList<BookIntelOverview>(array.length())
+        for (i in 0 until array.length()) {
+            val json = array.optJSONObject(i) ?: continue
+            val language = json.optionalString("language") ?: continue
+            val text = json.optionalString("text") ?: continue
+            overviews.add(
+                BookIntelOverview(
+                    language = language,
+                    text = text,
+                    model = json.optionalString("model") ?: "",
+                    generatedAt = json.optLong("generatedAt", 0L),
+                    // A record written before this field existed has no version, and `0` matches no
+                    // real prompt, so such a text is regenerated once rather than shown as current.
+                    promptVersion = json.optInt("promptVersion", 0),
+                ),
+            )
+        }
+        return BookIntelOverviewPrompt.prune(overviews)
     }
 
     private fun decodeSignals(json: JSONObject): BookSignals = BookSignals(

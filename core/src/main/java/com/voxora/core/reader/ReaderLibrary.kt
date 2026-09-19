@@ -65,8 +65,24 @@ object ReaderLibrary {
         state: MetadataLookupState,
     ): List<ReaderBook> = mapBook(books, id) { it.withLookup(state) }
 
+    /** Caches a generated Book Intelligence overview for one output language. */
+    fun withOverview(
+        books: List<ReaderBook>,
+        id: String,
+        overview: BookIntelOverview,
+    ): List<ReaderBook> = mapBook(books, id) { it.withOverview(overview) }
+
     /** Removes a book. */
     fun remove(books: List<ReaderBook>, id: String): List<ReaderBook> = books.filterNot { it.id == id }
+
+    /**
+     * Records that a book's document copy is gone.
+     *
+     * A no-op for an id that is not in the list, like every other function here, so a stale failure
+     * arriving after a deletion cannot resurrect a book.
+     */
+    fun markedUnavailable(books: List<ReaderBook>, id: String): List<ReaderBook> =
+        mapBook(books, id) { it.unavailable() }
 
     /**
      * The book to offer first: the one the reader was most recently in.

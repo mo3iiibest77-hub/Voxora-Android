@@ -212,7 +212,9 @@ private fun BookRow(
     val colors = MaterialTheme.colorScheme
     Surface(
         onClick = onOpen,
-        enabled = enabled,
+        // A book whose document copy is gone is not openable, so the row is not clickable: an
+        // enabled row that can only fail is worse than a row that plainly cannot be used.
+        enabled = enabled && !book.isUnavailable,
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
         color = if (active) colors.primaryContainer else colors.surfaceContainer,
@@ -294,11 +296,13 @@ private fun ProgressLine(book: ReaderBook, onContainer: Boolean) {
     }
 }
 
-/** The state label. The live transport phase is not persisted, so only these three are shown. */
+/** The state label. The live transport phase is not persisted, so only these are shown. */
 private fun bookStateLabel(state: ReaderBookState): Int = when (state) {
     ReaderBookState.NOT_STARTED -> R.string.reader_library_not_started
     ReaderBookState.IN_PROGRESS -> R.string.reader_library_in_progress
     ReaderBookState.COMPLETED -> R.string.reader_library_completed
+    // The copy is gone. Saying so is the honest alternative to offering a Continue that fails.
+    ReaderBookState.UNAVAILABLE -> R.string.reader_library_unavailable
 }
 
 /** The recency sentence, assembled from the pure rule in [readerRecencyOf]. */

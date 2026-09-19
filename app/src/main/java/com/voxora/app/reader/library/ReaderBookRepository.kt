@@ -7,9 +7,13 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.voxora.app.util.VoxoraLog
+import com.voxora.core.reader.BookIntelOverview
+import com.voxora.core.reader.BookIntelOverviewGenerator
+import com.voxora.core.reader.BookIntelOverviewPrompt
 import com.voxora.core.reader.BookLookupOutcome
 import com.voxora.core.reader.BookMetadataLookup
 import com.voxora.core.reader.BookSignals
+import com.voxora.core.reader.GeminiHttpTextTransport
 import com.voxora.core.reader.GoogleBooksSource
 import com.voxora.core.reader.MetadataLookupState
 import com.voxora.core.reader.MetadataUnavailable
@@ -98,8 +102,17 @@ class ReaderBookRepository @Inject constructor(
      */
     private val lookup = BookMetadataLookup(GoogleBooksSource(), OpenLibrarySource())
 
+    /**
+     * Turns a cached catalogue record into an overview in the reader's output language.
+     *
+     * Sends the metadata only — never the document — and is entirely optional: a failure leaves the
+     * book exactly as it was.
+     */
+    private val overviewGenerator = BookIntelOverviewGenerator(GeminiHttpTextTransport())
+
     private val mutex = Mutex()
     private val metadataMutex = Mutex()
+    private val overviewMutex = Mutex()
 
     private val _books = MutableStateFlow<List<ReaderBook>>(emptyList())
     val books: StateFlow<List<ReaderBook>> = _books.asStateFlow()
@@ -238,6 +251,17 @@ class ReaderBookRepository @Inject constructor(
     suspend fun markOpened(id: String, atMillis: Long = System.currentTimeMillis()) =
         mutate(id, active = id) { ReaderLibrary.touched(it, id, atMillis) }
 
+    /**
+     * Records that a book's document copy could not be found.
+     *
+     * The record, its saved position and its cached Book Intelligence are all kept: the copy may
+     * come back, and a reader's progress must not be destroyed because a file went missing. The
+     * state is persisted so the library stops offering an action that cannot work and the Reader
+     * stops re-attempting extraction on every open.
+     */
+    suspend fun markUnavailable(id: String) =
+        mutate(id) { ReaderLibrary.markedUnavailable(it, id) }
+
     /** Removes a book and its document. */
     suspend fun remove(id: String) = withContext(Dispatchers.IO) {
         ensureLoaded()
@@ -307,6 +331,48 @@ class ReaderBookRepository @Inject constructor(
             }
         }
     }
+
+    /**
+     * Generates and caches the Book Intelligence overview for [id] in [language], when missing.
+     *
+     * ## What it sends, and what it does not
+     *
+     * Only the catalogue record is sent — never the document, never an excerpt of it, and never
+     * anything about the reader's position. The narration session is not involved: this is a
+     * separate one-shot text call, and it runs beside playback rather than in it.
+     *
+     * ## Why it is safe to call speculatively
+     *
+     * A cached text for [language] short-circuits before any network work, so switching languages
+     * back and forth is free. A missing catalogue match, an unconfigured key, an offline device and
+     * a rejected model all end the same way: nothing is generated, nothing is stored, and the book
+     * is untouched. Serialized by [overviewMutex] so two triggers cannot generate the same text
+     * twice.
+     *
+     * @return true when a new overview was generated and stored.
+     */
+    suspend fun ensureOverview(id: String, language: String, apiKey: String?): Boolean =
+        withContext(Dispatchers.IO) {
+            overviewMutex.withLock {
+                ensureLoaded()
+                val book = ReaderLibrary.find(_books.value, id) ?: return@withLock false
+                val metadata = book.metadata ?: return@withLock false
+                if (BookIntelOverviewPrompt.isUsableFor(book.overviewFor(language), language)) {
+                    return@withLock false
+                }
+                val overview = try {
+                    overviewGenerator.generate(apiKey, metadata, language)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // The generator is total, so this is belt-and-braces only.
+                    VoxoraLog.w(TAG, "Overview generation failed: ${e.javaClass.simpleName}")
+                    null
+                } ?: return@withLock false
+                mutate(id) { ReaderLibrary.withOverview(it, id, overview) }
+                true
+            }
+        }
 
     /** Applies a pure library transform and persists the result, if anything changed. */
     private suspend fun mutate(

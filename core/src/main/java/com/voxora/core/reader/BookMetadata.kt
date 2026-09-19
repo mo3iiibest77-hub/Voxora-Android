@@ -90,7 +90,10 @@ enum class MatchConfidence(val id: String) {
  *
  * [description] and [categories] are stored exactly as the provider returned them, in the
  * provider's language. Voxora does not machine-translate catalogue data: a translated synopsis
- * would be Voxora's text presented as the publisher's.
+ * would be Voxora's text presented as the publisher's. When the reader's output language differs
+ * from the catalogue's, the translated explanatory text is a **separate, clearly labelled**
+ * [BookIntelOverview] generated from this record — it never replaces these fields, and the card
+ * shows both, each named for what it is.
  */
 data class BookMetadata(
     val provider: MetadataProvider,

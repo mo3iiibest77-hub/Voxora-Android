@@ -160,6 +160,7 @@ fun ReaderScreen(
         books = books,
         activeBookId = activeBookId,
         locale = locale,
+        outputLang = outputLang,
         onBack = onBack,
         onModeChange = viewModel::setMode,
         onVoiceChange = viewModel::setVoice,
@@ -202,6 +203,8 @@ private fun ReaderContent(
     books: List<ReaderBook>,
     activeBookId: String?,
     locale: java.util.Locale,
+    /** The Reader output language, so Book Intelligence can show the overview written for it. */
+    outputLang: String,
     onBack: () -> Unit,
     onModeChange: (String) -> Unit,
     onVoiceChange: (String) -> Unit,
@@ -312,6 +315,7 @@ private fun ReaderContent(
                 BookIntelCard(
                     book = activeBook,
                     locale = locale,
+                    outputLang = outputLang,
                     onRetry = { onRetryBookInfo(activeBook.id) },
                 )
             }
@@ -1757,6 +1761,7 @@ private fun ReaderScreenPreview(modifier: Modifier = Modifier) {
                 books = emptyList(),
                 activeBookId = null,
                 locale = java.util.Locale.ENGLISH,
+                outputLang = "en",
                 languageLabel = stringResource(R.string.reader_lang_en),
                 languageFlag = "🇬🇧",
                 ready = true,
@@ -1808,6 +1813,7 @@ private fun ReaderScreenPreparingPreview(modifier: Modifier = Modifier) {
                 books = emptyList(),
                 activeBookId = null,
                 locale = java.util.Locale.ENGLISH,
+                outputLang = "en",
                 languageLabel = stringResource(R.string.reader_lang_en),
                 languageFlag = "🇬🇧",
                 ready = true,
@@ -1845,6 +1851,7 @@ private fun ReaderScreenEmptyPreview(modifier: Modifier = Modifier) {
                 books = emptyList(),
                 activeBookId = null,
                 locale = java.util.Locale.ENGLISH,
+                outputLang = "en",
                 languageLabel = stringResource(R.string.reader_lang_fa),
                 languageFlag = "🇮🇷",
                 ready = true,

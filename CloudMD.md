@@ -35,28 +35,50 @@ holds the standing UI/i18n rules plus the current implementation record.
   missing `BookSignals` import. All three were committed-tree-only faults that the local harness
   could not see; see `AgentMD.md` §5 for why, and for the `checkimports.py` extension that now
   catches the missing-import class locally.
+- **Persistent book reopen is fixed, and Book Intelligence is localized** (commit SHA and CI result
+  recorded in the follow-up documentation commit). The reported real-device defect — a saved book
+  reopening to `ExtractionException` / "Could not read this document…" — was **not** a bad document.
+  `ReaderBook.withMetadata` replaces the display title with the catalogue title once identification
+  succeeds, and type resolution was falling back to that title's "extension" because Voxora's own
+  `file://` copy carries no MIME type. Type resolution is now one rule in
+  `core/.../reader/ReaderDocumentType.kt` with a **known type always winning**: the persisted
+  `sourceType` → provider MIME → a *file name*'s extension. A display title is never treated as a
+  file name. A book whose copy is gone is now marked the persisted `UNAVAILABLE` state instead of
+  being deleted (position and cached Book Intelligence are kept, no Continue is offered, no
+  extraction is re-attempted), and reopening the already-open book is a no-op. Book Intelligence now
+  separates *source metadata* (the catalogue's own text, shown unedited with its source language)
+  from *explanatory content* (a labelled AI-generated overview produced by a separate one-shot
+  metadata-only `generateContent` call, cached per output language, never the document and never the
+  narration session). 681 pure-JVM tests pass locally (up from 642); the Android-side layers
+  type-check; all six guards pass; Live Dub untouched.
 
 ## IN PROGRESS
 
-- Nothing. The Reader cycle above is implemented, locally validated and CI-verified.
+- Nothing. The Reader work above is implemented and locally validated; CI verification and the
+  documentation SHA/CI record are the only steps outstanding.
 
 ## BLOCKED
 
 - **Real-device verification is unavailable from this environment.** Everything about how the
   features *feel* (voice character, cover loading, RTL library layout, resume across a real process
-  death, the rate trim's audibility) is an owner-only item. This is now the single open item for the
-  Reader cycle — CI proves it compiles and the pure-JVM suite proves its logic, not how it looks or
+  death, the rate trim's audibility) is an owner-only item, and the reopen fix itself has not been
+  exercised on a device — it is proven by unit tests and by tracing the lifecycle, not by reopening a
+  real book. CI proves it compiles and the pure-JVM suite proves its logic, not how it looks or
   sounds.
 - **Live catalogue behaviour is unverified.** Google Books and Open Library contracts are pinned
   against `MockWebServer`; no real request was made, so live coverage, rate limits and real match
   quality are unknown.
+- **The `generateContent` overview path is unverified against the live API.** The transport is pinned
+  against `MockWebServer` and `DEFAULT_MODEL` (`models/gemini-2.0-flash`) has not been confirmed with
+  a real key. A wrong model name degrades to "no overview" and nothing else.
 
 ## NEXT
 
-Owner device verification of the `8293a98` debug APK: confirm the Female/Male narrator choice is
-audibly distinct and survives a restart, that a cover loads, that the library reads correctly under
-RTL, and that a book reopens at its saved chunk after a real process death. No further Reader code
-work is pending.
+Owner device verification: import a PDF, let identification succeed so the title becomes the
+catalogue title, then **tap the saved card and confirm the book reopens at its saved chunk** instead
+of showing "Could not read this document…". Then confirm the Book Intelligence section shows the
+catalogue's description with its source language plus a labelled AI-generated overview in the
+selected output language. No further Reader code work is pending.
 
 ---
 

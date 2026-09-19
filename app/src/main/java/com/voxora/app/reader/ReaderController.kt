@@ -170,6 +170,10 @@ class ReaderController @Inject constructor(
     suspend fun openBook(id: String) {
         try {
             library.ensureLoaded()
+            // Already the loaded document. Reopening it would cancel running narration and
+            // re-extract a document that is already in the queue, which is what made a tap on the
+            // active book produce another "Document extraction failed" line per attempt.
+            if (synchronized(lock) { bookId == id && queue.size != 0 }) return
             openStoredBook(id, restoring = false)
         } catch (e: CancellationException) {
             throw e
@@ -180,17 +184,45 @@ class ReaderController @Inject constructor(
 
     private suspend fun openStoredBook(id: String, restoring: Boolean) {
         val book = library.book(id) ?: return
+        // A book already known to be missing its copy is not re-attempted. Extraction cannot start
+        // from a file that is not there, so retrying would only repeat the same failure on every
+        // open; the persisted state is what stops the loop.
+        if (book.isUnavailable) {
+            reportUnavailable(restoring)
+            return
+        }
         val file = File(book.localPath)
         if (!file.isFile) {
-            // The record outlived its file — a cleared data directory, for example. Removing the
-            // record is the honest fix: a library entry that cannot be opened is worse than none.
-            VoxoraLog.w("Reader", "Book file is missing; dropping the record")
-            library.remove(id)
-            if (restoring) synchronized(lock) { publish(ReaderPhase.IDLE) }
+            // The record outlived its copy — a cleared data directory, for example. The record is
+            // *marked*, not deleted: the reader's saved position and cached Book Intelligence are
+            // still theirs, and the copy may yet come back. Deleting the book here would destroy
+            // both, and would make the failure indistinguishable from a book never imported.
+            VoxoraLog.w("Reader", "Book file is missing; marking the book unavailable")
+            library.markUnavailable(id)
+            reportUnavailable(restoring)
             return
         }
         library.markOpened(id)
         startLoad(Uri.fromFile(file), restoring = restoring, book = book)
+    }
+
+    /**
+     * Publishes the precise state for a book whose document cannot be restored.
+     *
+     * A restore (the automatic one on launch) stays quiet — the Reader opens idle rather than
+     * greeting the reader with an error about a book they did not ask for. An explicit open says
+     * exactly what is wrong.
+     */
+    private fun reportUnavailable(restoring: Boolean) {
+        synchronized(lock) {
+            if (restoring) {
+                publish(ReaderPhase.IDLE)
+            } else {
+                publish(ReaderPhase.ERROR)
+                mutableState.value =
+                    state.value.copy(error = context.getString(R.string.reader_book_unavailable))
+            }
+        }
     }
 
     /**
@@ -217,6 +249,9 @@ class ReaderController @Inject constructor(
             try {
                 // A stored book already knows its name and type, and its file is Voxora's own copy,
                 // so nothing is re-copied and the reader's title is not lost to the copy's name.
+                // `title` is a *display* title and may be the catalogue title once identification
+                // has succeeded, so it is never used to work out what the document is — the
+                // record's `sourceType` is.
                 val identity = if (book != null) {
                     DocumentIdentity(
                         name = book.title,
@@ -234,7 +269,16 @@ class ReaderController @Inject constructor(
                         ?: throw IOException("The document could not be copied into app storage.")
                 }
                 val source = staged?.let { Uri.fromFile(it.file) } ?: uri
-                val document = extractor.extract(source, displayName = identity.name)
+                // The type resolved here is passed on rather than re-derived inside extraction.
+                // For a stored book the record's `sourceType` is the only reliable source of it:
+                // the URI is a `file://` copy with no MIME type, and the display name is the
+                // book's title — which, once identification has succeeded, is the catalogue title
+                // and not a file name at all. Re-deriving from it is what broke reopening.
+                val document = extractor.extract(
+                    source,
+                    displayName = identity.name,
+                    knownType = identity.type,
+                )
                 currentCoroutineContext().ensureActive()
                 val committed = staged?.let {
                     library.commit(

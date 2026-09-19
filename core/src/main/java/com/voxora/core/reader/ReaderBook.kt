@@ -36,6 +36,17 @@ enum class ReaderBookState(val id: String) {
     NOT_STARTED("not_started"),
     IN_PROGRESS("in_progress"),
     COMPLETED("completed"),
+
+    /**
+     * The record outlived the copy of its document.
+     *
+     * This is a real, recoverable state rather than a reason to delete the book: the reader's
+     * progress and cached Book Intelligence are still valuable, and the file may reappear (a
+     * restored backup, a storage permission). It is persisted so the library stops offering a
+     * Continue action that cannot work, and so the Reader does not re-attempt extraction on every
+     * open.
+     */
+    UNAVAILABLE("unavailable"),
     ;
 
     companion object {
@@ -87,9 +98,20 @@ data class ReaderBook(
     val lookup: MetadataLookupState,
     /** The signals identification was attempted with. Kept so a refresh can reuse them offline. */
     val signals: BookSignals?,
+    /**
+     * AI-generated overviews of this book, at most one per Reader output language.
+     *
+     * Cached with the record so the Book Intelligence section reads in the reader's language while
+     * offline, and so switching languages back and forth never regenerates what was already paid
+     * for. Empty until a generation has succeeded; a generation that fails leaves it untouched.
+     */
+    val overviews: List<BookIntelOverview> = emptyList(),
 ) {
     /** True once narration has reached the end of the document. */
     val isCompleted: Boolean get() = state == ReaderBookState.COMPLETED
+
+    /** True when the record's document copy is gone, so the book cannot be opened. */
+    val isUnavailable: Boolean get() = state == ReaderBookState.UNAVAILABLE
 
     /**
      * Reading progress in `0f..1f`, derived from the persisted chunk.
@@ -110,7 +132,7 @@ data class ReaderBook(
     val displayChunk: Int get() = if (chunkCount <= 0) 0 else currentChunk.coerceIn(0, chunkCount - 1) + 1
 
     /** True when there is a position worth resuming from. */
-    val hasResumePoint: Boolean get() = state != ReaderBookState.NOT_STARTED && chunkCount > 0
+    val hasResumePoint: Boolean get() = state != ReaderBookState.NOT_STARTED && !isUnavailable && chunkCount > 0
 
     /**
      * Moves the persisted position.
@@ -161,4 +183,29 @@ data class ReaderBook(
 
     /** Records a lookup that produced no confident match, or could not run at all. */
     fun withLookup(state: MetadataLookupState): ReaderBook = copy(lookup = state)
+
+    /** The cached AI-generated overview for [language], or null when none has been generated. */
+    fun overviewFor(language: String): BookIntelOverview? =
+        overviews.firstOrNull { it.language.equals(language, ignoreCase = true) }
+
+    /**
+     * Stores [overview], replacing any existing text for the same language.
+     *
+     * The cache is pruned so a reader who tries many languages cannot grow one record without
+     * bound; see [BookIntelOverviewPrompt.prune].
+     */
+    fun withOverview(overview: BookIntelOverview): ReaderBook {
+        val others = overviews.filterNot { it.language.equals(overview.language, ignoreCase = true) }
+        return copy(overviews = BookIntelOverviewPrompt.prune(others + overview))
+    }
+
+    /**
+     * Records that the document copy could not be found.
+     *
+     * Deliberately keeps everything else — the saved position, the cached Book Intelligence, the
+     * title. Deleting the record would throw away the reader's progress over a file that may come
+     * back, and it would make the failure indistinguishable from a book that was never imported.
+     */
+    fun unavailable(): ReaderBook =
+        if (isUnavailable) this else copy(state = ReaderBookState.UNAVAILABLE)
 }

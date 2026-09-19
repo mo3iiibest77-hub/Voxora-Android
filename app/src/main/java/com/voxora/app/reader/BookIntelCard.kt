@@ -61,6 +61,7 @@ import java.util.Locale
 internal fun BookIntelCard(
     book: ReaderBook,
     locale: Locale,
+    outputLang: String,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -78,7 +79,7 @@ internal fun BookIntelCard(
             SectionHeader(title = stringResource(R.string.reader_book_info_section))
             when {
                 metadata != null && book.lookup == MetadataLookupState.FOUND ->
-                    IdentifiedBook(book = book, locale = locale)
+                    IdentifiedBook(book = book, locale = locale, outputLang = outputLang)
 
                 book.lookup == MetadataLookupState.NOT_FOUND ->
                     Unidentified(message = stringResource(R.string.reader_book_info_not_found), onRetry = onRetry)
@@ -104,7 +105,7 @@ internal fun BookIntelCard(
 }
 
 @Composable
-private fun IdentifiedBook(book: ReaderBook, locale: Locale) {
+private fun IdentifiedBook(book: ReaderBook, locale: Locale, outputLang: String) {
     val colors = MaterialTheme.colorScheme
     val metadata = book.metadata ?: return
     // A language is only ever named in a locale Voxora ships, and only when the app's own catalog
@@ -115,6 +116,12 @@ private fun IdentifiedBook(book: ReaderBook, locale: Locale) {
     val facts = remember(metadata, locale) { BookIntel.facts(metadata, languageName) }
     val topics = remember(metadata) { BookIntel.topics(metadata) }
     val description = BookIntel.description(metadata)
+    // The generated overview is per output language: this is the one that matches the language the
+    // reader has chosen to hear the book in, and it is absent until one has been generated.
+    val overview = remember(book.overviews, outputLang) { book.overviewFor(outputLang) }
+    val sourceLanguage = metadata.language
+        ?.takeIf { !it.equals(outputLang, ignoreCase = true) }
+        ?.let { languageName(it) }
     val matchLabel = when (metadata.confidence) {
         MatchConfidence.ISBN_EXACT -> R.string.reader_book_match_isbn
         MatchConfidence.TITLE_AUTHOR -> R.string.reader_book_match_title_author
@@ -174,6 +181,29 @@ private fun IdentifiedBook(book: ReaderBook, locale: Locale) {
         }
     }
 
+    // The generated overview comes first: it is the part written in the reader's own language, and
+    // it is labelled as generated so it can never be mistaken for something the catalogue said.
+    // Absent until a generation has succeeded, which is why its absence is not an error state.
+    if (overview != null) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(
+                text = stringResource(R.string.reader_book_info_generated),
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.onSurfaceVariant,
+            )
+            Text(
+                text = overview.text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.onSurface,
+            )
+            Text(
+                text = stringResource(R.string.reader_book_info_generated_note),
+                style = MaterialTheme.typography.labelSmall,
+                color = VoxoraColors.explanation,
+            )
+        }
+    }
+
     if (description != null) {
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text(
@@ -194,6 +224,15 @@ private fun IdentifiedBook(book: ReaderBook, locale: Locale) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.onSurface,
             )
+            // Say why this text is not in the reading language, rather than leaving the reader to
+            // wonder whether the app failed to translate it.
+            if (sourceLanguage != null) {
+                Text(
+                    text = stringResource(R.string.reader_book_info_source_language, sourceLanguage),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = VoxoraColors.explanation,
+                )
+            }
         }
     }
 
@@ -257,6 +296,7 @@ private fun BookIntelCardPreview() {
                 signals = null,
             ),
             locale = Locale.ENGLISH,
+            outputLang = "en",
             onRetry = {},
         )
     }

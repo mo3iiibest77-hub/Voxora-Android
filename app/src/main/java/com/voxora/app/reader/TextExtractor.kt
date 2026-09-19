@@ -11,6 +11,7 @@ import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.text.TextPosition
 import com.voxora.core.reader.BookSignals
 import com.voxora.core.reader.BookSignalsReader
+import com.voxora.core.reader.ReaderDocumentType
 import com.voxora.core.reader.ReaderSourceType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.ByteArrayOutputStream
@@ -61,8 +62,19 @@ class TextExtractor @Inject constructor(@ApplicationContext private val context:
      * @param displayName overrides the name reported by the provider. This is required when the URI
      *   points at Voxora's own copy of a document: the copy is named after the book's internal id,
      *   so the provider name would be a UUID and the reader's file name would be lost.
+     * @param knownType the type the caller already knows, which wins over anything sniffed here.
+     *   **This is what makes a stored book reopenable.** A `file://` URI carries no MIME type, so
+     *   without it the type can only be guessed from [displayName]'s extension — and a display name
+     *   is not a file name: once book identification succeeds, the record's title becomes the
+     *   catalogue title (`"The Selfish Gene"`), which has no extension. Guessing from it turned a
+     *   perfectly readable copy into `Unsupported file type`. The persisted `sourceType` is a fact
+     *   the record already holds; this parameter is how it reaches extraction.
      */
-    suspend fun identify(uri: Uri, displayName: String? = null): DocumentIdentity =
+    suspend fun identify(
+        uri: Uri,
+        displayName: String? = null,
+        knownType: ReaderSourceType? = null,
+    ): DocumentIdentity =
         withContext(Dispatchers.IO) {
             val resolver = context.contentResolver
             val mime = resolver.getType(uri)?.substringBefore(';')?.trim()?.lowercase(Locale.ROOT)
@@ -82,17 +94,18 @@ class TextExtractor @Inject constructor(@ApplicationContext private val context:
                     }
                 }
             }
-            val extension = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
-            val isPdf = when {
-                mime == "application/pdf" -> true
-                mime == "text/plain" -> false
-                extension == "pdf" -> true
-                extension == "txt" -> false
-                else -> throw ExtractionException("Unsupported file type. Choose a PDF or UTF-8 TXT file.")
-            }
+            // The order of evidence is the rule, not an implementation detail: see
+            // [ReaderDocumentType]. A known type from the record beats everything; a `file://` copy
+            // has no MIME type; and a display title is not a file name.
+            val type = ReaderDocumentType.resolve(
+                known = knownType,
+                mime = mime,
+                name = name,
+            ) ?: throw ExtractionException("Unsupported file type. Choose a PDF or UTF-8 TXT file.")
+            val isPdf = type == ReaderSourceType.PDF
             DocumentIdentity(
                 name = name.trim(),
-                type = if (isPdf) ReaderSourceType.PDF else ReaderSourceType.TXT,
+                type = type,
                 isPdf = isPdf,
             )
         }
@@ -101,12 +114,19 @@ class TextExtractor @Inject constructor(@ApplicationContext private val context:
      * Extracts [uri].
      *
      * @param displayName overrides the name reported by the provider; see [identify].
+     * @param knownType the type the caller already knows; see [identify]. Passing it is what lets a
+     *   stored book be re-extracted from its own copy even when its display title is a catalogue
+     *   title rather than a file name.
      */
-    suspend fun extract(uri: Uri, displayName: String? = null): ExtractedDocument = withContext(Dispatchers.IO) {
+    suspend fun extract(
+        uri: Uri,
+        displayName: String? = null,
+        knownType: ReaderSourceType? = null,
+    ): ExtractedDocument = withContext(Dispatchers.IO) {
         val coroutineContext = currentCoroutineContext()
         try {
             coroutineContext.ensureActive()
-            val identity = identify(uri, displayName)
+            val identity = identify(uri, displayName, knownType)
             val name = identity.name
             val isPdf = identity.isPdf
             val resolver = context.contentResolver

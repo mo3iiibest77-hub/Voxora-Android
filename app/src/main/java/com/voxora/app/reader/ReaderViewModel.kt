@@ -24,6 +24,7 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
@@ -80,6 +81,16 @@ class ReaderViewModel @Inject constructor(
      */
     private val metadataStarted = mutableSetOf<String>()
 
+    /**
+     * Book/language pairs whose overview generation has already been started.
+     *
+     * Keyed by language as well as book, so choosing a new output language is a new request while a
+     * failed one is not repeated for the same language in the same session. A generation that fails
+     * (offline, no key, a rejected model) therefore costs one attempt, not one per recomposition —
+     * and the cached source-backed facts stay on screen throughout.
+     */
+    private val overviewStarted = mutableSetOf<String>()
+
     init {
         runCommand {
             try {
@@ -103,6 +114,7 @@ class ReaderViewModel @Inject constructor(
             controller.restoreLastDocument()
         }
         observeLibraryForLookups()
+        observeLibraryForOverviews()
     }
 
     /**
@@ -133,6 +145,42 @@ class ReaderViewModel @Inject constructor(
             // The repository is total, so this is belt-and-braces only. A failed lookup is never
             // surfaced as an error: the book is already imported and readable.
             VoxoraLog.w("ReaderVM", "Book identification failed: ${e.javaClass.simpleName}")
+        }
+    }
+
+    /**
+     * Keeps the Book Intelligence overview in step with the chosen output language.
+     *
+     * A book that has been identified but has no overview for the current language gets one
+     * generated — once. This is what makes "explanatory content follows the Reader output language"
+     * true even though no public catalogue carries a Persian description: the catalogue's own
+     * description is translated and condensed, and clearly labelled as generated.
+     *
+     * Runs entirely beside playback. Nothing here gates narration, and a book with no catalogue
+     * match, no API key or no network simply never gets an overview.
+     */
+    private fun observeLibraryForOverviews() {
+        viewModelScope.launch {
+            combine(library.books, outputLang) { books, language -> books to language }
+                .collect { (books, language) ->
+                    for (book in books) {
+                        if (book.metadata == null) continue
+                        if (book.overviewFor(language) != null) continue
+                        if (!overviewStarted.add("${book.id}|$language")) continue
+                        launch(Dispatchers.IO) { runOverview(book.id, language) }
+                    }
+                }
+        }
+    }
+
+    private suspend fun runOverview(id: String, language: String) {
+        try {
+            val key = prefs.apiKey.first()
+            library.ensureOverview(id, language, key)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            VoxoraLog.w("ReaderVM", "Book overview failed: ${e.javaClass.simpleName}")
         }
     }
 

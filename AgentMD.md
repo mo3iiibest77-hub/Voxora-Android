@@ -294,3 +294,205 @@ install the `8293a98` debug APK and confirm, on a real device, the four things n
 reach — that the Female/Male narrator choice is audibly distinct and survives a restart, that a
 cover loads, that the library reads correctly under RTL, and that a book reopens at its saved chunk
 after a real process death.
+
+---
+
+## 6. Implementation record — persistent book reopen and localized Book Intelligence
+
+A **record**, not a rule. The standing rules are §1–§4; the Reader's architecture contract is
+`AGENTS.md` §5. This section covers the work that followed §5: a real-device defect in reopening a
+saved book, and the language rule for the Book Intelligence section.
+
+**Commit.** The implementation and this record are in the same commit; its SHA and the CI result for
+it are recorded in the follow-up documentation commit, because a commit cannot contain its own hash.
+See `CloudMD.md` for the current SHA and CI state. Branch `feat/reader-segmented-spooling`.
+
+### What was reported
+
+On a real device, importing a PDF or TXT worked and narration started, the book appeared in the
+library, but **tapping the saved card to reopen it** logged
+`WARN [Reader] Document extraction failed: ExtractionException` and showed the
+"Could not read this document…" error. The report was explicit that the source document must **not**
+be assumed invalid — the suspicion was the persisted reference and its restoration path.
+
+### Root cause — the display title was being used as a file name
+
+The defect was in **type resolution on reopen**, not in the file, the copy, or the codec.
+
+A reopen reads Voxora's own copy through `Uri.fromFile(...)`. That is a `file://` URI, so
+`ContentResolver.getType(...)` returns **null**: there is no MIME type to go on. The only remaining
+evidence was the name, and the name the Reader was handed was the record's `title`.
+
+That is the trap. `ReaderBook.withMetadata` replaces the display title with the **catalogue title**
+once automatic identification succeeds:
+
+```kotlin
+fun withMetadata(metadata: BookMetadata): ReaderBook = copy(
+    metadata = metadata,
+    lookup = MetadataLookupState.FOUND,
+    title = metadata.title.trim().ifEmpty { title },
+)
+```
+
+So a book imported as `selfish-gene.pdf` and successfully identified became `"The Selfish Gene"` —
+a title with no extension. On reopen the old code did:
+
+```kotlin
+val extension = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
+val isPdf = when {
+    mime == "application/pdf" -> true
+    mime == "text/plain" -> false
+    extension == "pdf" -> true
+    extension == "txt" -> false
+    else -> throw ExtractionException("Unsupported file type. …")
+}
+```
+
+`mime` was null and `extension` was `""`, so a **perfectly readable PDF** fell to `else` and threw.
+The failure therefore appeared *only after* identification had succeeded — which is why the first
+import always worked and every later reopen did not. The persisted `sourceType` that already held the
+answer was never consulted.
+
+The codec was not at fault: it round-trips `localPath` and `sourceType` correctly, and no other code
+path treats `title` as a file name.
+
+### The fix — one resolution rule, with a known type always winning
+
+Type resolution was extracted into a pure, unit-testable core object, `ReaderDocumentType.resolve`,
+whose order of evidence is the rule:
+
+1. **a known type** — the record's persisted `sourceType`. It is a fact the import that actually read
+   the document established, and nothing observed later may contradict it;
+2. the provider MIME type, when there is one;
+3. the extension of a **file name** — never a display title.
+
+`TextExtractor.identify` and `extract` take a new `knownType: ReaderSourceType?` parameter, and
+`ReaderController.startLoad` passes `identity.type` from the record. Nothing is re-derived from the
+title. The import path is unchanged in behaviour: a fresh import has no known type, so it resolves
+from MIME and extension exactly as before.
+
+### Making an unrestorable book a precise, recoverable state
+
+The previous behaviour deleted the record when its file was gone. That destroyed the reader's saved
+position and cached Book Intelligence over a file that may come back, and made the failure
+indistinguishable from a book that was never imported. It was replaced with a persisted state:
+
+- **`ReaderBookState.UNAVAILABLE`** (id `"unavailable"`), with `ReaderBook.isUnavailable` and an
+  idempotent `unavailable()` mutator that changes **only** the state — position, title, metadata and
+  overviews are all kept. `hasResumePoint` excludes it, so the library stops offering a Continue that
+  cannot work.
+- **`ReaderLibrary.markedUnavailable(books, id)`** and **`ReaderBookRepository.markUnavailable(id)`**.
+- `ReaderController.openStoredBook` marks rather than deletes, and `reportUnavailable(restoring)`
+  publishes the precise outcome: an automatic restore stays quiet and opens the Reader idle, while an
+  explicit open says exactly what is wrong (`reader_book_unavailable`). The exception is never
+  suppressed — a book that cannot be read is never shown as available.
+- **Repeated extraction is impossible.** An `UNAVAILABLE` book returns before any extraction is
+  attempted, and `openBook` is now a **no-op when that book is already loaded** — previously a tap
+  cancelled running narration and re-extracted a document already in the queue, which is what turned
+  one failure into a repeated error line per tap.
+- The library row for an unavailable book shows the "Not available" state and is **not clickable**.
+
+### Book Intelligence — explanatory content in the reader's output language
+
+**The distinction that governs this:** *source metadata* is the catalogue's, and *explanatory
+content* is the reader's. They are shown as two different things and never conflated.
+
+- The catalogue's own description, subjects, publisher and date are still shown **unedited and
+  untranslated**, with the source language named when it differs from the reading language
+  (`reader_book_info_source_language`). Voxora never presents its own translation as the publisher's
+  text.
+- No public catalogue carries a Persian description for most titles, so the reader's language cannot
+  come from the provider. `langRestrict` is deliberately **not** used on the query: it filters
+  *books* by language and would exclude the correct edition rather than translate anything.
+- Instead the record is turned into a short overview by a **separate, one-shot text call** —
+  `BookIntelOverviewGenerator` over `GeminiHttpTextTransport` (core) — that sends **the metadata
+  only: never the document, never an excerpt of it, and never anything about the reader's position**.
+  It is not the narration session and does not touch the audio path. The key travels in the
+  `x-goog-api-key` header, never as a `?key=` query parameter.
+- The prompt (`BookIntelOverviewPrompt.build`) forbids adding any fact not present in the supplied
+  record, and the card labels the result as AI-generated with a note that it is not a catalogue fact
+  (`reader_book_info_generated`, `reader_book_info_generated_note`).
+- Results are **cached per language on the record** (`ReaderBook.overviews`, `withOverview`,
+  `overviewFor(language)`), so switching languages back and forth is instant and works offline. The
+  cache is pruned to the newest few (`MAX_CACHED = 3`). The persisted field is **omitted entirely when
+  empty**, so a record that never generated an overview encodes byte-identically to before.
+- `BookIntelOverviewPrompt.VERSION` is part of what makes a cached text reusable: a text written by an
+  older prompt is regenerated rather than displayed as current, and a record written before the field
+  existed decodes to `0` and is regenerated once. (This was found while reviewing the change: the
+  constant was documented as a cache key but was not consulted anywhere, so improving the prompt would
+  have been silently masked by a cached answer. It is now implemented and tested.)
+- **Failure is expected and harmless.** A missing key, an offline device, a rate limit, a rejected
+  model and a parse failure all end in "no overview": the book is unaffected and the source-backed
+  facts stay on screen. Generation is attempted **once per book per language** (`overviewStarted`,
+  keyed by `"id|language"`), so a failure costs one call rather than one per recomposition or per
+  language-list emission.
+
+### Files and components changed
+
+- **core, new:** `reader/ReaderDocumentType.kt` (the resolution rule), `reader/BookIntelOverview.kt`
+  (`BookIntelOverview` + `BookIntelOverviewPrompt`), `reader/GeminiTextClient.kt`
+  (`GeminiTextResult`, `GeminiTextTransport`, `BookIntelOverviewGenerator`, `GeminiHttpTextTransport`).
+- **core, modified:** `ReaderBook.kt` (`UNAVAILABLE`, `isUnavailable`, `unavailable()`, `overviews`,
+  `overviewFor`, `withOverview`), `ReaderLibrary.kt` (`markedUnavailable`, `withOverview`),
+  `ReaderBookCodec.kt` (encode/decode overviews incl. `promptVersion`, tolerant of a missing field),
+  `BookMetadata.kt` (documentation of the source-vs-generated distinction).
+- **app, modified:** `TextExtractor.kt` (`knownType` on `identify`/`extract`, delegated to
+  `ReaderDocumentType`), `ReaderController.kt` (mark-not-delete, `reportUnavailable`, no-op reopen,
+  pass `knownType`), `library/ReaderBookRepository.kt` (`markUnavailable`, `ensureOverview`,
+  `overviewGenerator`, `overviewMutex`), `ReaderViewModel.kt` (`observeLibraryForOverviews`,
+  `runOverview`, `overviewStarted`), `BookIntelCard.kt` (generated-overview block, source-language
+  note), `ReaderScreen.kt` / `ReaderLibrarySection.kt` (`outputLang` threading, `UNAVAILABLE`
+  handling, non-clickable unavailable rows), `res/values/strings.xml` + `values-fa/strings.xml`.
+- **docs:** `AGENTS.md` §5 (type-resolution rule, `UNAVAILABLE`, no-op reopen, overview language and
+  caching), this section, `CloudMD.md`.
+- **new tests:** `ReaderDocumentTypeTest`, `BookIntelOverviewTest`, `ReaderBookOverviewTest` (core).
+- **Live Dub:** untouched. `git status` shows no change under `dub/`, `GeminiLive*`,
+  `SystemAudioCapture`, `DubPlayback`, `FloatingBubble*` or `DelayedScreenOverlay`.
+
+### Tests actually run
+
+| What | How | Result |
+|---|---|---|
+| Pure-JVM contract suite | `/tmp/rr/validate-cloud.sh` (kotlinc + JUnit, `-ea`) | **681 tests OK**, 58 classes |
+| Android-side Reader layers | `/tmp/rr/validate-reader-android.sh` | **OK** |
+| Guards | `themecheck`, `themeguard`, `checkimports`, `stringcheck`, `bidi_fa`, `dubguard` | all **OK** |
+| Live Dub untouched | `git status` filtered for `dub/`, `GeminiLive*`, `SystemAudioCapture`, `DubPlayback`, `FloatingBubble*`, `DelayedScreenOverlay` | **no changes** |
+
+The suite grew from 642 to 681 tests. `ReaderDocumentTypeTest` pins the resolution order and the
+regression itself — that a **catalogue title with no extension does not decide the type**, and that a
+known type wins over a contradicting name. `ReaderBookOverviewTest` pins the `UNAVAILABLE` state
+(nothing else is lost, no resume offered, survives the codec) and the overview cache (round trip,
+per-language replacement, bounded size, an entry with no `promptVersion` treated as stale).
+`BookIntelOverviewTest` pins what is sent and what is accepted back.
+
+### CI result
+
+Recorded in the follow-up documentation commit — see `CloudMD.md`. The local harness proves the
+pure-JVM logic and type-checks the Android Reader layers, but it **cannot compile Compose**, so
+`Assemble debug APK` on GitHub Actions remains the only proof that the UI changes compile.
+
+### Unresolved limitations
+
+- **No real-device testing was performed.** The reopen fix is proven by unit tests and by tracing the
+  lifecycle, not by reopening a book on a device. This is the one item that closes the reported bug.
+- **The Gemini text model name is unverified against the live API.** `DEFAULT_MODEL` is
+  `models/gemini-2.0-flash`, chosen because the narration model is a Live model and unsuitable for
+  `generateContent`. A wrong value degrades to "no overview" and nothing else, but it has not been
+  confirmed on a real key.
+- **No live call to `generateContent` was made.** The transport is pinned against `MockWebServer`;
+  real latency, quota and output quality in Persian are unmeasured.
+- **Compose is still not compiled locally** (§5), so the UI changes here carry the same CI-round-trip
+  cost and the same blind spot.
+- **The prompt version invalidates every previously cached overview once.** Existing installs have no
+  `promptVersion` on disk, so their first overview after this change is regenerated. That is the
+  intended semantics, but it is a one-time cost per book.
+
+### Exact next action
+
+**Owner device verification of the reopen fix.** Install the debug APK built from this commit and
+confirm the reported flow end to end: import a PDF, let narration start, let identification succeed
+so the title becomes the catalogue title, then tap the saved card and confirm the book reopens at its
+saved chunk instead of showing "Could not read this document…". Then confirm the Book Intelligence
+section shows the catalogue's own description with its source language, and a labelled AI-generated
+overview in the selected output language, and that switching the output language does not disturb
+narration.
