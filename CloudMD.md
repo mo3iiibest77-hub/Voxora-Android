@@ -1,8 +1,8 @@
 # CloudMD.md — Voxora long-term project state
 
 **Branch:** `feat/reader-segmented-spooling`
-**Last updated:** 2026-09-19, at commit `1b2da81` — the two-appearance / library / chunk-cache cycle
-is implemented, documented and **CI-verified**.
+**Last updated:** 2026-09-19, at commit `80fdae2` — the 100 MB / exact-resume / bounded-prefetch /
+help-affordance / observed-usage cycle is implemented, documented and **CI-verified**.
 
 This file is the concise, durable state of the project: what is finished, what is in flight, what is
 blocked, and the single next action. It is **not** a plan and it is not a wish list — an item is only
@@ -13,7 +13,59 @@ holds the standing UI/i18n rules plus the current implementation record.
 
 ## DONE
 
-- **The whole cycle is CI-verified** at `1b2da81` (Android CI push run `35451720666` and
+- **The 100 MB / exact-resume / bounded-prefetch / help-affordance / observed-usage cycle is
+  CI-verified** at `80fdae2` (Android CI push run `35458802897` #158 and `pull_request` run
+  `35458806113` #159): **both jobs success** — `Assemble debug APK` 14/14 steps and `Unit tests`
+  10/10 steps. It needed one fix round first: `d1209ba` failed **both** jobs on a single Compose
+  compile error (`ReaderScreen.kt:267 No parameter with name 'onOpen' found` — the
+  `ReaderLibrarySection` callback had been renamed `onOpen` → `onContinue` and the call site was
+  missed), so **no test ran** in that round; `9be68d1` fixed it and was green
+  (`35458516239` #156 / `35458518642` #157), and `80fdae2` released a retried chunk from the prefetch
+  map. `Assemble debug` is the only real compile check for the Compose files. Locally, 752 pure-JVM
+  tests pass across 63 classes (up from 715 across 59), `validate-reader-android.sh` type-checks the
+  Android-side Reader layers, and all seven guards pass. **No real-device testing was performed**; see
+  BLOCKED.
+- **The document limit is 100 MB, from one rule** (this cycle). It had been declared twice,
+  independently — `TextExtractor.MAX_BYTES` and `ReaderDocumentStore.MAX_BYTES` — with the number
+  also written by hand into the error string and two extraction messages, so raising one would have
+  left the other refusing a file the app claimed to accept. New `core/.../reader/ReaderDocumentLimits.kt`
+  (`MAX_BYTES = 100 MiB`, inclusive) is now the single source of truth consulted by both boundaries,
+  and the extraction message interpolates its label. The streaming read still buffers at most one
+  byte past the limit, so nothing is loaded eagerly. Both locales say 100 MB.
+- **Continue restores a book's own persisted chunk and starts narration** (this cycle). Chunk-level
+  resume was already per book and already persisted; the gap was that the library's Continue only
+  opened the book, so "keep listening" was two presses. `ReaderViewModel.continueBook` now starts
+  playback once extraction finishes, on its own job rather than inside the serialized command queue —
+  holding the queue open for a large document's extraction would have made Stop, the action a reader
+  reaches for when a restore is slow, appear dead.
+- **The rolling prefetch is bounded, tested and deduplicated** (this cycle). The look-ahead decision
+  had lived inline in the Android-bound controller, so its bound and end-of-book behaviour had no
+  pure test, and nothing prevented the same index being prepared twice. New pure-JVM
+  `ReaderPrefetchWindow` decides the index (one chunk ahead, never past the end, already-prepared
+  indices skipped) and the run keeps a `prepared` map so a repeated request coalesces onto the slot
+  already producing that artifact. Each slot is released on promotion, released again on the
+  empty-chunk retry, and the map is cleared when the run exits. Cancellation is unchanged and already
+  complete (`generation` + `navigationRevision` + `checkOwned`, with `cancelOwned` on book switch and
+  stop). The persisted chunk cache was **not** redesigned: inspection showed it already met the
+  requirement (full key, all-or-nothing boundary validation, corruption-is-a-miss, rename publish,
+  two per book plus a byte budget with LRU); it gained hit/miss/store logging.
+- **The green informational sections gained an info affordance** (this cycle). New
+  `ReaderInfoHint.kt` adds `HelpIconButton` (Material `Icons.Outlined.Info` in the explanation role,
+  a content description naming the section, an `AlertDialog` dismiss — the pattern the library's
+  removal confirmation already uses) and `ExplanationNote`, which keeps each section's sentence
+  exactly as it was and puts the icon beside it in a plain `Row` so RTL mirrors without a hand-set
+  direction. Adopted on the reading-page header, the playback hint, the bubble explanation, the voice
+  explanation and the Book Intelligence generated-overview note; nine new strings in both locales.
+  `reader_pause_hint` was also corrected — it had claimed Stop returns to the first chunk.
+- **The usage dashboard reports a real observed window and charts only real data** (this cycle). New
+  pure-JVM `UsageSeries` and `GeminiUsageLedger.window(...)` feed `requestsThisWeek` (rolling seven
+  UTC days) and `observedDaily`. Two separate flags keep it honest: a ledger with activity outside
+  this week reports a real `0` for the week, while a ledger with nothing ever recorded reports
+  `UNKNOWN` and produces **no chart at all**. A day with no request is a measured zero, bars are
+  scaled against the busiest day, and there is deliberately no quota line. The project/account side
+  is unchanged: `projectQuota` and `billing` remain `AUTH_REQUIRED`, because an API key genuinely
+  cannot read them.
+- **The whole previous cycle is CI-verified** at `1b2da81` (Android CI push run `35451720666` and
   `pull_request` run `35451723199`, created 2026-09-19T15:28Z): **both jobs success in both runs** —
   `Unit tests` 10/10 steps including `Run unit tests`, and `Assemble debug APK` 14/14 steps including
   `Assemble debug` and `Upload debug APK`. `Assemble debug` is the only real compile check for
@@ -117,9 +169,9 @@ holds the standing UI/i18n rules plus the current implementation record.
 
 ## IN PROGRESS
 
-- Nothing. The two-appearance / library / chunk-cache cycle is implemented, documented and
-  CI-verified at `1b2da81`; the only open items are the device-verification and live-API checks under
-  BLOCKED.
+- Nothing. The 100 MB / exact-resume / bounded-prefetch / help-affordance / observed-usage cycle is
+  implemented, documented and CI-verified at `80fdae2`; the only open items are the device-verification
+  and live-API checks under BLOCKED.
 
 ## BLOCKED
 
@@ -127,11 +179,16 @@ holds the standing UI/i18n rules plus the current implementation record.
   features *feel* is an owner-only item: the two-entry theme selector and the legacy-id redirect, the
   drag-to-expand library gesture under RTL, whether the swapped Dark roles read as intended, whether
   Continue actually plays from the cache, and whether the resume lands on the same chunk. CI proves it
-  compiles and the pure-JVM suite proves its logic, not how it looks or sounds.
+  compiles and the pure-JVM suite proves its logic, not how it looks or sounds. This cycle adds: the
+  100 MB boundary against a genuinely large file, the help dialogs and their RTL mirroring, the usage
+  chart's RTL mirroring, whether Continue audibly resumes the cached chunk, and whether the prefetched
+  chunk is ready before promotion.
 - **The cache's real hit rate is unmeasured.** The tests prove the reuse and eviction rules; they
   cannot prove that a real Stop usually lands on a chunk whose producer had finished. A missed cache
   costs a re-synthesis, never a lost position — `cacheDir` is the OS's to clear, and the cache is
-  derived audio by design.
+  derived audio by design. The prefetch's coalescing and cancellation are likewise reasoned from the
+  code plus the pure `ReaderPrefetchWindow` test; the controller's orchestration of them is only
+  type-checked, never executed locally.
 - **Live catalogue behaviour is unverified.** Google Books and Open Library contracts are pinned
   against `MockWebServer`; no real request was made, so live coverage, rate limits and real match
   quality are unknown.
@@ -143,12 +200,18 @@ holds the standing UI/i18n rules plus the current implementation record.
 
 ## NEXT
 
-Owner device verification of the whole cycle: (1) confirm the Settings theme selector offers exactly
-two appearances and that an install whose saved preference was the removed one lands on Voxora Light
+Owner device verification of both cycles: (1) confirm the Settings theme selector offers exactly two
+appearances and that an install whose saved preference was the removed one lands on Voxora Light
 rather than failing; (2) open "Your Books", drag the header down and up, select a book and confirm its
 real chunk and last-read appear and Continue resumes it; (3) play a chunk, let the next one prefetch,
 tap Stop, then Continue, and confirm it resumes at the same place; (4) switch the output language and
-confirm the Book Intelligence themes change language without narration being disturbed.
+confirm the Book Intelligence themes change language without narration being disturbed; (5) import a
+file just under 100 MB and confirm it is accepted, then confirm a file over 100 MB is refused with the
+100 MB message; (6) open Book A, stop at a chunk, open Book B, stop at a different chunk, then
+Continue each and confirm each resumes at its own chunk and starts playing without a second press;
+(7) tap the info icon beside each green section and confirm the dialog opens, reads correctly and
+dismisses, in both English and Persian; (8) confirm the usage chart appears only after a request has
+been made and that no figure implies a quota.
 
 ---
 
@@ -157,12 +220,18 @@ confirm the Book Intelligence themes change language without narration being dis
 - **No local Gradle, ever.** 4 GB / 2 cores; GitHub Actions is the only Android build. Pure-JVM
   validation lives in `/tmp/rr` (`validate-cloud.sh` for the full contract suite,
   `validate-reader-android.sh` for the Android Reader layers, `validate-sync.sh`/`validate-dubservice.sh`
-  for Live Dub, plus the six guard scripts).
+  for Live Dub, plus the seven guard scripts). `validate-cloud.sh` and `validate-reader-android.sh`
+  both needed their source lists extended for each new file this cycle; a green local run is necessary,
+  not sufficient.
 - **The harness cannot compile Compose.** A green local run is necessary, not sufficient.
-- **The harness has two known blind spots**, both of which let a real compile error reach CI once:
+- **The harness has two known blind spots**, both of which have let a real compile error reach CI:
   `validate-reader-android.sh` substitutes a stub for `TextExtractor.kt` (no PDFBox jar), and it does
   not cover the Compose files at all. `checkimports.py` was extended with a `WATCHED_PROJECT` list to
-  catch the missing-project-import case in both blind spots, but nothing local compiles Compose.
+  catch the missing-project-import case in both blind spots, but nothing local compiles Compose — and
+  the second blind spot struck again at `d1209ba`, where a renamed Compose parameter
+  (`ReaderLibrarySection`'s `onOpen` → `onContinue`) left a call site in `ReaderScreen.kt` stale and
+  failed both CI jobs. `checkimports.py` covers missing imports in those files, not renamed
+  parameters, so it passed on the broken tree. CI remains the only defence for Compose.
 - **CI job logs need a token.** The REST job-log endpoint returns 403 unauthenticated; `gh` is not
   logged in. `~/.git-credentials` holds a token that works for both the run/job API and the log
   download (follow the 302 to the signed URL, without the `Authorization` header).

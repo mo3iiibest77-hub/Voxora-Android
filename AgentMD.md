@@ -723,3 +723,244 @@ select a book and confirm its real chunk and last-read appear and Continue resum
 chunk, let the next one prefetch, tap Stop, then Continue, and confirm the chunk resumes at the same
 place; (4) switch the output language and confirm the Book Intelligence themes change language
 without narration being disturbed.
+
+## 8. Implementation record — 100 MB imports, exact per-book resume, bounded prefetch, an observed-usage view
+
+### What was requested
+
+Seven connected areas:
+
+- **A.** Raise the imported-document limit from 20 MB to **100 MB**, enforced at the import boundary,
+  with English and Persian text in step, one limit rather than two, no eager whole-file load, and
+  boundary tests just below / exactly at / just above.
+- **B.** **Exact persistent resume per book** — Book A at chunk 3 and Book B at chunk 2 must each
+  resume at their own chunk, showing the position, reusing cached text/audio, and starting playback
+  without a second press.
+- **C.** **Persistent text + audio cache reuse** through the existing `ReaderChunkCache`, keyed on
+  book, chunk, chunk count, unit set, language, mode, voice and model; bounded, corruption-safe,
+  hit/miss-reportable, no whole-book eager caching.
+- **D.** **Bounded rolling prefetch** — N playing, N+1 prepared — with no unbounded memory, no
+  duplicate concurrent generation for one artifact, cancellation on book switch / jump / stop /
+  mode change, and no stale work overwriting a newer artifact. Reusing the existing queue, spool,
+  controller and session; no second queue framework.
+- **E.** **Book Intelligence** generated and cached in the selected Reader output language, with a
+  cached language never regenerated, and source bibliographic fields kept distinct from generated
+  content.
+- **F.** **Info/help icons** beside the green informational sections: existing Material icons, the
+  semantic explanation role (never a hardcoded colour), an established pattern, accessible content
+  descriptions, English + Persian, correct under RTL, and without changing what a section means.
+- **G.** **Usage dashboard** improvements from data Voxora can actually obtain — day/week/month,
+  tokens, requests, remaining quota, charts, account/project context — **never fabricating
+  account-wide values**, and keeping `UsageMetric`/`UsageUnavailable` uncertainty explicit.
+
+Standing constraints: Live Dub and its overlay/sync/colours untouched; exactly two appearances with
+no theme redesign and no hardcoded hex in Reader composables; no local Gradle build.
+
+### What the repository actually contained (checked, not assumed)
+
+- **The 20 MB limit was declared twice**, independently: `TextExtractor.MAX_BYTES` and
+  `ReaderDocumentStore.MAX_BYTES`, plus a number written by hand into `reader_document_failed` and
+  into two extraction messages. Nothing tied them together, so raising one would have left the other
+  refusing a file the app claimed to accept.
+- **Chunk-level resume already existed and was already per book.** `ReaderBook.currentChunk` is the
+  persisted resume point, `ReaderLibrary.withPosition` already targets one book by id, and
+  `queue.jumpTo(book.currentChunk)` already restored it. The genuine gap in B was that the library's
+  Continue action only called `controller.openBook(id)` and never started narration, so "keep
+  listening" was two presses.
+- **`ReaderChunkCache` already met C.** It keyed on every field the request lists, validated the unit
+  boundaries all-or-nothing, treated corruption as a miss, stored by rename, and bounded itself by
+  `KEEP_PER_BOOK = 2` plus a 64 MiB budget with LRU eviction and the just-written entry protected.
+  Nothing was redesigned; it gained hit/miss/store logging so the reuse is observable.
+- **The prefetch look-ahead decision lived inline in the Android-bound controller**
+  (`prefetch(index)` returning null at `index >= queue.size`). Its bound and end-of-book behaviour
+  therefore had no pure test, and there was **no deduplication at all**: nothing prevented the same
+  index from being prepared twice if it were asked for twice.
+- **The prefetch itself was already one chunk wide**, so the memory bound was never the defect — the
+  untested decision and the missing dedup were.
+- **`reader_pause_hint` was factually wrong.** It said Stop returns to the first chunk; Stop persists
+  the chunk the reader was on (`savePositionLocked()` after `stop()`), and the surrounding comment in
+  `ReaderController` records that resetting the queue there was the old defect.
+- **Book Intelligence per-language caching was already correct and already tested**
+  (`ReaderBookOverviewTest`, `BookIntelOverviewTest`): language-aware lookup, `isUsableFor` staleness,
+  a bounded `MAX_CACHED`, themes stored inside the per-language record, and codec round-trips. The
+  repository's short-circuit `isUsableFor(book.overviewFor(language), language)` is what makes a
+  cached language free. Only that exact decision lacked a direct test.
+
+### What was actually implemented
+
+**A. One document-size rule, at 100 MB.**
+
+- New `core/src/main/java/com/voxora/core/reader/ReaderDocumentLimits.kt` is the single source of
+  truth: `MAX_BYTES = 100L * 1024 * 1024`, `MAX_MEGABYTES = 100`, `LABEL = "100 MB"`, and
+  `exceeds(bytes) = bytes > MAX_BYTES` (inclusive at exactly 100 MB).
+- `TextExtractor` consults it in both places — the provider size column and the streaming read — and
+  its local `MAX_BYTES` is gone. The read bound is now
+  `minOf(buffer.size, MAX_BYTES - total + 1)` so a file is refused after buffering **at most one byte
+  past the limit**; nothing is loaded eagerly.
+- `ReaderDocumentStore`'s copy loop consults the same rule and its local `MAX_BYTES` is gone.
+- Both locales say 100 MB, and the extraction message interpolates `ReaderDocumentLimits.LABEL`
+  rather than repeating a number. The wording is "no larger than", which matches the inclusive
+  boundary.
+
+**B. Continue restores the book's own chunk and starts narration.**
+
+- `ReaderViewModel.continueBook(id)` opens the book and then starts playback once extraction
+  finishes. The wait is for `!ReaderGates.isExtracting(phase)`, which always terminates because
+  `isExtracting` is true only for `EXTRACTING` (already pinned by `ReaderStartupGatesTest`).
+- The wait runs on its own job (`pendingAutoPlay`), **not** inside the serialized command queue, and
+  `runCommand` cancels it at the start of every command. Holding the queue open for a large
+  document's extraction would have made Stop — the action a reader reaches for when a restore is
+  slow — appear dead; cancelling the job means any later command supersedes "keep listening".
+- `startPlayback()` was extracted from `play()` so both share one path; `play()` still gates on
+  `ReaderGates.canPlay`.
+
+**C. The chunk cache is reused as it was; its reuse is now visible.**
+
+- `ReaderController` logs `Cache hit chunk=…`, `Cache miss chunk=…` and `Cache stored chunk=…`. The
+  key, the boundary validation, the rename-based publish, the corruption-is-a-miss rule and the
+  bounds are unchanged, because inspection showed they already satisfied the requirement.
+
+**D. The prefetch is now a bounded, tested rule with coalescing.**
+
+- New pure-JVM `ReaderPrefetchWindow` decides which index is worth preparing: one chunk ahead by
+  default, nothing at or past the end of the book, nothing for an empty document, nothing for a
+  non-positive look-ahead, and **already-prepared indices are skipped**.
+- The run keeps `prepared: MutableMap<Int, Slot>`, so a repeated request for one index coalesces onto
+  the slot already producing it instead of opening a second session. Each slot is released when it is
+  promoted, released again on the empty-chunk retry, and the map is cleared when the run exits — so
+  it can never retain a slot the run has finished with.
+- Promotion resolves `next ?: prepared[current.index + 1]`, so a chunk that was prepared but not
+  returned as `next` is still promoted rather than being reported as "no next chunk".
+- Cancellation is unchanged and already complete: `cancelOwned()` bumps `generation`, `navigate()`
+  bumps `navigationRevision` and cancels the pipeline, and every publish is guarded by
+  `checkOwned(run, revision)`, which throws when stale. Mode/language changes cannot race a run
+  because `canConfigure` is false while narrating.
+- `fail()` now logs `Stale narration failure discarded` when the run or revision no longer matches,
+  and `openBook`/restore log `Resume requested` / `Resume restored`.
+
+**E. Book Intelligence: the reuse decision is pinned.**
+
+- No behaviour change was needed — the repository already short-circuits on
+  `isUsableFor(book.overviewFor(language), language)` before any network work. A test now pins that
+  exact predicate for a hit, a never-generated language, and a blank entry.
+
+**F. An info affordance for the explanation-role sections.**
+
+- New `app/src/main/java/com/voxora/app/reader/ReaderInfoHint.kt`:
+  - `HelpIconButton(helpTitle, helpBody)` — Material `Icons.Outlined.Info` tinted with
+    `VoxoraColors.explanation` (the semantic role, no literal), a content description naming the
+    section it explains (`reader_help_open`), and an `AlertDialog` with a single `reader_help_close`
+    dismiss. `AlertDialog` is the pattern the library's removal confirmation already uses.
+  - `ExplanationNote(text, helpTitle, helpBody)` — the existing explanation sentence unchanged, with
+    the icon beside it in a plain `Row`, so RTL mirrors without any hand-set direction or coordinate.
+- `SectionHeader` gained optional `helpTitle`/`helpBody`; when both are present the hint is rendered
+  through `ExplanationNote`, and when absent it is the original `Text`. All existing callers use
+  named arguments, so the addition is source-compatible.
+- Adopted on the reading-page header, the playback pause hint, the bubble explanation, the voice
+  explanation and the Book Intelligence generated-overview note. Nine new strings in both locales.
+
+**G. Usage: a real observed window, and a chart only when there is data.**
+
+- New `GeminiUsageLedger.window(atMillis, dayCount)` sums the `dayCount` UTC days ending on the day
+  containing `atMillis`, and new pure-JVM `UsageSeries.daily(ledger, atMillis, dayCount)` produces
+  oldest-first points, zero for a day with no recorded request (a measured zero, not a gap).
+- `ApiUsageSnapshot` gained `requestsThisWeek` and `observedDaily`, plus `WEEK_DAYS = 7` and
+  `CHART_DAYS = 14`. Two separate flags keep the honesty intact: `observed` (this month) and
+  `observedAnything` (ever). A ledger with activity outside this week reports a real `0` for the week
+  rather than `UNKNOWN`, and a ledger with nothing ever recorded reports `UNKNOWN` and produces **no
+  chart at all**.
+- `ApiUsageScreen` gained a "Requests this week" row and a conditional chart item. The chart is a
+  `Row` of weighted columns rather than a `Canvas`, so it mirrors under RTL for free; bars are scaled
+  against the busiest day in the window, a zero day is a hairline, and there is deliberately **no
+  quota line** — Google never reported one.
+- Nothing changed about the project/account side: `projectQuota` and `billing` remain
+  `UsageUnavailable.AUTH_REQUIRED`, because an API key genuinely cannot read them.
+
+**Also corrected:** `reader_pause_hint` in both locales now describes what Pause and Stop actually do.
+
+### Files and components changed
+
+- **Core main:** `reader/ReaderDocumentLimits.kt` (new); `usage/UsageSeries.kt` (new);
+  `usage/GeminiUsageLedger.kt` (`UsageWindow`, `window(...)`); `usage/ApiUsageSnapshot.kt`
+  (`requestsThisWeek`, `observedDaily`, `WEEK_DAYS`, `CHART_DAYS`, `observedAnything`).
+- **App main:** `reader/ReaderPrefetchWindow.kt` (new); `reader/ReaderInfoHint.kt` (new);
+  `reader/ReaderController.kt` (`prefetchNext`, `prepared`, cache/resume/stale logging);
+  `reader/ReaderViewModel.kt` (`continueBook`, `pendingAutoPlay`, extracted `startPlayback`);
+  `reader/ReaderScreen.kt` (`SectionHeader` help, `ExplanationNote` adoption, `onContinueBook`);
+  `reader/ReaderLibrarySection.kt` (`onOpen` → `onContinue`); `reader/ReaderVoiceSection.kt`;
+  `reader/BookIntelCard.kt`; `reader/TextExtractor.kt`; `reader/library/ReaderDocumentStore.kt`;
+  `ui/ApiUsageScreen.kt` (week row, chart, `UsageBarChart`, `dayLabel`); both `strings.xml`.
+- **Tests:** `ReaderDocumentLimitsTest` (new), `UsageSeriesTest` (new), `ReaderPrefetchWindowTest`
+  (new), `ReaderDocumentLimitTextTest` (new); additions to `ReaderLibraryTest` (independent per-book
+  resume across a codec round-trip), `ReaderBookOverviewTest` (the reuse decision),
+  `GeminiUsageLedgerTest` (the window), `ApiUsageSnapshotTest` (week, chart, real-zero-vs-unknown).
+
+### Build defects found after the first push, and how they were fixed
+
+`d1209ba` failed **both** jobs, and both failures were the same single compile error:
+`:app:compileDebugKotlin` reported `ReaderScreen.kt:267:21 No parameter with name 'onOpen' found.`
+and `ReaderScreen.kt:269:21 No value passed for parameter 'onContinue'.` The `Unit tests` job failed
+at the same compile step, so **no test ran** — this was not a test failure.
+
+`ReaderLibrarySection`'s callback had been renamed `onOpen` → `onContinue` (the action now starts
+narration, so "open" no longer described it), and the call site in `ReaderScreen.kt` was missed. Fixed
+in `9be68d1`; `9be68d1` and `80fdae2` are both green.
+
+This is precisely the documented Compose blind spot: `validate-reader-android.sh` type-checks the
+controller, view model, service and library layers but **has no Compose compiler**, so
+`ReaderScreen.kt`, `ReaderLibrarySection.kt`, `ReaderVoiceSection.kt`, `BookIntelCard.kt` and
+`ApiUsageScreen.kt` are only ever compiled by CI. The local `checkimports.py` guard covers missing
+imports in those files, not renamed parameters, and it passed on the broken tree. A follow-up fix
+(`80fdae2`) also released the retried chunk from the prefetch map.
+
+### Tests actually run
+
+- `validate-cloud.sh` (pure JVM, kotlinc 2.0.21 + JUnit 4.13.2, `-ea`): **752 tests pass across 63
+  classes** (up from 715 across 59 before this cycle). It now also compiles `UsageSeries.kt`,
+  `ReaderPrefetchWindow.kt`, `UsageSeriesTest`, `ReaderPrefetchWindowTest` and
+  `ReaderDocumentLimitTextTest`.
+- `validate-reader-android.sh`: **OK** — the Android-side Reader layers (including
+  `ReaderPrefetchWindow` and the modified `ReaderController`/`ReaderViewModel`) type-check against
+  `android.jar` with stubs.
+- All seven guards pass: `bidi_fa.py`, `checkimports.py`, `dubguard.py`, `themeguard.py`,
+  `themecheck.py`, `stringcheck.py` (`values` 372 / `values-fa` 371, the only difference being the
+  `translatable="false"` key), `apptestguard.py`.
+- **No local Gradle build was run** (prohibited), so nothing here proves Compose compiles.
+- **No real-device validation was performed.**
+
+### CI result
+
+`d1209ba` **failed**: push run `35458245341` (#154) and `pull_request` run `35458248307` (#155), both
+jobs failure, from the single `onOpen`/`onContinue` compile error above. After `9be68d1`, **CI is
+green**: push run `35458516239` (#156) and `pull_request` run `35458518642` (#157). The final commit
+`80fdae2` is **green** too: push run `35458802897` (#158) and `pull_request` run `35458806113` (#159),
+with `Assemble debug APK` (14/14 steps) and `Unit tests` (10/10 steps) both `success`. `Assemble
+debug` is the only real compile check for the Compose files; the CI log does not print a test count,
+so the number of tests Gradle ran is not asserted here.
+
+### Unresolved limitations
+
+- **No real-device testing was performed.** The 100 MB boundary against a genuinely large file, the
+  help dialogs, the chart's RTL mirroring, whether Continue audibly resumes the cached chunk, and
+  whether the prefetched chunk is ready before promotion are all **DEVICE VERIFICATION PENDING**.
+- **The cache's real hit rate is still unmeasured**, and the prefetch's coalescing and cancellation
+  are reasoned from the code plus the pure window test — the controller-level orchestration is only
+  type-checked, never executed locally.
+- **`requestsThisWeek` is a rolling seven UTC days, not an ISO week.** It is labelled "this week",
+  which is what a reader means by it, but it is not a calendar week.
+- **The project/account usage figures remain unavailable by construction.** `projectQuota` and
+  `billing` are `AUTH_REQUIRED` because an API key cannot read them; no OAuth path was added.
+- **Live catalogue and `generateContent` behaviour remain unverified against the real APIs** (carried
+  over from §7), so Book Intelligence's live generation path is still unproven.
+- **`ReaderPrefetchWindow` is a pure rule; the controller's use of it is not executed locally.**
+
+### Exact next action
+
+**Owner device verification of this cycle**, in addition to §7's list: (1) import a file just under
+100 MB and confirm it is accepted, then confirm a file over 100 MB is refused with the 100 MB
+message; (2) open Book A, stop at a chunk, open Book B, stop at a different chunk, then Continue each
+and confirm each resumes at its own chunk and starts playing without a second press; (3) tap the info
+icon beside each green section and confirm the dialog opens, reads correctly and dismisses, in both
+English and Persian, with RTL mirroring; (4) confirm the usage chart appears only after a request has
+been made, that a day with no request shows a zero, and that no figure implies a quota.
+
