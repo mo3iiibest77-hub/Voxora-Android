@@ -161,40 +161,46 @@ primary #4F46E5  secondary(cyan) #0891B2  tertiary(violet) #7C3AED  accent purpl
 onSurface #171923  onSurfaceVariant #596174  explanation #64748B
 gradient #22D3EE → #818CF8 → #A855F7
 
-// LIGHT TEST 2 — "Voxora Contrast Light". The light-side contrast of Original Dark:
-// near-black → cool near-white, gold → refined indigo/blue, warm beige text → cool slate.
-// Its own complete palette, NOT Light Test 1 + overrides.
-background #F5F7FB  surface #EDF1F7  surfaceVariant #E4E9F1  outlineVariant #D3D9E3
-primary #375CD4  secondary/tertiary(deeper blue) #2E50B8  primaryContainer #DDE5FF
-onSurface #101827  onSurfaceVariant #4B5870  explanation #5F6775  neutral #556687
-success #BE185D  warning #2254E6  danger/error #0B6E8A
-// Two supplied values were not legible as text on the card and were darkened in the same hue
-// family, as the owner's WCAG instruction required: error #5DE8E8 (1.22:1) → #0B6E8A (4.77:1),
-// success #DC3D95 (3.35:1) → #BE185D (4.95:1). Explanation #6B7384 (3.91:1) → #5F6775 (4.68:1).
-// Warning #2254E6 and primary #375CD4 already cleared AA and are kept exactly as supplied.
+// VOXORA LIGHT (the LIGHT_TEST_2 slot) — warm cream + gold leaf; the final light appearance.
+// Its own complete palette, NOT Light Test 1 + overrides and NOT a lightened dark theme.
+background #F5F2EC  surface #EDE9DF  surfaceVariant(card) #E4DFD3  outlineVariant #D0C9BC
+surfaceContainer #EAE6DC  surfaceContainerHigh #DEDAD0  surfaceContainerHighest #D5D0C4
+outline #B8B0A0
+primary(gold) #8B6914  secondary(dim gold) #A07820  primaryContainer #F0E4B8  onPrimaryContainer #5C4A10
+secondaryContainer #E8DFC8  onSecondaryContainer #4A3E20
+onSurface #1A1610  onSurfaceVariant #4A4438  explanation(info navy) #0369A1  neutral #6B6558
+disabled #A09888
+success #1A9E57  warning #B88A10  danger/error #C0392B  errorContainer #FAD7D7  onErrorContainer #7A1515
+glow rgba(139,105,20,0.12)  shadow rgba(100,80,30,0.12)   // the light design language
+// Supplied verbatim: nothing is darkened or "corrected" for contrast, and the gold stays exactly
+// #8B6914 / #A07820. The measured shortfalls are documented in LightTest2Palette.kt and pinned by
+// LightTestPalettesTest: explanation 4.46 and neutral 4.35 on the card (AA is 4.5), primary 3.83
+// and secondary 3.61 as text on the cream surfaces. Never #FFFFFF as the page.
 
-// Status roles are declared per palette. The two light themes do NOT share values: Light Test 1
-// uses success #16A34A / warning #D97706 / error #DC2626, Light Test 2 the values above.
+// Status roles are declared per palette. The two light appearances do NOT share values: Light
+// Test 1 uses success #16A34A / warning #D97706 / error #DC2626, Voxora Light the values above.
 // Roles Material 3 does not model (VoxoraColors.*): success / warning / danger / neutral /
-// explanation / disabled.
+// explanation / disabled / glow.
 ```
 
 **Theme selection:**
 - The user's choice is `core/.../prefs/ThemeMode.kt` — `ORIGINAL_DARK` (default), `LIGHT_TEST_1`, `LIGHT_TEST_2` — persisted through `UserPrefs`/DataStore (`themeMode`, stored as the enum's stable `id` so reordering the enum cannot change a choice). `MainActivity` collects it and passes it to `VoxoraTheme(mode = …)`; `SettingsScreen` exposes a `ThemeSelector` that writes it. Never hold the selection in a composable's own `remember`, and never read `isSystemInDarkTheme()` anywhere.
 - **`ThemeMode.DEFAULT` is `ORIGINAL_DARK`, and that must not change.** The original Voxora dark theme is the product's primary identity and the baseline appearance; neither light test may become the default, and the Google-style palette must not come back. `ThemeMode.normalize` is total (unknown/blank → `DEFAULT`) and migrates the previous `system`/`dark`/`light` ids (`system`/`dark` → dark, `light` → the first light test), so a corrupt or old preference can never leave the app themeless or silently drop a light user into dark. Pinned by `ThemeModeTest`.
-- **The three themes are independent by construction.** Each light test is a complete palette in its own file, not "the other light theme with overrides", and they share no constant or mutable state. Removing a light test later means deleting its palette file, its scheme + semantics block in `Theme.kt`, its `ThemeMode` entry and its string — the dark theme and the remaining light theme are untouched. Never introduce a shared mutable palette or a base-plus-overrides hierarchy between the light tests.
-- **Dark is the original Voxora gold identity — not a Google or Nova look.** Gold is `primary`, `secondary` and the tint of the tonal surfaces; the text is warm light; there is no cyan, indigo or purple. Cyan/indigo/violet belong to Light Test 1; the indigo/blue complement belongs to Light Test 2.
-- **Light is a real appearance, not an inverted dark one.** Every role is a chosen value with deliberate contrast: near-black content on white, a mid-grey secondary, a lighter help grey, and the indigo carrying action. Light Test 2 is the *contrast* light theme — its indigo/blue is the deliberate opposite of the dark theme's gold, not a copy of Light Test 1's accents.
-- **Contrast is verified, not assumed.** A palette value the owner supplies is measured against the surface it will sit on before it is accepted; a value below WCAG AA for text is adjusted to the nearest legible member of the same hue family and the adjustment is recorded in the palette's KDoc and in `LightTestPalettesTest`. Never ship a supplied colour that cannot be read.
+- **The three appearances are independent by construction.** Each light appearance is a complete palette in its own file, not "the other light theme with overrides", and they share no constant or mutable state. A change to the light appearance cannot move a dark value, and a change to the dark appearance cannot move a light one. Removing an appearance later means deleting its palette file, its scheme + semantics block in `Theme.kt`, its `ThemeMode` entry and its string. Never introduce a shared mutable palette or a base-plus-overrides hierarchy, and never build the light appearance by lightening the dark theme's tokens.
+- **Dark is the original Voxora gold identity — not a Google or Nova look.** Gold is `primary`, `secondary` and the tint of the tonal surfaces; the text is warm light; there is no cyan, indigo or purple. Cyan/indigo/violet belong to Light Test 1; Voxora Light keeps the gold identity on the light side (a darker gold `#8B6914` and a dim gold `#A07820`) on warm cream surfaces, and does not borrow Light Test 1's accents.
+- **Light is a real appearance, not an inverted dark one.** Every role is a chosen value with deliberate contrast. Voxora Light is warm parchment — never pure white — with near-black content `#1A1610`, a warm brown secondary `#4A4438`, a navy information tone `#0369A1`, and the darker gold carrying action. It is not "the dark theme made lighter".
+- **Contrast is measured and recorded, not assumed.** A palette the owner supplies is measured against the surfaces it will sit on, and the measured ratios are recorded in the palette's KDoc and pinned by `LightTestPalettesTest`. When a supplied value falls below WCAG AA the owner's instruction is to keep it **verbatim** and document the shortfall — never silently darken the supplied identity colours. A supplied value is adjusted only when the owner explicitly asks for the correction, minimally and in the same hue family, and the adjustment is recorded. `Voxora Light`'s measured shortfalls are listed in §3 above and in `LightTest2Palette.kt`.
 
 **Compose rules:**
 - Always use `MaterialTheme.colorScheme.*` tokens — never hardcode hex in composables. The only accepted literal in a composable is `Color.Transparent` (a framework constant, not a brand colour).
-- **The semantic roles are the contract.** `Theme.kt` exposes `VoxoraSemanticColors` through `VoxoraColors.success` / `.warning` / `.danger` / `.neutral` / `.explanation` / `.disabled` (a `staticCompositionLocalOf`, read via `@Composable @ReadOnlyComposable`). Ask for the role, never a number. The hierarchy is **screen title → section title → primary content (`onSurface`) → secondary content (`onSurfaceVariant`) → explanation (`VoxoraColors.explanation`) → status / action**. A screen must not invent a role or pick an alpha on `onSurface` to mean "less important".
+- **The semantic roles are the contract.** `Theme.kt` exposes `VoxoraSemanticColors` through `VoxoraColors.success` / `.warning` / `.danger` / `.neutral` / `.explanation` / `.disabled` / `.glow` (a `staticCompositionLocalOf`, read via `@Composable @ReadOnlyComposable`). Ask for the role, never a number. The hierarchy is **screen title → section title → primary content (`onSurface`) → secondary content (`onSurfaceVariant`) → explanation (`VoxoraColors.explanation`) → status / action**. A screen must not invent a role or pick an alpha on `onSurface` to mean "less important".
 - **`ReaderStatusVisual` decides which tone a phase gets**, and the composable only asks for it: **speaking and playing are green, paused is yellow and never green, stopped and failed are red, connecting and preparing are neutral and must not falsely show green.** The same pattern holds for `UsageStatusVisual` and `LogSeverity` — a pure-JVM mapper owns the decision so no composable picks a colour inline.
-- **One explanation role.** Every help, hint, caption or "why this is unavailable" line uses `VoxoraColors.explanation`. Do not reach for `onSurfaceVariant` for one note and `outline` for the next; a single token is what makes the hierarchy consistent across Reader, Settings, usage and account surfaces. Secondary content (`onSurfaceVariant`) stays for supporting labels, values and subtitles — do not "unify" the two by repainting every secondary label, which would erase the distinction the role exists to make. **Each theme states its own explanation colour and the role is not defined by being dimmer:** in the restored dark theme it is the owner's dedicated icy/electric blue `#7DD3FC`, which is *brighter* than the warm secondary text and is kept distinct by hue and by dedicated use; in Light Test 1 it is the neutral `#64748B` and in Light Test 2 the cool slate `#5F6775`, where it is genuinely lighter than secondary content. Never make it a brand gold or an accent, and never make it an action or a status colour — that is what made explanatory text read as a brand accent.
+- **One explanation role.** Every help, hint, caption or "why this is unavailable" line uses `VoxoraColors.explanation`. Do not reach for `onSurfaceVariant` for one note and `outline` for the next; a single token is what makes the hierarchy consistent across Reader, Settings, usage and account surfaces. Secondary content (`onSurfaceVariant`) stays for supporting labels, values and subtitles — do not "unify" the two by repainting every secondary label, which would erase the distinction the role exists to make. **Each theme states its own explanation colour and the role is not defined by being dimmer:** in the restored dark theme it is the owner's dedicated icy/electric blue `#7DD3FC`, which is *brighter* than the warm secondary text and is kept distinct by hue and by dedicated use; in Light Test 1 it is the neutral `#64748B` and in Voxora Light the deeper navy-blue `#0369A1`, where it is the lighter of the two by luminance and so still reads as the quieter role. Never make it a brand gold or an accent, and never make it an action or a status colour — that is what made explanatory text read as a brand accent.
 - **`neutral` is a status, not a failure.** Idle, connecting and an expected data gap are neutral; only a refusal or a network problem is `danger`. Never dress "we cannot show this" as an error.
 - `VoxoraBrand` (`waveGold`, `waveGreen`) is decorative only — the Live bubble waveform. It is **not** a text or surface colour and must never be used for status.
-- **Every text role clears WCAG AA on the surface it sits on.** `OriginalDarkPaletteTest` and `LightTestPalettesTest` compute the contrast ratios and fail if a role drops below 4.5:1 on its card or page background (disabled content is exempt but must stay visible). Adding a colour means adding it to the reach of the test for its theme.
+- **Every text role clears WCAG AA where it holds, and the shortfalls are pinned where it does not.** `OriginalDarkPaletteTest` and `LightTestPalettesTest` compute the contrast ratios. Original Dark's content roles clear AA on its card and page; Voxora Light's content and help roles clear AA on the page and surface, and its measured shortfalls (explanation 4.46 / neutral 4.35 on the card; primary 3.83, secondary 3.61 as text on the cream surfaces) are asserted as documented facts rather than hidden or "fixed" (disabled content is exempt but must stay visible). Adding a colour means adding it to the reach of the test for its appearance.
+- **The accent wash is a role, not an alpha on `primary`.** The gold/indigo wash behind an icon or a brand mark is `VoxoraColors.glow`, resolved per appearance — Original Dark `#D4AF37` @15 %, Light Test 1 `#4F46E5` @15 %, Voxora Light `#8B6914` @12 % (the supplied `rgba(139,105,20,0.12)`). Never write `primary.copy(alpha = …)` at a call site: that is exactly how a light screen would inherit the dark appearance's wash.
+- **The light shadow language is warm brown, never black.** Any light-appearance shadow uses `LightTest2Palette.Shadow` (`rgba(100,80,30,0.12)`), not `rgba(0,0,0,…)`. Nothing draws a custom shadow today (the UI uses `tonalElevation`), so the value is a declared token; a future shadow must use it.
 - An active-state pulse must modify alpha, glow or scale of the semantic colour. Never introduce a separate neon colour for animation, and never run an infinite animation for a phase that is not active.
 - **Typography is the Material 3 default — do not bundle a font.** `Theme.kt` calls `MaterialTheme(colorScheme, content)` with **no** `typography` argument, so the app uses the stock Material 3 type scale and the **device's own font**, for Persian and every other language. Use `MaterialTheme.typography.*` — never hardcode `sp` sizes and never set a `fontFamily` at a call site; the only sanctioned exception is the log list's monospace, because a timestamp and a bracketed tag are code, not prose. There is deliberately **no** `ui/theme/Type.kt`, no `res/font/` directory and no bundled font: a bundled Persian-only cut was tried and rejected because it pushed every Latin product name through font fallback and changed the app's appearance on every device. Do not reintroduce one. See `AgentMD.md` for the standing rule.
 - Shapes: `RoundedCornerShape(12.dp)` for cards, `CircleShape` for FABs/bubbles
@@ -818,6 +824,35 @@ VoxoraLog.e("ReaderVM", "Chunk rewrite failed: ${e.message}", e)
 
 ## 10. STRINGS & i18n
 
+### The canonical Persian standard — permanent and project-wide
+
+> **The current Persian UI writing and localization style is the canonical Persian standard for
+> Voxora and must be preserved across all future features.**
+
+This is a permanent **Localization and UI Design Principle**, not a visual preference. Every future
+feature — every screen, component, dialog, Bottom Sheet, Toast, Snackbar, error message, status
+message, Settings item, Reader/PDF Reader UI, Live Dub UI, Onboarding, Navigation, Notification,
+permission message, API/cloud message, login/connection state, and any other Persian text — must
+follow exactly the same Persian writing and presentation standard used by the current version.
+
+**Before adding or modifying any Persian text, inspect the existing Persian text in the current
+version first and match it.** The current implementation is the reference; the list below is what
+that reference already does, not a licence to invent a new style:
+
+- follow the same wording style and sentence structure as the strings already in the app;
+- write natural, modern Iranian Persian — never machine-translated Persian;
+- use the correct Persian characters consistently (Persian `ک`/`ی`, not the Arabic forms);
+- preserve correct Persian spacing and نیم‌فاصله (ZWNJ);
+- preserve natural Persian punctuation;
+- handle mixed Persian/English/numbers with correct RTL/BiDi behaviour (the FSI/PDI isolate rule
+  below), and never hand-reverse a string or pad it with spaces;
+- do not use unnecessary LRM/RLM/LTR/RTL hacks unless a specific BiDi case technically requires it;
+- preserve the established terminology below, and **extend the existing Persian language system
+  rather than creating a new writing style**.
+
+`AgentMD.md` §2 carries the same contract for day-to-day UI work; `bidi_fa.py` and `stringcheck.py`
+are the mechanical checks.
+
 - Every user-visible string goes in `res/values/strings.xml`
 - English is default — add Persian (`values-fa`) translations for every new string
 - Format: `snake_case` key names, e.g. `reader_start_button`, `reader_chunk_progress`
@@ -979,15 +1014,20 @@ A task is NOT done until:
 
 ---
 
-*Last updated: auto-generated by Claude for Voxora project — Light Test 2 replaced by "Voxora Contrast
-Light" (the light-side contrast of the dark theme), the dark explanation/help role moved to the
-owner's icy/electric blue `#7DD3FC`, the bundled Vazirmatn type stack removed so the app renders with
-the platform font through the stock Material 3 type scale, the Persian strings audited and
+*Last updated: auto-generated by Claude for Voxora project — the `LIGHT_TEST_2` slot now holds the
+final **Voxora Light** appearance (warm cream, gold leaf, warm brown shadows, gold-at-12 % glow),
+built as a completely independent light UI variant with the owner's palette used verbatim and its
+measured WCAG shortfalls documented rather than designed around; the accent wash behind icons became
+the per-appearance `VoxoraColors.glow` role so a light screen can never inherit the dark gold wash;
+the canonical Persian writing/localization standard was made permanent project law (§10 here and
+`AgentMD.md` §2); and earlier in the line, the bundled Vazirmatn type stack removed so the app renders
+with the platform font through the stock Material 3 type scale, the Persian strings audited and
 bidi-isolated for mixed Persian/Latin text, and Live Dub given an adaptive source/dub synchronization
 layer that measures the pipeline's own latency (no fixed delay), corrects drift through an opt-in
 media-session layer, accounts for dropped audio, and logs monotonic stage timings — together with two
 real latency fixes: the per-emission audio coroutine replaced by one ordered consumer, and the
 one-second `AudioTrack` buffer reduced to ~125 ms. The standing rules for future UI work live in
 `AgentMD.md`; the Live Dub contract is §6 here. **No real-device testing was performed for the Live
-Dub synchronization work** — the sync behaviour, the media-session pause/resume and the measured
-latency are device-verification items.*
+Dub synchronization work or for the Voxora Light appearance** — the sync behaviour, the media-session
+pause/resume, the measured latency, the light appearance's on-device look and the gold-on-cream
+legibility at small sizes are device-verification items.*

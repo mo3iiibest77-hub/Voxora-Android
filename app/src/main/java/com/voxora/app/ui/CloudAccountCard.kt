@@ -578,7 +578,7 @@ private fun CloudRowHeader(
             modifier = Modifier
                 .size(44.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                .background(VoxoraColors.glow),
             contentAlignment = Alignment.Center,
         ) {
             Icon(

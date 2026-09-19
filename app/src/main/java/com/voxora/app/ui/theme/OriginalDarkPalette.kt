@@ -44,6 +44,13 @@ internal object OriginalDarkPalette {
     /** Muted gold. The original `secondary`. */
     const val GoldDim: Long = 0xFFB8962E
 
+    /**
+     * The gold glow / accent wash behind icons and brand marks: [Gold] at 15 % alpha. This is the
+     * dark appearance's value and it is **unchanged** — the light appearance states its own,
+     * deliberately different glow, so the two never share a token.
+     */
+    const val Glow: Long = 0x26D4AF37
+
     // ---- surfaces ------------------------------------------------------------------------
 
     /** Near-black page. */

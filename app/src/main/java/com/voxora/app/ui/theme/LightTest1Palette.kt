@@ -67,6 +67,13 @@ internal object LightTest1Palette {
 
     /** Indigo — primary action and the selected state. */
     const val Primary: Long = 0xFF4F46E5
+
+    /**
+     * The indigo glow / accent wash behind icons and brand marks: [Primary] at 15 % alpha. Each
+     * appearance states its own glow; this one is unchanged from before the token existed.
+     */
+    const val Glow: Long = 0x264F46E5
+
     const val OnPrimary: Long = 0xFFFFFFFF
     const val PrimaryContainer: Long = 0xFFE0E7FF
     const val OnPrimaryContainer: Long = 0xFF1E1B4B

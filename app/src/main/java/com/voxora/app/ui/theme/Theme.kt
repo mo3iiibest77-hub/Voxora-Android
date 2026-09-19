@@ -15,20 +15,21 @@ import com.voxora.core.prefs.ThemeMode
  * The Voxora design system.
  *
  * ## Three independent themes
- * Voxora ships three complete, separately defined colour systems so the owner can compare them on a
- * device:
+ * Voxora ships three complete, separately defined colour systems. Each is a full appearance in its
+ * own right, not a variation of another:
  *
  * | `ThemeMode`        | Palette                 | Identity |
  * |--------------------|-------------------------|----------|
  * | [ThemeMode.ORIGINAL_DARK] | [OriginalDarkPalette] | the original Voxora dark gold theme — the product's primary identity and the default |
- * | [ThemeMode.LIGHT_TEST_1]  | [LightTest1Palette]   | Voxora Light, Nova-inspired |
- * | [ThemeMode.LIGHT_TEST_2]  | [LightTest2Palette]   | Voxora Contrast Light — the light-side contrast of the dark theme |
+ * | [ThemeMode.LIGHT_TEST_1]  | [LightTest1Palette]   | Voxora Light, Nova-inspired — a comparison candidate |
+ * | [ThemeMode.LIGHT_TEST_2]  | [LightTest2Palette]   | Voxora Light — warm cream, gold leaf, warm brown shadows; the final light appearance |
  *
  * **The palettes are independent by construction.** Each lives in its own file, declares every
- * value it uses, and shares no constant or mutable state with the others. Removing a light test
- * later means deleting its palette file, its scheme block below, its `ThemeMode` entry and its
- * string — the dark theme and the remaining light theme are not touched. Neither light theme is
- * implemented as an override of the other.
+ * value it uses, and shares no constant or mutable state with the others. A change to the light
+ * appearance cannot move a dark value, and a change to the dark appearance cannot move a light one;
+ * removing an appearance means deleting its palette file, its scheme block below, its `ThemeMode`
+ * entry and its string. Neither light appearance is implemented as an override of the other, and
+ * the light appearance is never achieved by "lightening" the dark theme's tokens.
  *
  * ## Roles, not numbers
  * A screen asks for a role — `MaterialTheme.colorScheme.*` or `VoxoraColors.*` — and never for a
@@ -62,6 +63,11 @@ import com.voxora.core.prefs.ThemeMode
  *   never confused with it), the light themes by a quieter grey. It is never used for a heading,
  *   a button label or a status;
  * - [disabled] is content that is present but explicitly not actionable.
+ * - [glow] is the one **decorative** role: the accent wash painted behind an icon or a brand mark.
+ *   It is theme-resolved like the semantic roles so each appearance states its own — the dark
+ *   appearance's gold-at-15 % wash, the light appearance's gold-at-12 % — and a light screen can
+ *   never inherit the dark wash. It carries no meaning: never use it for text, a status, or a
+ *   surface.
  *
  * Exposed through a composition local rather than added to `colorScheme` so the roles stay explicit
  * and each theme resolves them deliberately.
@@ -74,6 +80,7 @@ data class VoxoraSemanticColors(
     val neutral: Color,
     val explanation: Color,
     val disabled: Color,
+    val glow: Color,
 )
 
 private val OriginalDarkSemantics = VoxoraSemanticColors(
@@ -83,6 +90,7 @@ private val OriginalDarkSemantics = VoxoraSemanticColors(
     neutral = Color(OriginalDarkPalette.Neutral),
     explanation = Color(OriginalDarkPalette.Explanation),
     disabled = Color(OriginalDarkPalette.Disabled),
+    glow = Color(OriginalDarkPalette.Glow),
 )
 
 private val LightTest1Semantics = VoxoraSemanticColors(
@@ -92,6 +100,7 @@ private val LightTest1Semantics = VoxoraSemanticColors(
     neutral = Color(LightTest1Palette.Neutral),
     explanation = Color(LightTest1Palette.Explanation),
     disabled = Color(LightTest1Palette.Disabled),
+    glow = Color(LightTest1Palette.Glow),
 )
 
 private val LightTest2Semantics = VoxoraSemanticColors(
@@ -101,6 +110,7 @@ private val LightTest2Semantics = VoxoraSemanticColors(
     neutral = Color(LightTest2Palette.Neutral),
     explanation = Color(LightTest2Palette.Explanation),
     disabled = Color(LightTest2Palette.Disabled),
+    glow = Color(LightTest2Palette.Glow),
 )
 
 private val LocalVoxoraSemanticColors = staticCompositionLocalOf { OriginalDarkSemantics }
@@ -133,6 +143,13 @@ object VoxoraColors {
     /** Content that is present but not actionable. */
     val disabled: Color
         @Composable @ReadOnlyComposable get() = LocalVoxoraSemanticColors.current.disabled
+
+    /**
+     * The decorative accent wash behind an icon or a brand mark. Never text, a status or a surface.
+     * Each appearance states its own value; a light screen never inherits the dark gold wash.
+     */
+    val glow: Color
+        @Composable @ReadOnlyComposable get() = LocalVoxoraSemanticColors.current.glow
 }
 
 /**
@@ -235,10 +252,10 @@ private val LightTest1Colors = lightColorScheme(
 )
 
 /**
- * **Light Test 2 — Voxora Contrast Light.** The light-side contrast of the original dark theme:
- * cool near-white surfaces and a refined indigo/blue complement in place of the gold. Every role
- * resolves to a value from [LightTest2Palette]; nothing is inherited from the other themes, and in
- * particular this is not an override of Light Test 1.
+ * **Voxora Light — warm cream and gold leaf.** The final light appearance: warm parchment surfaces
+ * (never pure white), the darker Voxora Light gold as `primary`, warm brown shadows and a
+ * gold-at-12 % glow. Every role resolves to a value from [LightTest2Palette]; nothing is inherited
+ * from the other appearances, and it is deliberately not a lightened copy of the dark theme.
  */
 private val LightTest2Colors = lightColorScheme(
     primary = Color(LightTest2Palette.Primary),

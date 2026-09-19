@@ -92,7 +92,7 @@ fun OnboardingScreen(
             Modifier
                 .size(64.dp)
                 .clip(CircleShape)
-                .background(colors.primary.copy(alpha = 0.15f)),
+                .background(VoxoraColors.glow),
             contentAlignment = Alignment.Center,
         ) {
             Text(

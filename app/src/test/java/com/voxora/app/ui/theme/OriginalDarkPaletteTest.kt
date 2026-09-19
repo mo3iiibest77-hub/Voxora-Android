@@ -79,6 +79,13 @@ class OriginalDarkPaletteTest {
     }
 
     @Test
+    fun theGoldGlowIsTheUnchangedDarkWash() {
+        // The accent wash behind icons used to be `primary.copy(alpha = 0.15f)`. The theme token now
+        // carries the same value, so the dark appearance renders exactly as it did before.
+        assertEquals(0x26D4AF37, OriginalDarkPalette.Glow)
+    }
+
+    @Test
     fun theIdentityIsGoldAndNotTheBlueTheBrokenPassIntroduced() {
         // 660f6c9 had made the dark primary a lifted Google blue; the original is gold.
         assertEquals(0xFFD4AF37, OriginalDarkPalette.Gold)

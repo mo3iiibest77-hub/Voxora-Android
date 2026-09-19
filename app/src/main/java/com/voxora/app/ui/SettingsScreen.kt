@@ -666,7 +666,7 @@ private fun SettingsRowHeader(
             modifier = Modifier
                 .size(44.dp)
                 .clip(CircleShape)
-                .background(colors.primary.copy(alpha = 0.15f)),
+                .background(VoxoraColors.glow),
             contentAlignment = Alignment.Center,
         ) {
             Icon(imageVector = icon, contentDescription = null, tint = colors.primary)
@@ -696,7 +696,7 @@ private fun SettingsRowHeader(
 }
 
 /**
- * The theme choice: Original Dark / Light Test 1 / Light Test 2.
+ * The theme choice: Original Dark / Light Test 1 / Voxora Light (the `LIGHT_TEST_2` slot).
  *
  * Three visible options rather than a dropdown, because the appearance is the one setting whose
  * effect should be obvious from the Settings screen itself. Each option is a normal selectable

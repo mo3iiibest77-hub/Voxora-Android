@@ -101,10 +101,10 @@
     <string name="settings_app_language">App language</string>
     <string name="settings_app_language_help">Change the language of Voxora menus. This is separate from the dubbing language.</string>
     <string name="settings_theme_mode">Theme</string>
-    <string name="settings_theme_help">Choose the look of Voxora. The light themes are test variants for comparison.</string>
+    <string name="settings_theme_help">Choose the look of Voxora.</string>
     <string name="settings_theme_original_dark">Original Dark</string>
     <string name="settings_theme_light_test_1">Light Test 1</string>
-    <string name="settings_theme_light_test_2">Light Test 2</string>
+    <string name="settings_theme_light_test_2">Voxora Light</string>
     <string name="settings_app_language_open">Open language settings</string>
     <string name="settings_sign_in">Sign in with Google</string>
     <string name="settings_saved">Saved</string>

@@ -1,38 +1,46 @@
 package com.voxora.app.ui.theme
 
 /**
- * **Light Test 2 — "Voxora Contrast Light"** — raw ARGB values.
+ * **Voxora Light — the warm cream and gold-leaf appearance** — raw ARGB values.
  *
- * The light-side contrast of the original Voxora dark theme. The concept is a deliberate mirror of
- * [OriginalDarkPalette]'s visual language:
+ * This is a **complete, independent light appearance**, not an override of [OriginalDarkPalette] and
+ * not a re-tint of [LightTest1Palette]. It owns every value below; it shares no constant and no
+ * mutable state with either of the other palettes, so a change here can never alter the dark theme
+ * or the Nova-style light candidate, and a change there can never alter this one.
  *
- * | Original Dark            | Contrast Light                    |
- * |--------------------------|-----------------------------------|
- * | near-black page          | cool near-white page              |
- * | dark charcoal surfaces   | cool light surfaces               |
- * | gold primary accent      | refined indigo/blue complement    |
- * | warm beige text          | cool slate text                   |
+ * It occupies the `ThemeMode.LIGHT_TEST_2` slot because that is the stored preference id; the
+ * identifier is historical and is kept so a user's saved choice keeps working. The *appearance* is
+ * the final Voxora Light: warm parchment surfaces, a darker gold identity, and warm brown shadows —
+ * "daytime premium / parchment / gold leaf", deliberately not sterile white Material, not an
+ * Apple-style white UI, and not the generic Android light mode.
  *
- * It is **not** Light Test 1 with different accents and it is **not** a Nova palette. Every value
- * below is stated here; the object shares no constant or mutable state with [LightTest1Palette] or
- * with [OriginalDarkPalette], so either light theme can be deleted without touching the others.
+ * ## The palette is supplied verbatim
+ * Every value the owner specified is used **exactly** as given; nothing is darkened, lightened or
+ * "corrected" to satisfy a contrast target. The measured WCAG ratios are documented below instead,
+ * so the limitation is visible rather than silently designed around. `LightTestPalettesTest` pins
+ * the supplied values and asserts AA only for the roles and surfaces where it actually holds.
  *
- * ## Contrast verification and the two required adjustments
- * The owner supplied the target values together with an explicit instruction to verify WCAG
- * contrast and make the smallest adjustment required for legibility. Two supplied values are not
- * usable as *text* on these light surfaces:
+ * ## Measured contrast (WCAG 2.x, on the page `#F5F2EC` / surface `#EDE9DF` / card `#E4DFD3`)
  *
- * - `Error` was specified as the vivid cyan `#5DE8E8`; on this card it is **1.22:1** — invisible.
- *   It is darkened to `#0B6E8A`, the same cyan family, which reads at **4.77:1** on the card. The
- *   vivid cyan survives as the error container tint (`#CCF2F5`).
- * - `Success` was specified as the vivid magenta `#DC3D95`; on this card it is **3.35:1**. It is
- *   darkened to `#BE185D`, the same magenta family, at **4.95:1**.
+ * | Role | Page | Surface | Card |
+ * |------|------|---------|------|
+ * | `OnSurface` #1A1610 | 16.12 | 14.85 | 13.54 |
+ * | `OnSurfaceVariant` #4A4438 | 8.64 | 7.96 | 7.26 |
+ * | `Explanation` #0369A1 | 5.31 | 4.89 | 4.46 |
+ * | `Neutral` #6B6558 | 5.18 | 4.78 | 4.35 |
+ * | `Primary` (gold) #8B6914 | 4.55 | 4.20 | 3.83 |
+ * | `Secondary` (dim gold) #A07820 | 3.61 | 3.33 | 3.04 |
+ * | `Success` #1A9E57 | 3.10 | 2.85 | 2.60 |
+ * | `Warning` #B88A10 | 2.81 | 2.59 | 2.36 |
+ * | `Error` #C0392B | 4.87 | 4.49 | 4.09 |
  *
- * `Explanation` `#6B7384` measured 3.91:1 on the card, so it is darkened minimally to `#5F6775`
- * (4.68:1) while staying lighter than `OnSurfaceVariant`, i.e. still the less prominent role.
- * `Warning` `#2254E6` (4.95:1), `Primary` `#375CD4` (4.73:1) and every content role already clear
- * AA and are kept exactly as specified. `Neutral` was not supplied; it is derived as a cool slate
- * distinct from both `OnSurfaceVariant` and `Explanation`, at 4.74:1.
+ * **AA holds for the content and help roles on the page and the surface** (the primary reading
+ * surfaces). It is short on the card for `Explanation` (4.46) and `Neutral` (4.35) — a hair below
+ * 4.5 — and the accent/status tones are below AA as *text* on the neutral card by design; they are
+ * used as indicators and as fills paired with their own `on*` colour, where the pair clears AA
+ * (`onPrimary`/`primary` 5.09, `onPrimaryContainer`/`primaryContainer` 6.75,
+ * `onSecondaryContainer`/`secondaryContainer` 7.91, `onError`/`error` 5.44,
+ * `onErrorContainer`/`errorContainer` 8.10). `Disabled` is exempt but stays visible (2.15–2.56).
  *
  * ## Why raw values and not `Color`
  * The local harness cannot compile Compose, so keeping the numbers in a plain Kotlin object is what
@@ -40,96 +48,103 @@ package com.voxora.app.ui.theme
  */
 internal object LightTest2Palette {
 
-    // ---- surfaces ------------------------------------------------------------------------
+    // ---- surfaces: warm cream, never white ------------------------------------------------
 
-    /** Cool near-white page — the light counterpart of the dark theme's near-black. */
-    const val Background: Long = 0xFFF5F7FB
+    /** The warm cream page. Deliberately not `#FFFFFF`. */
+    const val Background: Long = 0xFFF5F2EC
 
-    /** The base cool light surface. */
-    const val Surface: Long = 0xFFEDF1F7
+    /** The base light surface. */
+    const val Surface: Long = 0xFFEDE9DF
 
     /** Card / secondary surface: grouped rows, the selector's resting fill. */
-    const val SurfaceVariant: Long = 0xFFE4E9F1
+    const val SurfaceVariant: Long = 0xFFE4DFD3
 
-    /** Subtle border. */
-    const val OutlineVariant: Long = 0xFFD3D9E3
+    const val SurfaceContainerLowest: Long = 0xFFFAF8F3
+    const val SurfaceContainerLow: Long = 0xFFF5F2EC
+    const val SurfaceContainer: Long = 0xFFEAE6DC
+    const val SurfaceContainerHigh: Long = 0xFFDEDAD0
+    const val SurfaceContainerHighest: Long = 0xFFD5D0C4
 
-    const val SurfaceContainerLowest: Long = 0xFFFFFFFF
-    const val SurfaceContainerLow: Long = 0xFFF5F7FB
-    const val SurfaceContainer: Long = 0xFFEDF1F7
-    const val SurfaceContainerHigh: Long = 0xFFE4E9F1
-    const val SurfaceContainerHighest: Long = 0xFFDCE2EC
+    // ---- borders: visible but soft, never harsh black --------------------------------------
 
     /** A stronger border, for a focused or selected outline. */
-    const val Outline: Long = 0xFF667085
+    const val Outline: Long = 0xFFB8B0A0
 
-    // ---- text hierarchy ------------------------------------------------------------------
+    /** Subtle border. */
+    const val OutlineVariant: Long = 0xFFD0C9BC
 
-    /** Primary content and screen titles — the cool counterpart of the warm light text. */
-    const val OnSurface: Long = 0xFF101827
+    // ---- text hierarchy -------------------------------------------------------------------
+
+    /** Primary content and screen titles. */
+    const val OnSurface: Long = 0xFF1A1610
 
     /** Secondary content: supporting labels, values, subtitles. */
-    const val OnSurfaceVariant: Long = 0xFF4B5870
+    const val OnSurfaceVariant: Long = 0xFF4A4438
 
-    /**
-     * Help and explanatory text. Less prominent than secondary content by design; see the class
-     * note for the minimal darkening from the supplied `#6B7384` to clear AA on the card.
-     */
-    const val Explanation: Long = 0xFF5F6775
+    /** Help and explanatory text: the owner's deeper navy-blue information tone. */
+    const val Explanation: Long = 0xFF0369A1
+
+    /** Idle or connecting. Neither good nor bad. */
+    const val Neutral: Long = 0xFF6B6558
 
     /** Present but not actionable. */
-    const val Disabled: Long = 0xFF585E6B
+    const val Disabled: Long = 0xFFA09888
 
-    /** Idle or connecting. Derived: a cool slate distinct from secondary content and from help. */
-    const val Neutral: Long = 0xFF556687
+    // ---- the gold identity ----------------------------------------------------------------
 
-    // ---- accents -------------------------------------------------------------------------
-
-    /** The refined indigo/blue that replaces the dark theme's gold as the primary action colour. */
-    const val Primary: Long = 0xFF375CD4
-
-    /** The deeper member of the same blue, for containers and the secondary/tertiary accents. */
-    const val PrimaryDim: Long = 0xFF2E50B8
+    /** The darker Voxora Light gold. Primary action and the tint of the tonal surfaces. */
+    const val Primary: Long = 0xFF8B6914
 
     const val OnPrimary: Long = 0xFFFFFFFF
-    const val PrimaryContainer: Long = 0xFFDDE5FF
-    const val OnPrimaryContainer: Long = 0xFF1D2E6B
+    const val PrimaryContainer: Long = 0xFFF0E4B8
+    const val OnPrimaryContainer: Long = 0xFF5C4A10
 
-    /** Secondary accent — the deeper blue of the same family. */
-    const val Secondary: Long = PrimaryDim
-    const val OnSecondary: Long = 0xFFFFFFFF
-    const val SecondaryContainer: Long = 0xFFE1E7F0
-    const val OnSecondaryContainer: Long = 0xFF2A3444
+    /** The dim gold secondary accent. */
+    const val Secondary: Long = 0xFFA07820
 
-    /** Tertiary accent — the same blue family keeps the theme monochrome-cool and on-concept. */
-    const val Tertiary: Long = PrimaryDim
-    const val OnTertiary: Long = 0xFFFFFFFF
-    const val TertiaryContainer: Long = 0xFFE1E7F0
-    const val OnTertiaryContainer: Long = 0xFF2A3444
+    /**
+     * Content on a [Secondary] fill.
+     *
+     * Not supplied by the owner; derived as the same warm near-black as [OnSurface]. No component
+     * paints text on a `secondary` fill today, so this pair is declared for completeness and
+     * measures 4.46:1 if it is ever used.
+     */
+    const val OnSecondary: Long = OnSurface
+
+    const val SecondaryContainer: Long = 0xFFE8DFC8
+    const val OnSecondaryContainer: Long = 0xFF4A3E20
+
+    /** Tertiary stays in the gold family so the appearance reads as one warm system. */
+    const val Tertiary: Long = Secondary
+    const val OnTertiary: Long = OnSecondary
+    const val TertiaryContainer: Long = SecondaryContainer
+    const val OnTertiaryContainer: Long = OnSecondaryContainer
 
     // ---- status --------------------------------------------------------------------------
 
-    /**
-     * The complementary of the dark theme's success green: a magenta. Adjusted from the supplied
-     * `#DC3D95` to `#BE185D` for text legibility (see the class note).
-     */
-    const val Success: Long = 0xFFBE185D
-
-    /** The complementary of the dark theme's gold warning: a strong blue. Kept as supplied. */
-    const val Warning: Long = 0xFF2254E6
-
-    /**
-     * The complementary of the dark theme's error red: a cyan. Adjusted from the supplied
-     * `#5DE8E8` to `#0B6E8A` for text legibility (see the class note).
-     */
-    const val Error: Long = 0xFF0B6E8A
+    const val Success: Long = 0xFF1A9E57
+    const val Warning: Long = 0xFFB88A10
+    const val Error: Long = 0xFFC0392B
 
     /** Stopped, failed, refused — the same value as [Error], as in the dark palette. */
     const val Danger: Long = Error
 
     const val OnError: Long = 0xFFFFFFFF
+    const val ErrorContainer: Long = 0xFFFAD7D7
+    const val OnErrorContainer: Long = 0xFF7A1515
 
-    /** The light tint of the supplied vivid cyan, so the error family stays visible as a fill. */
-    const val ErrorContainer: Long = 0xFFCCF2F5
-    const val OnErrorContainer: Long = 0xFF083B44
+    // ---- the light design language ---------------------------------------------------------
+
+    /**
+     * The gold glow / accent wash behind icons and brand marks: `rgba(139,105,20,0.12)` — the
+     * supplied [Primary] at 12 % alpha. Deliberately **not** the dark theme's gold-at-15 % wash.
+     */
+    const val Glow: Long = 0x1F8B6914
+
+    /**
+     * The warm brown shadow tone: `rgba(100,80,30,0.12)`. The declared shadow language for this
+     * appearance — never a generic `rgba(0,0,0,…)`. Nothing draws a custom shadow today (the UI
+     * uses tonal elevation, not drop shadows), so this is a declared token rather than a call site.
+     */
+    const val Shadow: Long = 0x1F64501E
 }

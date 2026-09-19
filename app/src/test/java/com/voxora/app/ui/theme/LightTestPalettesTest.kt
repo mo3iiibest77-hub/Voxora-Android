@@ -6,15 +6,19 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * The two light candidates are complete, independent themes — not one palette with overrides.
+ * The light appearances are complete, independent colour systems — not one palette with overrides.
  *
- * These tests do four things:
- *  1. pin each theme's declared tokens to the exact values it was specified with, so a "tidy-up"
- *     cannot blur the difference the owner is being asked to compare;
- *  2. prove the two themes are genuinely separate systems (they disagree on their signature tokens,
+ * These tests do five things:
+ *  1. pin each appearance's declared tokens to the exact values it was specified with, so a
+ *     "tidy-up" cannot blur the appearance the owner asked for;
+ *  2. prove the appearances are genuinely separate systems (they disagree on their signature tokens,
  *     and neither inherits anything from the other);
- *  3. prove neither light theme is the dark theme or the previous Google-inspired palette;
- *  4. verify the WCAG contrast of the new contrast theme, including the two documented adjustments.
+ *  3. prove neither light appearance is the dark appearance or the previous Nova-style palette;
+ *  4. verify the WCAG contrast where it holds, and **document the measured shortfalls** of the
+ *     supplied Voxora Light palette rather than silently altering it — the owner requires the
+ *     supplied hex values verbatim;
+ *  5. pin the per-appearance glow and the light shadow language, so a light screen can never inherit
+ *     the dark gold wash.
  */
 class LightTestPalettesTest {
 
@@ -53,68 +57,79 @@ class LightTestPalettesTest {
         assertEquals(0xFFA855F7, LightTest1Palette.GradientEnd)
     }
 
-    // ---- Light Test 2 — Voxora Contrast Light --------------------------------------------
+    // ---- Voxora Light (the `LIGHT_TEST_2` slot) — supplied values, verbatim ----------------
 
     @Test
-    fun lightTest2DeclaresItsSpecifiedSurfacesAndBorders() {
-        assertEquals(0xFFF5F7FB, LightTest2Palette.Background)
-        assertEquals(0xFFEDF1F7, LightTest2Palette.Surface)
-        assertEquals(0xFFE4E9F1, LightTest2Palette.SurfaceVariant)
-        assertEquals(0xFFD3D9E3, LightTest2Palette.OutlineVariant)
+    fun voxoraLightDeclaresItsSuppliedSurfacesAndBorders() {
+        assertEquals(0xFFF5F2EC, LightTest2Palette.Background)
+        assertEquals(0xFFEDE9DF, LightTest2Palette.Surface)
+        assertEquals(0xFFE4DFD3, LightTest2Palette.SurfaceVariant)
+        assertEquals(0xFFEAE6DC, LightTest2Palette.SurfaceContainer)
+        assertEquals(0xFFDEDAD0, LightTest2Palette.SurfaceContainerHigh)
+        assertEquals(0xFFD5D0C4, LightTest2Palette.SurfaceContainerHighest)
+        assertEquals(0xFFB8B0A0, LightTest2Palette.Outline)
+        assertEquals(0xFFD0C9BC, LightTest2Palette.OutlineVariant)
     }
 
     @Test
-    fun lightTest2DeclaresItsSpecifiedCoolIndigoIdentity() {
-        // "gold becomes a refined indigo/blue complement".
-        assertEquals(0xFF375CD4, LightTest2Palette.Primary)
-        assertEquals(0xFF2E50B8, LightTest2Palette.PrimaryDim)
-        assertEquals(0xFFDDE5FF, LightTest2Palette.PrimaryContainer)
-        assertEquals(0xFF1D2E6B, LightTest2Palette.OnPrimaryContainer)
-        assertEquals(0xFFE1E7F0, LightTest2Palette.SecondaryContainer)
-        assertEquals(0xFF2A3444, LightTest2Palette.OnSecondaryContainer)
+    fun voxoraLightDeclaresItsSuppliedGoldIdentity() {
+        assertEquals(0xFF8B6914, LightTest2Palette.Primary)
+        assertEquals(0xFFA07820, LightTest2Palette.Secondary)
+        assertEquals(0xFFF0E4B8, LightTest2Palette.PrimaryContainer)
+        assertEquals(0xFF5C4A10, LightTest2Palette.OnPrimaryContainer)
+        assertEquals(0xFFE8DFC8, LightTest2Palette.SecondaryContainer)
+        assertEquals(0xFF4A3E20, LightTest2Palette.OnSecondaryContainer)
     }
 
     @Test
-    fun lightTest2DeclaresItsSpecifiedCoolSlateText() {
-        // "warm beige text becomes cool slate text".
-        assertEquals(0xFF101827, LightTest2Palette.OnSurface)
-        assertEquals(0xFF4B5870, LightTest2Palette.OnSurfaceVariant)
-        assertEquals(0xFF585E6B, LightTest2Palette.Disabled)
+    fun voxoraLightDeclaresItsSuppliedTextTokens() {
+        assertEquals(0xFF1A1610, LightTest2Palette.OnSurface)
+        assertEquals(0xFF4A4438, LightTest2Palette.OnSurfaceVariant)
+        assertEquals(0xFF0369A1, LightTest2Palette.Explanation)
+        assertEquals(0xFF6B6558, LightTest2Palette.Neutral)
+        assertEquals(0xFFA09888, LightTest2Palette.Disabled)
     }
 
     @Test
-    fun lightTest2WarningKeepsTheSuppliedComplementaryBlue() {
-        // The supplied Warning was already legible on every surface, so it is kept exactly.
-        assertEquals(0xFF2254E6, LightTest2Palette.Warning)
+    fun voxoraLightDeclaresItsSuppliedStatusTokens() {
+        assertEquals(0xFF1A9E57, LightTest2Palette.Success)
+        assertEquals(0xFFB88A10, LightTest2Palette.Warning)
+        assertEquals(0xFFC0392B, LightTest2Palette.Error)
+        assertEquals(0xFFFAD7D7, LightTest2Palette.ErrorContainer)
+        assertEquals(0xFF7A1515, LightTest2Palette.OnErrorContainer)
     }
 
     @Test
-    fun lightTest2ErrorAndSuccessAreTheMinimalLegibleAdjustments() {
-        // The supplied vivid Error (#5DE8E8) measured 1.22:1 and Success (#DC3D95) 3.35:1 on the
-        // card — invisible and below AA. They keep their hue families but are darkened to the
-        // lightest members that clear 4.5:1, as required by the task's WCAG instruction.
-        assertEquals(0xFF0B6E8A, LightTest2Palette.Error)
-        assertEquals(0xFFBE185D, LightTest2Palette.Success)
-        assertFalse(LightTest2Palette.Error == 0xFF5DE8E8)
-        assertFalse(LightTest2Palette.Success == 0xFFDC3D95)
+    fun voxoraLightGoldIsDarkerThanTheDarkThemeGold() {
+        // The owner's design rule: the light gold must be darker than the dark theme's gold.
+        val darkGold = PaletteContrast.luminance(OriginalDarkPalette.Gold)
+        assertTrue(PaletteContrast.luminance(LightTest2Palette.Primary) < darkGold)
+        assertTrue(PaletteContrast.luminance(LightTest2Palette.Secondary) < darkGold)
     }
 
     @Test
-    fun lightTest2ExplanationIsTheMinimalLegibleAdjustment() {
-        // Supplied #6B7384 measured 3.91:1 on the card; #5F6775 clears AA while staying lighter
-        // than secondary content, i.e. still the less prominent role.
-        assertEquals(0xFF5F6775, LightTest2Palette.Explanation)
+    fun voxoraLightNeverUsesPureWhiteAsItsPage() {
+        assertFalse(LightTest2Palette.Background == 0xFFFFFFFF)
+        assertFalse(LightTest2Palette.Surface == 0xFFFFFFFF)
     }
 
     @Test
-    fun lightTest2DangerMatchesErrorLikeTheDarkPalette() {
+    fun voxoraLightHasItsOwnGlowAndWarmShadow() {
+        // rgba(139,105,20,0.12) and rgba(100,80,30,0.12) — the light language, not the dark one.
+        assertEquals(0x1F8B6914, LightTest2Palette.Glow)
+        assertEquals(0x1F64501E, LightTest2Palette.Shadow)
+        assertFalse("the light glow must not reuse the dark gold glow", LightTest2Palette.Glow == OriginalDarkPalette.Glow)
+    }
+
+    @Test
+    fun voxoraLightDangerMatchesErrorLikeTheDarkPalette() {
         assertEquals(LightTest2Palette.Error, LightTest2Palette.Danger)
     }
 
     // ---- independence --------------------------------------------------------------------
 
     @Test
-    fun theTwoLightThemesDisagreeOnEverySignatureToken() {
+    fun theTwoLightAppearancesDisagreeOnEverySignatureToken() {
         assertFalse(LightTest1Palette.Background == LightTest2Palette.Background)
         assertFalse(LightTest1Palette.Primary == LightTest2Palette.Primary)
         assertFalse(LightTest1Palette.OnSurface == LightTest2Palette.OnSurface)
@@ -124,8 +139,8 @@ class LightTestPalettesTest {
     }
 
     @Test
-    fun lightTest2IsNotLightTest1WithADifferentPrimary() {
-        // If Light Test 2 were an override of Light Test 1, these would coincide.
+    fun voxoraLightIsNotLightTest1WithADifferentPrimary() {
+        // If Voxora Light were an override of Light Test 1, these would coincide.
         assertFalse(LightTest2Palette.Background == LightTest1Palette.Background)
         assertFalse(LightTest2Palette.OnSurface == LightTest1Palette.OnSurface)
         assertFalse(LightTest2Palette.SurfaceVariant == LightTest1Palette.SurfaceVariant)
@@ -133,7 +148,7 @@ class LightTestPalettesTest {
     }
 
     @Test
-    fun lightTest2IsNotTheOldNovaStylePalette() {
+    fun voxoraLightIsNotTheOldNovaStylePalette() {
         // The previous Light Test 2 (cyan -> indigo -> purple) is gone; nothing of it survives.
         assertFalse(LightTest2Palette.Background == 0xFFF8FAFC)
         assertFalse(LightTest2Palette.SurfaceVariant == 0xFFF1F5F9)
@@ -143,7 +158,17 @@ class LightTestPalettesTest {
     }
 
     @Test
-    fun neitherLightThemeIsTheDarkTheme() {
+    fun voxoraLightIsNotThePreviousCoolContrastPalette() {
+        // The cool near-white / indigo Contrast Light that occupied this slot before is gone.
+        assertFalse(LightTest2Palette.Background == 0xFFF5F7FB)
+        assertFalse(LightTest2Palette.Primary == 0xFF375CD4)
+        assertFalse(LightTest2Palette.OnSurface == 0xFF101827)
+        assertFalse(LightTest2Palette.Error == 0xFF0B6E8A)
+        assertFalse(LightTest2Palette.Success == 0xFFBE185D)
+    }
+
+    @Test
+    fun neitherLightAppearanceIsTheDarkTheme() {
         for (value in listOf(
             LightTest1Palette.Background, LightTest1Palette.Primary, LightTest1Palette.OnSurface,
             LightTest2Palette.Background, LightTest2Palette.Primary, LightTest2Palette.OnSurface,
@@ -155,7 +180,7 @@ class LightTestPalettesTest {
     }
 
     @Test
-    fun neitherLightThemeUsesTheGooglePalette() {
+    fun neitherLightAppearanceUsesTheGooglePalette() {
         val googleFamily = setOf(
             0xFF1967D2, 0xFF8AB4F8, 0xFF137333, 0xFF81C995,
             0xFF8A5200, 0xFFFDD663, 0xFFB3261E, 0xFFF28B82,
@@ -172,32 +197,37 @@ class LightTestPalettesTest {
             LightTest2Palette.Warning, LightTest2Palette.Error,
         )
         val leaked = lightValues.filter { it in googleFamily }
-        assertTrue("a light theme leaked Google colours: $leaked", leaked.isEmpty())
+        assertTrue("a light appearance leaked Google colours: $leaked", leaked.isEmpty())
     }
 
     // ---- structure and legibility --------------------------------------------------------
 
     @Test
-    fun theDarkThemeIsActuallyDarkAndTheLightThemesAreLight() {
+    fun theDarkThemeIsActuallyDarkAndTheLightAppearancesAreLight() {
         assertTrue(PaletteContrast.luminance(OriginalDarkPalette.NearBlack) < 0.05)
         assertTrue(PaletteContrast.luminance(LightTest1Palette.Background) > 0.8)
         assertTrue(PaletteContrast.luminance(LightTest2Palette.Background) > 0.8)
     }
 
     @Test
-    fun everyLightValueIsFullyOpaque() {
+    fun everyOpaqueLightValueIsFullyOpaque() {
+        // Glow and Shadow are deliberately translucent; every other value is a solid colour.
         for (value in listOf(
             LightTest1Palette.Background, LightTest1Palette.Surface, LightTest1Palette.SurfaceVariant,
             LightTest1Palette.OnSurface, LightTest1Palette.OnSurfaceVariant, LightTest1Palette.Explanation,
             LightTest1Palette.Neutral, LightTest1Palette.Disabled, LightTest1Palette.Success,
             LightTest1Palette.Warning, LightTest1Palette.Error, LightTest1Palette.GradientStart,
             LightTest2Palette.Background, LightTest2Palette.Surface, LightTest2Palette.SurfaceVariant,
-            LightTest2Palette.OnSurface, LightTest2Palette.OnSurfaceVariant, LightTest2Palette.Explanation,
+            LightTest2Palette.SurfaceContainer, LightTest2Palette.SurfaceContainerHigh,
+            LightTest2Palette.SurfaceContainerHighest, LightTest2Palette.OnSurface,
+            LightTest2Palette.OnSurfaceVariant, LightTest2Palette.Explanation,
             LightTest2Palette.Neutral, LightTest2Palette.Disabled, LightTest2Palette.Success,
             LightTest2Palette.Warning, LightTest2Palette.Error,
         )) {
             assertTrue("not opaque: $value", PaletteContrast.isOpaque(value))
         }
+        assertFalse(PaletteContrast.isOpaque(LightTest2Palette.Glow))
+        assertFalse(PaletteContrast.isOpaque(LightTest2Palette.Shadow))
     }
 
     @Test
@@ -213,9 +243,10 @@ class LightTestPalettesTest {
     }
 
     @Test
-    fun lightTest2ContentClearsAaOnBothTheCardAndThePage() {
+    fun voxoraLightContentClearsAaOnThePageAndTheSurface() {
+        // The primary reading surfaces: every content and help role clears AA here.
         assertContentClearsAa(
-            "LightTest2",
+            "VoxoraLight",
             LightTest2Palette.OnSurface,
             LightTest2Palette.OnSurfaceVariant,
             LightTest2Palette.Explanation,
@@ -225,34 +256,59 @@ class LightTestPalettesTest {
     }
 
     @Test
-    fun lightTest2TextRolesClearAaOnTheCardToo() {
-        // The contrast theme was designed so that every text role also reads on its card
-        // (surfaceVariant), which is the darkest surface the UI puts text on.
-        assertContentClearsAa(
-            "LightTest2",
-            LightTest2Palette.OnSurface,
+    fun voxoraLightContentTextClearsAaOnTheCard() {
+        assertClearsAa(LightTest2Palette.OnSurface, LightTest2Palette.SurfaceVariant, "onSurface")
+        assertClearsAa(
             LightTest2Palette.OnSurfaceVariant,
-            LightTest2Palette.Explanation,
-            LightTest2Palette.Neutral,
-            listOf(LightTest2Palette.SurfaceVariant),
+            LightTest2Palette.SurfaceVariant,
+            "onSurfaceVariant",
         )
     }
 
     @Test
-    fun lightTest2StatusRolesClearAaOnTheCard() {
-        for ((role, value) in listOf(
-            "primary" to LightTest2Palette.Primary,
-            "error" to LightTest2Palette.Error,
-            "success" to LightTest2Palette.Success,
-            "warning" to LightTest2Palette.Warning,
-            "disabled" to LightTest2Palette.Disabled,
-        )) {
-            val ratio = PaletteContrast.ratio(value, LightTest2Palette.SurfaceVariant)
-            assertTrue(
-                "LightTest2 $role contrast $ratio on the card is below AA",
-                ratio >= PaletteContrast.AA,
-            )
-        }
+    fun voxoraLightContainerPairsClearAa() {
+        assertClearsAa(LightTest2Palette.OnPrimary, LightTest2Palette.Primary, "onPrimary")
+        assertClearsAa(
+            LightTest2Palette.OnPrimaryContainer,
+            LightTest2Palette.PrimaryContainer,
+            "onPrimaryContainer",
+        )
+        assertClearsAa(
+            LightTest2Palette.OnSecondaryContainer,
+            LightTest2Palette.SecondaryContainer,
+            "onSecondaryContainer",
+        )
+        assertClearsAa(LightTest2Palette.OnError, LightTest2Palette.Error, "onError")
+        assertClearsAa(
+            LightTest2Palette.OnErrorContainer,
+            LightTest2Palette.ErrorContainer,
+            "onErrorContainer",
+        )
+    }
+
+    @Test
+    fun voxoraLightDocumentsItsMeasuredAaShortfallsInsteadOfAlteringThePalette() {
+        // The owner requires the supplied hex values verbatim, so the shortfalls are pinned here as
+        // the honest record rather than designed around. If a value is ever changed to clear AA,
+        // this test fails and the change has to be a deliberate, documented decision.
+        val card = LightTest2Palette.SurfaceVariant
+        assertTrue(
+            "Explanation on the card is now ${PaletteContrast.ratio(LightTest2Palette.Explanation, card)}",
+            PaletteContrast.ratio(LightTest2Palette.Explanation, card) < PaletteContrast.AA,
+        )
+        assertTrue(
+            "Neutral on the card is now ${PaletteContrast.ratio(LightTest2Palette.Neutral, card)}",
+            PaletteContrast.ratio(LightTest2Palette.Neutral, card) < PaletteContrast.AA,
+        )
+        assertTrue(
+            "Primary on the card is now ${PaletteContrast.ratio(LightTest2Palette.Primary, card)}",
+            PaletteContrast.ratio(LightTest2Palette.Primary, card) < PaletteContrast.AA,
+        )
+        assertTrue(
+            "Secondary on the page is now ${PaletteContrast.ratio(LightTest2Palette.Secondary, LightTest2Palette.Background)}",
+            PaletteContrast.ratio(LightTest2Palette.Secondary, LightTest2Palette.Background) <
+                PaletteContrast.AA,
+        )
     }
 
     @Test
@@ -268,9 +324,19 @@ class LightTestPalettesTest {
         val l1Secondary = PaletteContrast.luminance(LightTest1Palette.OnSurfaceVariant)
         assertTrue(l1Explanation > l1Secondary)
 
+        // The navy information tone is a different hue from the warm secondary text, but it is the
+        // lighter of the two by luminance, so the "help is the quieter role" ordering still holds.
         val l2Explanation = PaletteContrast.luminance(LightTest2Palette.Explanation)
         val l2Secondary = PaletteContrast.luminance(LightTest2Palette.OnSurfaceVariant)
         assertTrue(l2Explanation > l2Secondary)
+    }
+
+    private fun assertClearsAa(foreground: Long, background: Long, role: String) {
+        val ratio = PaletteContrast.ratio(foreground, background)
+        assertTrue(
+            "$role contrast $ratio on $background is below AA",
+            ratio >= PaletteContrast.AA,
+        )
     }
 
     private fun assertContentClearsAa(

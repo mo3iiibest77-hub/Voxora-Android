@@ -37,6 +37,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.voxora.app.R
+import com.voxora.app.ui.theme.VoxoraColors
 import com.voxora.app.ui.theme.VoxoraTheme
 
 /**
@@ -67,7 +68,7 @@ fun HomeScreen(
             modifier = Modifier
                 .size(72.dp)
                 .clip(CircleShape)
-                .background(colors.primary.copy(alpha = 0.15f)),
+                .background(VoxoraColors.glow),
             contentAlignment = Alignment.Center,
         ) {
             Text(
@@ -137,7 +138,7 @@ private fun ProductCard(
                 modifier = Modifier
                     .size(44.dp)
                     .clip(CircleShape)
-                    .background(colors.primary.copy(alpha = 0.15f)),
+                    .background(VoxoraColors.glow),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(imageVector = icon, contentDescription = null, tint = colors.primary)

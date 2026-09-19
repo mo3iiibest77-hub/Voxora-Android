@@ -362,7 +362,7 @@ private fun DocumentCard(
                     modifier = Modifier
                         .size(44.dp)
                         .clip(CircleShape)
-                        .background(colors.primary.copy(alpha = 0.15f)),
+                        .background(VoxoraColors.glow),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
@@ -553,7 +553,7 @@ private fun LanguageRow(
                 modifier = Modifier
                     .size(44.dp)
                     .clip(CircleShape)
-                    .background(colors.primary.copy(alpha = 0.15f)),
+                    .background(VoxoraColors.glow),
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
@@ -751,7 +751,7 @@ private fun BubbleCard(
                     modifier = Modifier
                         .size(44.dp)
                         .clip(CircleShape)
-                        .background(colors.primary.copy(alpha = 0.15f)),
+                        .background(VoxoraColors.glow),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
@@ -1159,7 +1159,7 @@ private fun ChunkHeader(
                     modifier = Modifier
                         .size(44.dp)
                         .clip(CircleShape)
-                        .background(colors.primary.copy(alpha = 0.15f)),
+                        .background(VoxoraColors.glow),
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(

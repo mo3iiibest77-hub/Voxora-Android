@@ -45,6 +45,15 @@ same role render at the same scale and a screen can never drift from the type sc
 
 ## 2. Persian is written, not translated — and RTL is fixed in the layout
 
+> **The canonical Persian standard.** The current Persian UI writing and localization style is the
+> canonical Persian standard for Voxora and must be preserved across all future features. Before
+> adding or modifying any Persian text, **inspect the existing Persian text first and match it** —
+> wording, sentence structure, register, terminology, characters, spacing and نیم‌فاصله (ZWNJ),
+> punctuation and RTL/BiDi behaviour. Extend the existing Persian language system; never start a new
+> writing style, never machine-translate, never hand-reverse a string, never pad with spaces, and
+> never add an LRM/RLM/LTR/RTL hack unless a specific BiDi case technically requires it. This is a
+> permanent project-wide Localization and UI Design Principle, not a visual preference.
+
 **The rule.** Every user-visible string exists in `res/values/strings.xml` and
 `res/values-fa/strings.xml`. The Persian is authored in one register, uses the product's fixed
 terminology, and is never machine-translated or transliterated.
@@ -100,7 +109,8 @@ point of the role.
 - **Each theme states its own value, and the role is not defined by being dimmer.** Original Dark
   uses the owner's dedicated icy/electric blue `#7DD3FC`, which is *brighter* than its warm
   secondary text and is kept distinct by hue and dedicated use; Light Test 1 uses `#64748B` and
-  Light Test 2 the cool slate `#5F6775`, where it is genuinely lighter than secondary content.
+  Voxora Light the deeper navy-blue `#0369A1`, where it is the lighter of the two by luminance and
+  so still reads as the quieter role.
 - Never make it a brand gold or an accent, and never make it an action or a status colour.
 
 ---

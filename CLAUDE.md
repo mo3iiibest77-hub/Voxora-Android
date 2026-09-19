@@ -163,7 +163,69 @@ When owner reports a bug → diagnose from code, write targeted fix prompt.
 > must not expire with any single feature. Add a rule to `AgentMD.md` only when it
 > applies to every future UI change; everything else belongs in `AGENTS.md`.
 
-### Last change (this session) — the dub-side playback timeline: an explicit playhead and a bounded backlog
+### Last change (this session) — the independent Voxora Light appearance, the permanent Persian standard, and the accent-wash token
+
+**DONE — the `LIGHT_TEST_2` slot now holds the final Voxora Light appearance, built as a completely
+independent light UI variant. No Live Dub change, no Reader architecture change, and the existing
+dark and Light Test 1 appearances render byte-identically.**
+
+**The governing instruction.** The new light UI had to be a **separate, independent Light UI
+variant** — not "convert the existing UI to light". The supplied palette had to be used **verbatim**
+(no reinterpretation, no WCAG-driven edits), the gold had to stay exactly `#8B6914` / `#A07820`, and
+WCAG handling was fixed by the owner's choice: **"verbatim, document misses"**. The existing UI's
+visual identity, Live Dub sync and Reader architecture were out of scope.
+
+**What changed.**
+
+- **`LightTest2Palette.kt` is now the Voxora Light palette** — warm cream, gold leaf, warm brown
+  shadows. Supplied values used exactly: background `#F5F2EC`, surface `#EDE9DF`, card
+  `#E4DFD3`, surfaceContainer `#EAE6DC` / high `#DEDAD0` / highest `#D5D0C4`, outline `#B8B0A0` /
+  variant `#D0C9BC`, onSurface `#1A1610`, onSurfaceVariant `#4A4438`, explanation `#0369A1`,
+  neutral `#6B6558`, disabled `#A09888`, primary `#8B6914`, secondary `#A07820`,
+  primaryContainer `#F0E4B8` / on `#5C4A10`, secondaryContainer `#E8DFC8` / on `#4A3E20`,
+  success `#1A9E57`, warning `#B88A10`, error/danger `#C0392B`, errorContainer `#FAD7D7` / on
+  `#7A1515`. Glow `0x1F8B6914` = `rgba(139,105,20,0.12)`; shadow `0x1F64501E` =
+  `rgba(100,80,30,0.12)`. Roles the owner did not supply (onPrimary, onSecondary, onError,
+  onTertiary, surfaceContainerLowest, tertiary) are **derived and documented as derived** in the
+  KDoc — the supplied values themselves are never touched.
+- **WCAG is measured and the shortfalls are documented, not designed around.** Measured ratios are
+  in the palette KDoc: content and help roles clear AA on the page and surface; explanation 4.46 and
+  neutral 4.35 fall a hair short on the card, and primary 3.83 / secondary 3.61 are below AA as
+  *text* on the cream surfaces. The values are kept verbatim and the shortfalls are **pinned by a
+  test** (`voxoraLightDocumentsItsMeasuredAaShortfallsInsteadOfAlteringThePalette`) so a future
+  "fix" has to be a deliberate, documented decision. Container pairs (`onPrimary`/`primary` 5.09,
+  `onPrimaryContainer` 6.75, `onSecondaryContainer` 7.91, `onError` 5.44, `onErrorContainer` 8.10)
+  all clear AA.
+- **A per-appearance `glow` role replaces the alpha-at-the-call-site.** The gold/indigo wash behind
+  an icon or brand mark was `colors.primary.copy(alpha = 0.15f)` at ten call sites. That is exactly
+  how a light screen would inherit the dark appearance's wash, so the wash is now the semantic role
+  `VoxoraColors.glow`: Original Dark `0x26D4AF37` (`#D4AF37` @15 % — unchanged), Light Test 1
+  `0x264F46E5` (`#4F46E5` @15 % — unchanged), Voxora Light `0x1F8B6914` (the supplied @12 %). Ten
+  call sites updated: `ReaderScreen` (4), `DubScreen` (1), `OnboardingScreen` (1), `SettingsScreen`
+  (1), `CloudAccountCard` (1), `HomeScreen` (2). `OriginalDarkPalette` and `LightTest1Palette` each
+  gained only this additive `Glow` constant; no existing value moved, so the dark and Light Test 1
+  appearances render identically to before.
+- **Strings and label.** `settings_theme_light_test_2` → "Voxora Light" / "روشن ⁨Voxora⁩";
+  `settings_theme_help` trimmed to "Choose the look of Voxora." / "ظاهر ⁨Voxora⁩ را انتخاب کن." (the
+  "test variants for comparison" wording is no longer true). The `LIGHT_TEST_2` preference id is kept
+  unchanged so a saved choice keeps working; `ThemeMode.kt` KDoc explains it is historical.
+- **The permanent Persian standard is now project law.** `AGENTS.md` §10 and `AgentMD.md` §2 carry
+  the same canonical blockquote: the current Persian UI writing/localization style is the reference
+  for all future Persian text; inspect the existing strings first and match wording, structure,
+  register, terminology, characters, نیم‌فاصله (ZWNJ), punctuation and RTL/BiDi behaviour; never
+  machine-translate, hand-reverse or pad; never add an LRM/RLM/LTR/RTL hack unless a specific BiDi
+  case requires it.
+
+**Verification.** `validate-cloud.sh` (pure JVM, kotlinc + JUnit, `-ea`): **489 tests pass**, with
+the rewritten `LightTestPalettesTest` and the extended `OriginalDarkPaletteTest` included. All six
+static guards pass — `themecheck.py` (no colour literal outside the theme layer), `themeguard.py`
+(three modes, independent palettes, no deleted-Light-Test-2 leftover, no bundled font),
+`checkimports.py`, `stringcheck.py` (values/values-fa parity), `bidi_fa.py`, `dubguard.py`. **Not
+verified on a device** — the light appearance's real-device look, the gold-on-cream legibility at
+small sizes, and the warm-brown shadow language are owner-verification items. The shadow token is
+declared but nothing draws a custom shadow today (the UI uses tonal elevation).
+
+### Last change (previous session) — the dub-side playback timeline: an explicit playhead and a bounded backlog
 
 **DONE — one additive change to Live Dub, no Reader change, no architecture replacement.**
 

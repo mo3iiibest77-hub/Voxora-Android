@@ -7,13 +7,14 @@ package com.voxora.core.prefs
  *
  * - [ORIGINAL_DARK] — the original Voxora dark gold theme. It is the product's primary identity and
  *   therefore the **default**; an install that has never opened the control starts here.
- * - [LIGHT_TEST_1] — Voxora Light, Nova-inspired.
- * - [LIGHT_TEST_2] — Voxora Contrast Light: the light-side contrast of the dark theme, with cool
- *   near-white surfaces and a refined indigo/blue accent in place of the gold.
+ * - [LIGHT_TEST_1] — Voxora Light, Nova-inspired. A comparison candidate.
+ * - [LIGHT_TEST_2] — Voxora Light: warm cream surfaces, the darker Voxora Light gold, warm brown
+ *   shadows and a gold-at-12 % glow. The final light appearance.
  *
- * The two light themes exist so the owner can compare them on a device and later keep one. Because
- * they are separate, removing either later is a matter of deleting its palette and its entry here,
- * without touching the dark theme or the other light theme.
+ * Each light appearance is a complete, independent colour system; neither is an override of the
+ * other and neither is a lightened copy of the dark theme. The identifier `LIGHT_TEST_2` is
+ * historical — it is the stored preference id, kept so a saved choice keeps working — while the
+ * appearance it selects is the final Voxora Light.
  *
  * The value is stored as its [id] so a stored preference stays readable if the enum is ever
  * reordered. Pure JVM (no `android.*`) so normalization is unit-testable.
@@ -25,7 +26,7 @@ enum class ThemeMode(val id: String) {
     /** Voxora Light, Nova-inspired. A comparison candidate. */
     LIGHT_TEST_1("light_test_1"),
 
-    /** Voxora Contrast Light. The light-side contrast of the dark theme. A comparison candidate. */
+    /** Voxora Light: warm cream, gold leaf. The final light appearance. */
     LIGHT_TEST_2("light_test_2");
 
     companion object {
