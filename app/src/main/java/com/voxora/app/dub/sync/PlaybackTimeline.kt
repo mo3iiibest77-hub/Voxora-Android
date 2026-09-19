@@ -47,16 +47,23 @@ enum class ChunkAction { PLAY, DROP }
  *
  * Pure Kotlin: no Android, no coroutines, no clock of its own. The caller supplies every
  * timestamp, which is what makes every scenario below a deterministic unit test.
+ *
+ * **Thread-safe.** The audio consumer calls [onChunkArrived] while the synchronizer's tick calls
+ * [onPlayed], and the service reads the counters for its log line, so every mutator is
+ * synchronized and every reported value is volatile. A torn read would misreport the backlog and
+ * a lost update could let it grow unbounded — which is the one thing this class exists to prevent.
  */
 class PlaybackTimeline(
     private val config: PlaybackTimelineConfig = PlaybackTimelineConfig(),
     private val log: (String) -> Unit = {},
 ) {
     /** Content accepted for playback: received minus dropped, in nanoseconds of audio. */
+    @Volatile
     var scheduledNanos: Long = 0L
         private set
 
     /** Content the device has presented, relative to the position at [start]/[reset]. */
+    @Volatile
     var playedNanos: Long = 0L
         private set
 
@@ -65,25 +72,31 @@ class PlaybackTimeline(
         get() = (scheduledNanos - playedNanos).coerceAtLeast(0L)
 
     /** The backlog the timeline is currently willing to tolerate before it discards audio. */
+    @Volatile
     var toleranceNanos: Long = config.initialToleranceNanos
         private set
 
     /** Chunks discarded to keep the backlog bounded. */
+    @Volatile
     var dropCount: Long = 0L
         private set
 
     /** Total audio discarded, in nanoseconds. */
+    @Volatile
     var droppedNanos: Long = 0L
         private set
 
     /** Times the output ran dry before the next chunk arrived. */
+    @Volatile
     var underrunCount: Long = 0L
         private set
 
     /** The largest backlog ever observed, for the instrumentation line. */
+    @Volatile
     var peakBacklogNanos: Long = 0L
         private set
 
+    @Volatile
     private var started = false
 
     /** The device position that [playedNanos] is measured from. */
@@ -96,6 +109,7 @@ class PlaybackTimeline(
     private var lastAdaptationNanos = Long.MIN_VALUE
 
     /** Begins a run, rebasing the playhead on [absolutePlayedNanos]. */
+    @Synchronized
     fun start(nowNanos: Long, absolutePlayedNanos: Long = 0L) {
         reset(nowNanos, absolutePlayedNanos)
         started = true
@@ -109,6 +123,7 @@ class PlaybackTimeline(
      * rebased rather than zeroed. Resetting it to zero would make the backlog look enormous and
      * the timeline would start discarding audio it should have played.
      */
+    @Synchronized
     fun reset(nowNanos: Long, absolutePlayedNanos: Long = 0L) {
         scheduledNanos = 0L
         playedNanos = 0L
@@ -127,6 +142,7 @@ class PlaybackTimeline(
      * Records the device's playback position between chunks, so the backlog reported to the
      * synchronizer and the instrumentation line reflect real playback.
      */
+    @Synchronized
     fun onPlayed(absolutePlayedNanos: Long) {
         if (!started) return
         if (lastAbsolutePlayedNanos >= 0L && absolutePlayedNanos < lastAbsolutePlayedNanos) {
@@ -148,6 +164,7 @@ class PlaybackTimeline(
      * [durationNanos] is the chunk's own length in nanoseconds of audio; [absolutePlayedNanos]
      * is the device's current playback position, which the caller reads from the output track.
      */
+    @Synchronized
     fun onChunkArrived(
         nowNanos: Long,
         durationNanos: Long,
@@ -187,6 +204,7 @@ class PlaybackTimeline(
     }
 
     /** Ends the run. The counters are kept so the final report can still be read. */
+    @Synchronized
     fun stop() {
         started = false
     }

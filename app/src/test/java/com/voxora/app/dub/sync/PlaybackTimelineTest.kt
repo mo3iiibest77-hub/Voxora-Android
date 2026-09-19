@@ -383,8 +383,39 @@ class PlaybackTimelineTest {
         assertTrue("peak backlog must be observable", sim.timeline.peakBacklogNanos > 0L)
     }
 
-    // ------------------------------------------------------------ configuration
+    // ------------------------------------------------------------ concurrency
 
+    @Test
+    fun `concurrent arrivals and playhead updates keep the backlog bounded`() {
+        // The real pipeline calls onChunkArrived from the audio consumer and onPlayed from the
+        // synchronizer's tick. The assertion is scheduling-independent: the playhead only ever
+        // moves forward, so the backlog after the last arrival cannot exceed the tolerance.
+        val timeline = PlaybackTimeline(log = {})
+        timeline.start(0L, 0L)
+        val playhead = java.util.concurrent.atomic.AtomicLong(0L)
+        val now = java.util.concurrent.atomic.AtomicLong(0L)
+
+        val arrivals = Thread {
+            repeat(2_000) {
+                timeline.onChunkArrived(now.addAndGet(1_000_000L), chunk, playhead.get())
+            }
+        }
+        val advances = Thread {
+            repeat(2_000) { playhead.addAndGet(chunk) }
+        }
+
+        arrivals.start()
+        advances.start()
+        arrivals.join()
+        advances.join()
+
+        assertTrue(
+            "backlog ${timeline.backlogNanos} exceeded tolerance ${timeline.toleranceNanos}",
+            timeline.backlogNanos <= timeline.toleranceNanos,
+        )
+    }
+
+    // ------------------------------------------------------------ configuration
     @Test(expected = IllegalArgumentException::class)
     fun `an underrun threshold at the minimum tolerance is rejected`() {
         // A threshold that high would make every healthy pipeline look starved.

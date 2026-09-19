@@ -216,13 +216,15 @@ permissions, the controller corrects residual drift when control exists — and 
 other. `DubSyncController`, `SyncConfig`, `ExternalPlayer` and the Reader subsystem are untouched.
 
 **Files.** New: `dub/sync/PlaybackTimeline.kt`, `dub/sync/PlaybackTimelineConfig.kt`,
-`dub/sync/PlaybackHead.kt`, plus `PlaybackTimelineTest` (22) and `PlaybackHeadTest` (6). Modified:
+`dub/sync/PlaybackHead.kt`, plus `PlaybackTimelineTest` (23) and `PlaybackHeadTest` (6). Modified:
 `DubPlayback.kt` (playhead + real playback timestamp, synchronized because three threads read it),
+`PlaybackTimeline.kt` itself (every mutator `@Synchronized`, every counter `@Volatile` — the consumer
+and the sync tick both call into it, and a lost update would let the backlog grow unbounded),
 `DubService.kt` (consults the timeline per chunk, feeds the controller the playhead, rebases on
 reconnect), `LatencyTimeline.kt` (`SCHEDULED_PLAYBACK`, `ACTUAL_PLAYBACK`, `CHUNK_DROPPED`, and a
 summary that separates write from playback), `GeminiLiveSession.kt` (hand-off buffer).
 
-**Verification.** 71 sync tests pass locally (kotlinc + JUnit, `-ea`); `DubPlayback`, `dub/sync` and
+**Verification.** 72 sync tests pass locally (kotlinc + JUnit, `-ea`); `DubPlayback`, `dub/sync` and
 `DubService` are type-checked against `android.jar` with stubs; all six guards pass, with
 `dubguard.py` extended by three rules and each one verified to fail on an injected violation. **Not
 verified on a device** — see the owner-verification items above. Do not claim the synchronization is
@@ -317,9 +319,9 @@ solved: the constants are bounded and measured, not tuned against real Gemini be
   the ducked source level is saved and restored exactly (`SourceVolumeDuck`, pure and tested); the
   volume-key `MediaSession`/`VolumeProvider` is untouched.
 
-**Locally verified (no Gradle).** `kotlinc 2.0.21` + JUnit 4.13.2 with `-ea`: **71 sync tests
+**Locally verified (no Gradle).** `kotlinc 2.0.21` + JUnit 4.13.2 with `-ea`: **72 sync tests
 pass** — `DubSyncControllerTest` 19, `SourceVolumeDuckTest` 6, `LatencyTimelineTest` 12,
-`PlaybackTimelineTest` 22, `PlaybackHeadTest` 6, `SyncStatusVisualTest` 6 — and the comprehensive
+`PlaybackTimelineTest` 23, `PlaybackHeadTest` 6, `SyncStatusVisualTest` 6 — and the comprehensive
 harness is still green (**383 tests across 33 classes**; the Cloud suite separately **485 tests across
 43 classes**). `DubPlayback`, the whole `dub/sync` package and `DubService` are additionally
 type-checked against `android.jar` with small stubs for the AndroidX/app collaborators, since the
