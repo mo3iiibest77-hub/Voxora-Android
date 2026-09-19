@@ -1,7 +1,7 @@
 # CloudMD.md — Voxora long-term project state
 
 **Branch:** `feat/reader-segmented-spooling`
-**Last updated:** 2026-09-19, at commit `8293a981e67032fb054321838d0f845d64431a67` (`8293a98`).
+**Last updated:** 2026-09-19, at commit `115d6df994b6db654fe8c1102b158d264e76ab5a` (`115d6df`).
 
 This file is the concise, durable state of the project: what is finished, what is in flight, what is
 blocked, and the single next action. It is **not** a plan and it is not a wish list — an item is only
@@ -35,27 +35,27 @@ holds the standing UI/i18n rules plus the current implementation record.
   missing `BookSignals` import. All three were committed-tree-only faults that the local harness
   could not see; see `AgentMD.md` §5 for why, and for the `checkimports.py` extension that now
   catches the missing-import class locally.
-- **Persistent book reopen is fixed, and Book Intelligence is localized** (commit SHA and CI result
-  recorded in the follow-up documentation commit). The reported real-device defect — a saved book
-  reopening to `ExtractionException` / "Could not read this document…" — was **not** a bad document.
-  `ReaderBook.withMetadata` replaces the display title with the catalogue title once identification
-  succeeds, and type resolution was falling back to that title's "extension" because Voxora's own
-  `file://` copy carries no MIME type. Type resolution is now one rule in
-  `core/.../reader/ReaderDocumentType.kt` with a **known type always winning**: the persisted
-  `sourceType` → provider MIME → a *file name*'s extension. A display title is never treated as a
-  file name. A book whose copy is gone is now marked the persisted `UNAVAILABLE` state instead of
-  being deleted (position and cached Book Intelligence are kept, no Continue is offered, no
-  extraction is re-attempted), and reopening the already-open book is a no-op. Book Intelligence now
-  separates *source metadata* (the catalogue's own text, shown unedited with its source language)
-  from *explanatory content* (a labelled AI-generated overview produced by a separate one-shot
+- **Persistent book reopen is fixed, and Book Intelligence is localized** (`115d6df`, CI-verified).
+  The reported real-device defect — a saved book reopening to `ExtractionException` / "Could not read
+  this document…" — was **not** a bad document. `ReaderBook.withMetadata` replaces the display title
+  with the catalogue title once identification succeeds, and type resolution was falling back to that
+  title's "extension" because Voxora's own `file://` copy carries no MIME type. Type resolution is now
+  one rule in `core/.../reader/ReaderDocumentType.kt` with a **known type always winning**: the
+  persisted `sourceType` → provider MIME → a *file name*'s extension. A display title is never treated
+  as a file name. A book whose copy is gone is now marked the persisted `UNAVAILABLE` state instead of
+  being deleted (position and cached Book Intelligence are kept, no Continue is offered, no extraction
+  is re-attempted), and reopening the already-open book is a no-op. Book Intelligence now separates
+  *source metadata* (the catalogue's own text, shown unedited with its source language) from
+  *explanatory content* (a labelled AI-generated overview produced by a separate one-shot
   metadata-only `generateContent` call, cached per output language, never the document and never the
   narration session). 681 pure-JVM tests pass locally (up from 642); the Android-side layers
-  type-check; all six guards pass; Live Dub untouched.
+  type-check; all six guards pass; Live Dub untouched. **Android CI is green** on `115d6df`:
+  `Unit tests` and `Assemble debug APK` both `success` on the push run `35443414003` and the PR run
+  `35443416114`.
 
 ## IN PROGRESS
 
-- Nothing. The Reader work above is implemented and locally validated; CI verification and the
-  documentation SHA/CI record are the only steps outstanding.
+- Nothing. The Reader work above is implemented, locally validated and CI-verified.
 
 ## BLOCKED
 

@@ -303,9 +303,9 @@ A **record**, not a rule. The standing rules are §1–§4; the Reader's archite
 `AGENTS.md` §5. This section covers the work that followed §5: a real-device defect in reopening a
 saved book, and the language rule for the Book Intelligence section.
 
-**Commit.** The implementation and this record are in the same commit; its SHA and the CI result for
-it are recorded in the follow-up documentation commit, because a commit cannot contain its own hash.
-See `CloudMD.md` for the current SHA and CI state. Branch `feat/reader-segmented-spooling`.
+**Commit.** `115d6df` — `fix(reader): restore persisted books and localize book intelligence`. The
+implementation, its tests and this record are all in that one commit. Branch
+`feat/reader-segmented-spooling`.
 
 ### What was reported
 
@@ -467,9 +467,16 @@ per-language replacement, bounded size, an entry with no `promptVersion` treated
 
 ### CI result
 
-Recorded in the follow-up documentation commit — see `CloudMD.md`. The local harness proves the
-pure-JVM logic and type-checks the Android Reader layers, but it **cannot compile Compose**, so
-`Assemble debug APK` on GitHub Actions remains the only proof that the UI changes compile.
+**Green.** Commit `115d6df` passes both jobs in both runs, read from the GitHub REST API
+(`/actions/runs/{id}/jobs`), not inferred:
+
+| Run | Event | `Unit tests` | `Assemble debug APK` |
+|---|---|---|---|
+| `35443414003` | push | success | success |
+| `35443416114` | pull_request | success | success |
+
+`Assemble debug APK` is the only proof that the Compose changes here (`BookIntelCard`,
+`ReaderScreen`, `ReaderLibrarySection`) compile; the local harness cannot compile Compose.
 
 ### Unresolved limitations
 
