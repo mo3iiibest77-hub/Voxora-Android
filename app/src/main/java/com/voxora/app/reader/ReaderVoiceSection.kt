@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.voxora.app.R
+import com.voxora.app.ui.theme.VoxoraColors
 import com.voxora.app.ui.theme.VoxoraTheme
 import com.voxora.core.gemini.ReaderVoice
 

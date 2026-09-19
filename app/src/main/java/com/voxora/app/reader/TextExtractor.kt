@@ -9,6 +9,7 @@ import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.encryption.InvalidPasswordException
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.text.TextPosition
+import com.voxora.core.reader.BookSignals
 import com.voxora.core.reader.BookSignalsReader
 import com.voxora.core.reader.ReaderSourceType
 import dagger.hilt.android.qualifiers.ApplicationContext
