@@ -264,7 +264,7 @@ private fun ReaderContent(
                     books = books,
                     activeBookId = activeBookId,
                     canOpen = ReaderGates.canPickDocument(ready),
-                    onOpen = onContinueBook,
+                    onContinue = onContinueBook,
                     onRemove = onRemoveBook,
                     onImport = onPick,
                 )
