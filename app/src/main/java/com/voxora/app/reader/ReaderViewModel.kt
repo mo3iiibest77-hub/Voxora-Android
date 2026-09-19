@@ -7,10 +7,13 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.voxora.app.R
+import com.voxora.app.reader.library.ReaderBookRepository
 import com.voxora.app.util.VoxoraLog
 import com.voxora.core.gemini.ReaderLanguages
 import com.voxora.core.gemini.ReaderNarrationModes
+import com.voxora.core.gemini.ReaderVoice
 import com.voxora.core.prefs.UserPrefs
+import com.voxora.core.reader.MetadataLookupState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.util.Locale
@@ -28,6 +31,7 @@ import kotlinx.coroutines.launch
 class ReaderViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val controller: ReaderController,
+    private val library: ReaderBookRepository,
 ) : ViewModel() {
     private val prefs = UserPrefs(context)
     internal val state = controller.state
@@ -36,6 +40,8 @@ class ReaderViewModel @Inject constructor(
     val mode = mutableMode.asStateFlow()
     private val mutableOutputLang = MutableStateFlow(ReaderLanguages.DEFAULT)
     val outputLang = mutableOutputLang.asStateFlow()
+    private val mutableVoice = MutableStateFlow(ReaderVoice.DEFAULT)
+    val voice = mutableVoice.asStateFlow()
     private val mutableReady = MutableStateFlow(false)
     val ready = mutableReady.asStateFlow()
     private val mutableSettingsError = MutableStateFlow<String?>(null)
@@ -48,9 +54,31 @@ class ReaderViewModel @Inject constructor(
     val languageFlag = mutableLanguageFlag.asStateFlow()
     private val mutableReaderBubble = MutableStateFlow(true)
     val readerBubble = mutableReaderBubble.asStateFlow()
+
+    /**
+     * The library, straight from the repository.
+     *
+     * The screen reads the books and the active id from here rather than keeping its own copy, so a
+     * change made by the controller (an import, a new position) is visible without the UI having to
+     * be told about it twice.
+     */
+    val books = library.books
+    val activeBookId = library.activeBookId
+    val libraryReady = library.ready
+
     private var commandJob: Job? = null
     private var languageJob: Job? = null
     @Volatile private var languageLocale = Locale.ENGLISH
+
+    /**
+     * Books whose automatic identification has already been started.
+     *
+     * The library is observed rather than polled: a book is created in the `NONE` state, and the
+     * first time it is seen there the lookup is launched and the id recorded, so the search runs
+     * exactly once per book. A lookup that ends in `UNAVAILABLE` moves the book out of `NONE`, which
+     * is what stops an offline reader from retrying in a loop; retrying is then an explicit choice.
+     */
+    private val metadataStarted = mutableSetOf<String>()
 
     init {
         runCommand {
@@ -58,6 +86,7 @@ class ReaderViewModel @Inject constructor(
                 prefs.migrateReaderLanguage()
                 mutableMode.value = ReaderNarrationModes.normalize(prefs.readerMode.first())
                 mutableOutputLang.value = prefs.readerOutputLang.first()
+                mutableVoice.value = prefs.readerVoice.first()
                 mutableReaderBubble.value = prefs.readerBubble.first()
             } catch (e: CancellationException) {
                 throw e
@@ -72,6 +101,38 @@ class ReaderViewModel @Inject constructor(
             controller.setOutputLanguage(mutableOutputLang.value)
             controller.setNarrationMode(mutableMode.value)
             controller.restoreLastDocument()
+        }
+        observeLibraryForLookups()
+    }
+
+    /**
+     * Starts the automatic book identification for every book that has not had one.
+     *
+     * Runs beside playback and never gates it: a book is readable the moment it is imported, whether
+     * or not a catalogue has answered yet. Nothing here blocks the Main thread — the lookup itself
+     * is a suspend call the repository runs on IO.
+     */
+    private fun observeLibraryForLookups() {
+        viewModelScope.launch {
+            library.books.collect { books ->
+                for (book in books) {
+                    if (book.lookup != MetadataLookupState.NONE) continue
+                    if (!metadataStarted.add(book.id)) continue
+                    launch(Dispatchers.IO) { runLookup(book.id) }
+                }
+            }
+        }
+    }
+
+    private suspend fun runLookup(id: String) {
+        try {
+            library.refreshMetadata(id)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // The repository is total, so this is belt-and-braces only. A failed lookup is never
+            // surfaced as an error: the book is already imported and readable.
+            VoxoraLog.w("ReaderVM", "Book identification failed: ${e.javaClass.simpleName}")
         }
     }
 
@@ -112,6 +173,22 @@ class ReaderViewModel @Inject constructor(
     }
 
     /**
+     * Selects the narrator voice.
+     *
+     * A global Reader preference, like the narration language: it is stored once and read by the
+     * controller when a run starts, so every new Gemini session — including one opened after a
+     * pause — uses it. Nothing has to be pushed into a session, and no session is left holding a
+     * stale voice.
+     */
+    fun setVoice(id: String) = runCommand {
+        if (!canConfigure() || !ReaderVoice.isValid(id)) return@runCommand
+        val selected = ReaderVoice.normalize(id)
+        if (selected == voice.value) return@runCommand
+        prefs.setReaderVoice(selected)
+        mutableVoice.value = selected
+    }
+
+    /**
      * Chunk and segment navigation publish **synchronously** on the caller's thread.
      *
      * The page animation depends on that. `ReaderController.jumpToChunk` / `jumpToSegment`
@@ -143,6 +220,27 @@ class ReaderViewModel @Inject constructor(
 
     fun load(uri: Uri) = runCommand { controller.load(uri) }
 
+    /**
+     * Opens a library book at its saved chunk.
+     *
+     * Gated like picking a document, because it replaces the loaded document and therefore cancels
+     * any running narration — the same contract as choosing a new file.
+     */
+    fun openBook(id: String) = runCommand {
+        if (!ReaderGates.canPickDocument(ready.value)) return@runCommand
+        controller.openBook(id)
+    }
+
+    /** Removes a book and its stored document. */
+    fun removeBook(id: String) = runCommand { library.remove(id) }
+
+    /** Re-runs identification for a book whose earlier lookup failed or found nothing. */
+    fun retryBookInfo(id: String) = runCommand {
+        // Recorded as started so the automatic pass cannot fire a second lookup for it later.
+        metadataStarted.add(id)
+        runLookup(id)
+    }
+
     fun play() = runCommand {
         // Never start narration before the queue is ready; see ReaderGates.canPlay.
         if (!ReaderGates.canPlay(ready.value, state.value.phase, state.value.total > 0)) return@runCommand
@@ -165,7 +263,7 @@ class ReaderViewModel @Inject constructor(
     fun stop() = runCommand { controller.stop() }
 
     /**
-     * Mode and language stay editable while a document is being extracted. They are
+     * Mode, language and voice stay editable while a document is being extracted. They are
      * only preferences and never touch extraction, so freezing them was what made a
      * restored PDF feel locked. Playback keeps its own, stricter gate.
      */

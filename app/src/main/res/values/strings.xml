@@ -303,4 +303,59 @@
     <string name="usage_google_source">Reported by Google for %1$s</string>
     <string name="usage_google_refresh">Refresh project usage</string>
     <string name="usage_google_loading">Reading what Google reports for this project…</string>
+
+    <!-- Reader narration voice -->
+    <string name="reader_voice_section">Narration voice</string>
+    <string name="reader_voice_female">Female voice</string>
+    <string name="reader_voice_female_desc">Lighter and higher.</string>
+    <string name="reader_voice_male">Male voice</string>
+    <string name="reader_voice_male_desc">Deeper and warmer.</string>
+    <string name="reader_voice_explain">The voice Gemini narrates with. It applies to every new narration segment.</string>
+
+    <!-- Reader library -->
+    <string name="reader_library_section">Your books</string>
+    <string name="reader_library_empty">No books yet. Import a PDF or TXT to start listening.</string>
+    <string name="reader_library_continue_title">Continue where you left off</string>
+    <string name="reader_library_import">Import a book</string>
+    <string name="reader_library_continue">Continue</string>
+    <string name="reader_library_remove">Remove</string>
+    <string name="reader_library_remove_title">Remove this book?</string>
+    <string name="reader_library_remove_body">Its saved position and Voxora\'s copy are deleted from your library. The original file is left untouched.</string>
+    <string name="reader_library_remove_confirm">Remove</string>
+    <string name="reader_library_cancel">Cancel</string>
+    <string name="reader_library_chunk_progress">Chunk %1$d of %2$d</string>
+    <string name="reader_library_not_started">Not started</string>
+    <string name="reader_library_in_progress">In progress</string>
+    <string name="reader_library_completed">Completed</string>
+    <string name="reader_library_last_read">Last read %1$s</string>
+
+    <!-- How long ago a book was read -->
+    <string name="reader_time_just_now">just now</string>
+    <string name="reader_time_minutes">%1$d minutes ago</string>
+    <string name="reader_time_hours">%1$d hours ago</string>
+    <string name="reader_time_days">%1$d days ago</string>
+    <string name="reader_time_weeks">%1$d weeks ago</string>
+    <string name="reader_time_months">%1$d months ago</string>
+
+    <!-- About this book -->
+    <string name="reader_book_info_section">About this book</string>
+    <string name="reader_book_info_identifying">Identifying this book…</string>
+    <string name="reader_book_info_not_found">This book could not be identified confidently, so no information was attached to it.</string>
+    <string name="reader_book_info_ambiguous">Several books match this document, so no information was attached to it.</string>
+    <string name="reader_book_info_unavailable">Book information is unavailable right now. You can keep reading and try again later.</string>
+    <string name="reader_book_info_retry">Try again</string>
+    <string name="reader_book_info_synopsis">Synopsis</string>
+    <string name="reader_book_info_description">About the work</string>
+    <string name="reader_book_info_topics">Themes and subjects</string>
+    <string name="reader_book_cover">Cover</string>
+    <string name="reader_book_fact_author">Author</string>
+    <string name="reader_book_fact_publisher">Publisher</string>
+    <string name="reader_book_fact_published">Published</string>
+    <string name="reader_book_fact_language">Language</string>
+    <string name="reader_book_fact_pages">Pages</string>
+    <string name="reader_book_fact_isbn">ISBN</string>
+    <string name="reader_book_fact_provider">Source</string>
+    <string name="reader_book_match_isbn">Matched by ISBN</string>
+    <string name="reader_book_match_title_author">Matched by title and author</string>
+    <string name="reader_book_match_title">Matched by title</string>
 </resources>

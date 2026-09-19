@@ -27,6 +27,7 @@ import okio.ByteString.Companion.encodeUtf8
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -52,6 +53,30 @@ class GeminiReaderSessionTest {
         assertNull(empty.await().getOrThrow())
         assertEquals(1, f.factory.sockets.size)
     }
+
+    @Test
+    fun theSetupMessageCarriesTheRequestedVoice() = fixture { f ->
+        f.session.connect(SECRET, "read", "model", ReaderVoice.MALE.geminiVoiceName)
+        f.socket.open()
+        assertEquals(ReaderVoice.MALE.geminiVoiceName, voiceNameOf(f.socket.sent.single()))
+        assertNotEquals(ReaderVoice.FEMALE.geminiVoiceName, voiceNameOf(f.socket.sent.single()))
+    }
+
+    @Test
+    fun aBlankVoiceFallsBackToTheProductDefaultInsteadOfSendingAnEmptyName() = fixture { f ->
+        f.session.connect(SECRET, "read", "model", "   ")
+        f.socket.open()
+        assertEquals(ReaderVoice.DEFAULT.geminiVoiceName, voiceNameOf(f.socket.sent.single()))
+    }
+
+    /** The voice the setup message actually asked Gemini for. */
+    private fun voiceNameOf(setup: String): String = JSONObject(setup)
+        .getJSONObject("setup")
+        .getJSONObject("generationConfig")
+        .getJSONObject("speechConfig")
+        .getJSONObject("voiceConfig")
+        .getJSONObject("prebuiltVoiceConfig")
+        .getString("voiceName")
 
     @Test
     fun transportEndDrainsAcceptedPcmAndHonorsQueuedCompletion() = fixture { f ->
@@ -139,7 +164,7 @@ class GeminiReaderSessionTest {
         withTimeout(2000) { closing.await() }
         assertEquals(1, calls.get())
         assertFalse(f.session.reusable)
-        assertTrue(runCatching { f.session.connect("key", "read", "model") }.isFailure)
+        assertTrue(runCatching { f.session.connect("key", "read", "model", ReaderVoice.DEFAULT.geminiVoiceName) }.isFailure)
     }
 
     @Test
@@ -264,7 +289,7 @@ class GeminiReaderSessionTest {
 
     @Test
     fun setupAndTurnTimeoutsAreBoundedIncludingRetirementAndDrain() = fixture(connectMs = 100, turnMs = 300) { f ->
-        f.session.connect("key", "read", "model")
+        f.session.connect("key", "read", "model", ReaderVoice.DEFAULT.geminiVoiceName)
         assertTrue(f.error().contains("setup timed out"))
         for (kind in listOf("normal", "goAway", "drain")) {
             f.ready()
@@ -351,7 +376,7 @@ class GeminiReaderSessionTest {
         }
 
         suspend fun ready() {
-            session.connect(SECRET, "read", "model")
+            session.connect(SECRET, "read", "model", ReaderVoice.DEFAULT.geminiVoiceName)
             socket.open()
             socket.message("""{"setupComplete":{}}""")
             withTimeout(2000) { session.status.first { it == ReaderSessionStatus.Ready } }

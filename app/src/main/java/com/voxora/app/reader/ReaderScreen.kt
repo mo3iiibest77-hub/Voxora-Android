@@ -94,7 +94,9 @@ import com.voxora.app.R
 import com.voxora.app.ui.theme.VoxoraColors
 import com.voxora.app.ui.theme.VoxoraTheme
 import com.voxora.core.gemini.ReaderNarrationModes
+import com.voxora.core.gemini.ReaderVoice
 import com.voxora.core.i18n.AppLocales
+import com.voxora.core.reader.ReaderBook
 import kotlin.math.abs
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -124,12 +126,15 @@ fun ReaderScreen(
     val narrationText by viewModel.narrationText.collectAsStateWithLifecycle()
     val mode by viewModel.mode.collectAsStateWithLifecycle()
     val outputLang by viewModel.outputLang.collectAsStateWithLifecycle()
+    val voice by viewModel.voice.collectAsStateWithLifecycle()
     val languageLabel by viewModel.languageLabel.collectAsStateWithLifecycle()
     val languageFlag by viewModel.languageFlag.collectAsStateWithLifecycle()
     val ready by viewModel.ready.collectAsStateWithLifecycle()
     val settingsError by viewModel.settingsError.collectAsStateWithLifecycle()
     val readerBubble by viewModel.readerBubble.collectAsStateWithLifecycle()
     val languages by viewModel.languageOptions.collectAsStateWithLifecycle()
+    val books by viewModel.books.collectAsStateWithLifecycle()
+    val activeBookId by viewModel.activeBookId.collectAsStateWithLifecycle()
     var languageQuery by remember { mutableStateOf("") }
     var choosingLanguage by remember { mutableStateOf(false) }
     // Language names are only ever rendered in a locale Voxora actually ships, so a
@@ -146,13 +151,18 @@ fun ReaderScreen(
         state = state,
         narrationText = narrationText,
         mode = mode,
+        voice = voice,
         languageLabel = languageLabel,
         languageFlag = languageFlag,
         ready = ready,
         settingsError = settingsError,
         readerBubble = readerBubble,
+        books = books,
+        activeBookId = activeBookId,
+        locale = locale,
         onBack = onBack,
         onModeChange = viewModel::setMode,
+        onVoiceChange = viewModel::setVoice,
         onOpenLanguage = { languageQuery = ""; choosingLanguage = true },
         onPick = { picker.launch(arrayOf("application/pdf", "text/plain")) },
         onPlay = viewModel::play,
@@ -161,6 +171,9 @@ fun ReaderScreen(
         onJumpToChunk = viewModel::jumpToChunk,
         onJumpToSegment = viewModel::jumpToSegment,
         onToggleBubble = viewModel::setReaderBubble,
+        onOpenBook = viewModel::openBook,
+        onRemoveBook = viewModel::removeBook,
+        onRetryBookInfo = viewModel::retryBookInfo,
         modifier = modifier,
     )
     if (choosingLanguage) {
@@ -180,13 +193,18 @@ private fun ReaderContent(
     state: ReaderState,
     narrationText: String,
     mode: String,
+    voice: ReaderVoice,
     languageLabel: String,
     languageFlag: String,
     ready: Boolean,
     settingsError: String?,
     readerBubble: Boolean,
+    books: List<ReaderBook>,
+    activeBookId: String?,
+    locale: java.util.Locale,
     onBack: () -> Unit,
     onModeChange: (String) -> Unit,
+    onVoiceChange: (String) -> Unit,
     onOpenLanguage: () -> Unit,
     onPick: () -> Unit,
     onPlay: () -> Unit,
@@ -195,6 +213,9 @@ private fun ReaderContent(
     onJumpToChunk: (Int) -> Boolean,
     onJumpToSegment: (Int) -> Boolean,
     onToggleBubble: (Boolean) -> Unit,
+    onOpenBook: (String) -> Unit,
+    onRemoveBook: (String) -> Unit,
+    onRetryBookInfo: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
@@ -205,6 +226,10 @@ private fun ReaderContent(
     val configuring = ReaderGates.canConfigure(ready, state.phase)
     val hasDocument = state.total > 0
     val progress = progressOf(state)
+    // The library is the reader's own shelf, so it is shown once there is something on it. While it
+    // is empty the document card's picker is the import path, and a second "import" button would
+    // only duplicate it.
+    val activeBook = books.firstOrNull { it.id == activeBookId }
 
     LazyColumn(
         modifier = modifier
@@ -230,11 +255,30 @@ private fun ReaderContent(
                 onPick = onPick,
             )
         }
+        if (books.isNotEmpty()) {
+            item(key = "library") {
+                ReaderLibrarySection(
+                    books = books,
+                    activeBookId = activeBookId,
+                    canOpen = ReaderGates.canPickDocument(ready),
+                    onOpen = onOpenBook,
+                    onRemove = onRemoveBook,
+                    onImport = onPick,
+                )
+            }
+        }
         item(key = "mode") {
             ModeSection(
                 mode = mode,
                 enabled = configuring,
                 onModeChange = onModeChange,
+            )
+        }
+        item(key = "voice") {
+            ReaderVoiceSection(
+                selected = voice,
+                enabled = configuring,
+                onVoiceChange = { onVoiceChange(it.id) },
             )
         }
         item(key = "language") {
@@ -261,6 +305,15 @@ private fun ReaderContent(
         if (error != null) {
             item(key = "error") {
                 ErrorCard(message = error)
+            }
+        }
+        if (activeBook != null) {
+            item(key = "book-info") {
+                BookIntelCard(
+                    book = activeBook,
+                    locale = locale,
+                    onRetry = { onRetryBookInfo(activeBook.id) },
+                )
             }
         }
         if (state.segments.isNotEmpty()) {
@@ -1454,8 +1507,14 @@ private fun NarrationCard(
     }
 }
 
+/**
+ * A section heading, shared with the Reader's other section files.
+ *
+ * `internal` rather than `private` so `ReaderLibrarySection`, `ReaderVoiceSection` and
+ * `BookIntelCard` can use the same heading instead of each inventing one.
+ */
 @Composable
-private fun SectionHeader(
+internal fun SectionHeader(
     title: String,
     hint: String? = null,
     modifier: Modifier = Modifier,
@@ -1694,6 +1753,10 @@ private fun ReaderScreenPreview(modifier: Modifier = Modifier) {
                 ),
                 narrationText = "",
                 mode = ReaderNarrationModes.FAITHFUL,
+                voice = ReaderVoice.FEMALE,
+                books = emptyList(),
+                activeBookId = null,
+                locale = java.util.Locale.ENGLISH,
                 languageLabel = stringResource(R.string.reader_lang_en),
                 languageFlag = "🇬🇧",
                 ready = true,
@@ -1709,6 +1772,10 @@ private fun ReaderScreenPreview(modifier: Modifier = Modifier) {
                 onJumpToChunk = { true },
                 onJumpToSegment = { true },
                 onToggleBubble = {},
+                onVoiceChange = {},
+                onOpenBook = {},
+                onRemoveBook = {},
+                onRetryBookInfo = {},
             )
         }
     }
@@ -1737,6 +1804,10 @@ private fun ReaderScreenPreparingPreview(modifier: Modifier = Modifier) {
                 ),
                 narrationText = "",
                 mode = ReaderNarrationModes.FLUENT,
+                voice = ReaderVoice.FEMALE,
+                books = emptyList(),
+                activeBookId = null,
+                locale = java.util.Locale.ENGLISH,
                 languageLabel = stringResource(R.string.reader_lang_en),
                 languageFlag = "🇬🇧",
                 ready = true,
@@ -1752,6 +1823,10 @@ private fun ReaderScreenPreparingPreview(modifier: Modifier = Modifier) {
                 onJumpToChunk = { true },
                 onJumpToSegment = { true },
                 onToggleBubble = {},
+                onVoiceChange = {},
+                onOpenBook = {},
+                onRemoveBook = {},
+                onRetryBookInfo = {},
             )
         }
     }
@@ -1766,6 +1841,10 @@ private fun ReaderScreenEmptyPreview(modifier: Modifier = Modifier) {
                 state = ReaderState(phase = ReaderPhase.IDLE),
                 narrationText = "",
                 mode = ReaderNarrationModes.FLUENT,
+                voice = ReaderVoice.FEMALE,
+                books = emptyList(),
+                activeBookId = null,
+                locale = java.util.Locale.ENGLISH,
                 languageLabel = stringResource(R.string.reader_lang_fa),
                 languageFlag = "🇮🇷",
                 ready = true,
@@ -1781,6 +1860,10 @@ private fun ReaderScreenEmptyPreview(modifier: Modifier = Modifier) {
                 onJumpToChunk = { true },
                 onJumpToSegment = { true },
                 onToggleBubble = {},
+                onVoiceChange = {},
+                onOpenBook = {},
+                onRemoveBook = {},
+                onRetryBookInfo = {},
             )
         }
     }

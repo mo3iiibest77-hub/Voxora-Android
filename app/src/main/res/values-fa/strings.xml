@@ -302,4 +302,59 @@
     <string name="usage_google_source">به گزارش ⁨Google⁩ برای %1$s</string>
     <string name="usage_google_refresh">به‌روزرسانی مصرف پروژه</string>
     <string name="usage_google_loading">در حال خواندن آنچه ⁨Google⁩ برای این پروژه گزارش می‌کند…</string>
+
+    <!-- Reader narration voice -->
+    <string name="reader_voice_section">صدای روایت</string>
+    <string name="reader_voice_female">صدای زنانه</string>
+    <string name="reader_voice_female_desc">روشن‌تر و بالاتر.</string>
+    <string name="reader_voice_male">صدای مردانه</string>
+    <string name="reader_voice_male_desc">بم‌تر و گرم‌تر.</string>
+    <string name="reader_voice_explain">صدایی که ⁨Gemini⁩ با آن روایت می‌کند. روی هر قطعهٔ تازهٔ روایت اعمال می‌شود.</string>
+
+    <!-- Reader library -->
+    <string name="reader_library_section">کتاب‌های تو</string>
+    <string name="reader_library_empty">هنوز کتابی نداری. برای شروع یک ⁨PDF⁩ یا ⁨TXT⁩ وارد کن.</string>
+    <string name="reader_library_continue_title">از همان‌جا که رها کردی ادامه بده</string>
+    <string name="reader_library_import">وارد کردن کتاب</string>
+    <string name="reader_library_continue">ادامه</string>
+    <string name="reader_library_remove">حذف</string>
+    <string name="reader_library_remove_title">این کتاب حذف شود؟</string>
+    <string name="reader_library_remove_body">جای ذخیره‌شده و نسخهٔ ⁨Voxora⁩ از کتابخانه‌ات پاک می‌شوند. فایل اصلی دست‌نخورده می‌ماند.</string>
+    <string name="reader_library_remove_confirm">حذف کن</string>
+    <string name="reader_library_cancel">بی‌خیال</string>
+    <string name="reader_library_chunk_progress">بخش %1$d از %2$d</string>
+    <string name="reader_library_not_started">شروع نشده</string>
+    <string name="reader_library_in_progress">در جریان</string>
+    <string name="reader_library_completed">تمام‌شده</string>
+    <string name="reader_library_last_read">آخرین بار %1$s</string>
+
+    <!-- How long ago a book was read -->
+    <string name="reader_time_just_now">همین حالا</string>
+    <string name="reader_time_minutes">%1$d دقیقه پیش</string>
+    <string name="reader_time_hours">%1$d ساعت پیش</string>
+    <string name="reader_time_days">%1$d روز پیش</string>
+    <string name="reader_time_weeks">%1$d هفته پیش</string>
+    <string name="reader_time_months">%1$d ماه پیش</string>
+
+    <!-- About this book -->
+    <string name="reader_book_info_section">دربارهٔ این کتاب</string>
+    <string name="reader_book_info_identifying">در حال شناسایی این کتاب…</string>
+    <string name="reader_book_info_not_found">این کتاب با اطمینان شناسایی نشد، پس هیچ اطلاعاتی به آن وصل نشد.</string>
+    <string name="reader_book_info_ambiguous">چند کتاب با این فایل هم‌خوانی دارند، پس هیچ اطلاعاتی به آن وصل نشد.</string>
+    <string name="reader_book_info_unavailable">اطلاعات کتاب الان در دسترس نیست. می‌توانی به خواندن ادامه بدهی و بعداً دوباره امتحان کنی.</string>
+    <string name="reader_book_info_retry">دوباره امتحان کن</string>
+    <string name="reader_book_info_synopsis">خلاصهٔ داستان</string>
+    <string name="reader_book_info_description">دربارهٔ این اثر</string>
+    <string name="reader_book_info_topics">درون‌مایه‌ها و موضوع‌ها</string>
+    <string name="reader_book_cover">جلد</string>
+    <string name="reader_book_fact_author">نویسنده</string>
+    <string name="reader_book_fact_publisher">ناشر</string>
+    <string name="reader_book_fact_published">تاریخ انتشار</string>
+    <string name="reader_book_fact_language">زبان</string>
+    <string name="reader_book_fact_pages">صفحه</string>
+    <string name="reader_book_fact_isbn">شمارهٔ ⁨ISBN⁩</string>
+    <string name="reader_book_fact_provider">منبع</string>
+    <string name="reader_book_match_isbn">تطبیق با ⁨ISBN⁩</string>
+    <string name="reader_book_match_title_author">تطبیق با عنوان و نویسنده</string>
+    <string name="reader_book_match_title">تطبیق با عنوان</string>
 </resources>

@@ -1,9 +1,10 @@
 package com.voxora.app.reader
 
 import android.content.Context
-import android.content.Intent
 import android.net.Uri
 import com.voxora.app.R
+import com.voxora.app.reader.library.ReaderBookRepository
+import com.voxora.app.reader.library.StagedImport
 import com.voxora.app.util.VoxoraLog
 import com.voxora.core.gemini.GeminiReaderSession
 import com.voxora.core.gemini.ReaderLanguages
@@ -11,9 +12,13 @@ import com.voxora.core.gemini.ReaderNarrationModes
 import com.voxora.core.gemini.ReaderSessionStatus
 import com.voxora.core.prefs.UserPrefs
 import com.voxora.core.prefs.UsagePrefs
+import com.voxora.core.reader.ReaderBook
+import com.voxora.core.reader.ReaderSourceType
 import com.voxora.core.usage.UsageFailureCategory
 import com.voxora.core.usage.UsageRecorder
 import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
+import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
@@ -38,11 +43,18 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 @Singleton
-class ReaderController @Inject constructor(@ApplicationContext private val context: Context) {
+class ReaderController @Inject constructor(
+    @ApplicationContext private val context: Context,
+    /**
+     * The persistent library. The controller owns the *active* document; the repository owns the
+     * records. Keeping them apart is what stops this class from becoming a database: it asks the
+     * library to save a position and never learns how the library stores one.
+     */
+    private val library: ReaderBookRepository,
+) {
     private val documentScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lock = Any()
     private val playbackMutex = Mutex()
-    private val persistenceMutex = Mutex()
     private val prefs = UserPrefs(context)
     /**
      * Records what Voxora observed about its own Gemini requests, for the Settings usage
@@ -61,6 +73,13 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
     private var queue = ChunkQueue(emptyList())
     private var documentName = ""
     private var segmentIndex = 0
+    /**
+     * The library record the loaded document belongs to, or null before a book is committed.
+     *
+     * Every position save is keyed by it, so a document that failed extraction (and therefore has no
+     * record) can never write a position for a book that does not exist.
+     */
+    private var bookId: String? = null
     /**
      * Selected-language reading text, one cache per narration mode. The canonical extracted
      * document stays in [queue]; these only hold the selected-language rendering of individual
@@ -108,21 +127,78 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
     private class NarrationFailure(val resource: Int) : Exception()
     private class EmptyPrefetchFailure : Exception()
 
-    fun load(uri: Uri) = startLoad(uri, restoring = false)
+    fun load(uri: Uri) = startLoad(uri, restoring = false, book = null)
 
+    /**
+     * Restores the book the reader was last in, at the chunk they stopped at.
+     *
+     * The library is consulted first, because that is where a durable record now lives. The old
+     * single-document preference is migrated **once** — and only when the library is empty — by
+     * feeding it through the ordinary import path, so an existing reader keeps their document
+     * instead of finding the Reader empty after the upgrade. A document that can no longer be read
+     * is treated as a restore, so the stale reference is cleared and the Reader opens idle rather
+     * than showing an error on launch.
+     */
     suspend fun restoreLastDocument() {
         if (synchronized(lock) { state.value.phase != ReaderPhase.IDLE || queue.size != 0 }) return
         try {
-            val saved = prefs.lastDocUri.first()
-            if (saved.isNotBlank()) startLoad(Uri.parse(saved), restoring = true)
+            library.ensureLoaded()
+            val recent = library.mostRecent()
+            if (recent != null) {
+                openStoredBook(recent.id, restoring = true)
+                return
+            }
+            if (library.needsLegacyMigration()) {
+                val legacy = prefs.lastDocUri.first()
+                library.markLegacyMigrated()
+                if (legacy.isNotBlank()) startLoad(Uri.parse(legacy), restoring = true, book = null)
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            VoxoraLog.w("Reader", "Document restoration failed: ${e.javaClass.simpleName}")
+            VoxoraLog.w("Reader", "Library restore failed: ${e.javaClass.simpleName}")
         }
     }
 
-    private fun startLoad(uri: Uri, restoring: Boolean) = synchronized(lock) {
+    /**
+     * Opens a book from the library at its saved chunk.
+     *
+     * Extraction is re-run from Voxora's own copy of the document rather than from the original
+     * provider URI, and because extraction is deterministic the saved chunk index still names the
+     * same content it named when it was written.
+     */
+    suspend fun openBook(id: String) {
+        try {
+            library.ensureLoaded()
+            openStoredBook(id, restoring = false)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            VoxoraLog.w("Reader", "Book open failed: ${e.javaClass.simpleName}")
+        }
+    }
+
+    private suspend fun openStoredBook(id: String, restoring: Boolean) {
+        val book = library.book(id) ?: return
+        val file = File(book.localPath)
+        if (!file.isFile) {
+            // The record outlived its file — a cleared data directory, for example. Removing the
+            // record is the honest fix: a library entry that cannot be opened is worse than none.
+            VoxoraLog.w("Reader", "Book file is missing; dropping the record")
+            library.remove(id)
+            if (restoring) synchronized(lock) { publish(ReaderPhase.IDLE) }
+            return
+        }
+        library.markOpened(id)
+        startLoad(Uri.fromFile(file), restoring = restoring, book = book)
+    }
+
+    /**
+     * Loads a document into the queue.
+     *
+     * @param book the library record to resume, or null for a fresh import.
+     */
+    private fun startLoad(uri: Uri, restoring: Boolean, book: ReaderBook?) = synchronized(lock) {
         if (restoring && (state.value.phase != ReaderPhase.IDLE || queue.size != 0)) return@synchronized
         cancelOwned()
         val run = generation
@@ -133,35 +209,70 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
         displayTexts.clear()
         documentName = ""
         segmentIndex = 0
+        bookId = null
         publish(ReaderPhase.EXTRACTING)
         loadJob = documentScope.launch(start = CoroutineStart.LAZY) {
             previous?.cancelAndJoin()
+            var staged: StagedImport? = null
             try {
-                if (!restoring) {
-                    saveDocument(run, null)
-                    try {
-                        context.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    } catch (e: SecurityException) {
-                        VoxoraLog.w("Reader", "Document provider did not grant persistent access")
-                    }
+                // A stored book already knows its name and type, and its file is Voxora's own copy,
+                // so nothing is re-copied and the reader's title is not lost to the copy's name.
+                val identity = if (book != null) {
+                    DocumentIdentity(
+                        name = book.title,
+                        type = book.sourceType,
+                        isPdf = book.sourceType == ReaderSourceType.PDF,
+                    )
+                } else {
+                    extractor.identify(uri)
                 }
-                val document = extractor.extract(uri)
+                if (book == null) {
+                    // Copy the document into app storage *before* extraction. From here on the book
+                    // no longer depends on the provider URI surviving, and the copy is what makes
+                    // re-extraction — and therefore the saved chunk index — deterministic.
+                    staged = library.stage(uri, identity.name, identity.type)
+                        ?: throw IOException("The document could not be copied into app storage.")
+                }
+                val source = staged?.let { Uri.fromFile(it.file) } ?: uri
+                val document = extractor.extract(source, displayName = identity.name)
                 currentCoroutineContext().ensureActive()
-                saveDocument(run, uri.toString())
-                synchronized(lock) {
+                val committed = staged?.let {
+                    library.commit(
+                        staged = it,
+                        title = document.name,
+                        chunkCount = document.chunks.size,
+                        signals = document.signals,
+                    )
+                }
+                staged = null
+                // A newer load replaced this one while it was extracting: the book must not linger
+                // in the library as a document the reader never sees. The removal is deliberately
+                // outside the lock — it suspends, and a suspension point inside `synchronized`
+                // would be a critical-section violation (and would hold the lock across disk IO).
+                val superseded = synchronized(lock) {
                     if (run == generation) {
                         queue = ChunkQueue(document.chunks)
                         documentName = document.name
+                        bookId = committed?.id ?: book?.id
                         segmentIndex = 0
+                        // Resume exactly where the reader stopped. The queue clamps the index, so a
+                        // record written against an older extraction can never point past the end.
+                        if (book != null) queue.jumpTo(book.currentChunk)
                         loadJob = null
                         publish(ReaderPhase.READY)
+                        null
+                    } else {
+                        committed?.id
                     }
                 }
+                if (superseded != null) library.remove(superseded)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 VoxoraLog.w("Reader", "Document extraction failed: ${e.javaClass.simpleName}")
-                if (restoring) saveDocument(run, null)
+                // Nothing was committed, so the staged copy is removed: a document that cannot be
+                // read never appears in the library as an empty book.
+                staged?.let { library.discard(it) }
                 synchronized(lock) {
                     if (run == generation) {
                         loadJob = null
@@ -173,14 +284,53 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
         }.also { it.start() }
     }
 
-    private suspend fun saveDocument(run: Long, uri: String?) = persistenceMutex.withLock {
-        if (synchronized(lock) { run != generation }) return@withLock
-        try {
-            prefs.updateReaderDocument(uri) { synchronized(lock) { run == generation } }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            VoxoraLog.w("Reader", "Document preference update failed: ${e.javaClass.simpleName}")
+    /**
+     * Saves the current chunk beside playback. Must be called with [lock] held.
+     *
+     * Deliberately fire-and-forget: the save is launched on the document scope, so a slow disk can
+     * never stall audio, and it is never called from a PCM callback — only from the transitions that
+     * matter (a chunk becoming current, pause, stop, navigation, completion). That is the whole
+     * reason chunk-level persistence is affordable.
+     */
+    private fun savePositionLocked() {
+        val id = bookId ?: return
+        val chunk = queue.index
+        documentScope.launch {
+            try {
+                library.recordPosition(id, chunk)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                VoxoraLog.w("Reader", "Position save failed: ${e.javaClass.simpleName}")
+            }
+        }
+    }
+
+    /** Records that the book was finished. Must be called with [lock] held. */
+    private fun markCompletedLocked() {
+        val id = bookId ?: return
+        documentScope.launch {
+            try {
+                library.complete(id)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                VoxoraLog.w("Reader", "Completion save failed: ${e.javaClass.simpleName}")
+            }
+        }
+    }
+
+    /** Records that a finished book is being heard again from the beginning. */
+    private fun markReopenedLocked() {
+        val id = bookId ?: return
+        documentScope.launch {
+            try {
+                library.reopen(id)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                VoxoraLog.w("Reader", "Reopen save failed: ${e.javaClass.simpleName}")
+            }
         }
     }
 
@@ -197,6 +347,9 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
                     if (state.value.phase == ReaderPhase.COMPLETE) {
                         queue.reset()
                         segmentIndex = 0
+                        // The reader chose to hear a finished book again, so the record stops
+                        // claiming completion and goes back to the first chunk.
+                        markReopenedLocked()
                     } else if (state.value.phase in setOf(ReaderPhase.IDLE, ReaderPhase.EXTRACTING)) return@coroutineScope
                     generation++
                     activeJob = owner
@@ -212,6 +365,11 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
                     val key = prefs.apiKey.first().trim()
                     if (key.isEmpty()) throw NarrationFailure(R.string.error_no_api_key)
                     val language = prefs.readerOutputLang.first()
+                    // The voice is read here, with the language, so every session in the run — and
+                    // every session a later run opens — uses the reader's current choice. The stored
+                    // value is normalized on read, so an absent or unknown value is the default
+                    // voice rather than a failed run.
+                    val voice = prefs.readerVoice.first().geminiVoiceName
                     // The instruction and the displayed reading text must always agree on one
                     // language *and one style* for the whole run, so both are recorded here and
                     // every unit is stored under exactly these keys. `mode` was validated above.
@@ -227,7 +385,7 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
                         }
                         val child = launch(start = CoroutineStart.LAZY) {
                             try {
-                                runPipeline(run, position, key, mode, language)
+                                runPipeline(run, position, key, mode, language, voice)
                             } catch (e: TimeoutCancellationException) {
                                 fail(run, position.revision, NarrationFailure(R.string.reader_audio_unavailable))
                             } catch (e: CancellationException) {
@@ -273,7 +431,14 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
         }
     }
 
-    private suspend fun runPipeline(run: Long, position: Position, key: String, mode: String, language: String) = coroutineScope {
+    private suspend fun runPipeline(
+        run: Long,
+        position: Position,
+        key: String,
+        mode: String,
+        language: String,
+        voice: String,
+    ) = coroutineScope {
         val slots = mutableListOf<Slot>()
         val output = ReaderPlayback(context) {
             synchronized(lock) {
@@ -287,7 +452,7 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
             }
             val slot = Slot(index, units, ReaderSpool(context.cacheDir, firstUnit), attempts = attempts)
             slots.add(slot)
-            slot.producer = launch { produce(slot, key, mode, language, run, position.revision) }
+            slot.producer = launch { produce(slot, key, mode, language, voice, run, position.revision) }
             return slot
         }
         fun prefetch(index: Int): Slot? {
@@ -342,10 +507,17 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
                     checkOwned(run, position.revision)
                     if (current.index + 1 >= queue.size) {
                         publish(ReaderPhase.COMPLETE)
+                        // The book is finished, and that is a fact worth persisting: it is what the
+                        // library shows instead of a percentage, and what makes Play restart it.
+                        markCompletedLocked()
                     } else {
                         queue.jumpTo(current.index + 1)
                         segmentIndex = 0
                         publish(ReaderPhase.NEXT)
+                        // A chunk becoming current is the moment worth persisting: it is the
+                        // granularity the reader perceives, and it happens minutes apart rather than
+                        // per audio callback.
+                        savePositionLocked()
                     }
                 }
                 val promoted = next
@@ -476,7 +648,15 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
         publish(state.value.phase)
     }
 
-    private suspend fun produce(slot: Slot, key: String, mode: String, language: String, run: Long, revision: Long) {
+    private suspend fun produce(
+        slot: Slot,
+        key: String,
+        mode: String,
+        language: String,
+        voice: String,
+        run: Long,
+        revision: Long,
+    ) {
         val producerContext = currentCoroutineContext()
         // The run's mode owns its own rendering cache, so a Faithful transcript can never be
         // recorded into — or served from — the Fluent display.
@@ -502,7 +682,9 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
                             // The server only *may* report token usage, so this fires only when
                             // it actually did. Nothing is synthesised when it stays silent.
                             it.onUsage = { reported -> usageRecorder.noteReportedUsage(reported) }
-                            it.connect(key, instructionFor(mode, language), "models/gemini-3.8-live")
+                            // The voice is passed explicitly: the session used to hard-code one
+                            // voice, so the reader's choice could not reach it at all.
+                            it.connect(key, instructionFor(mode, language), READER_MODEL, voice)
                             when (it.status.first { status -> status is ReaderSessionStatus.Ready || status is ReaderSessionStatus.Error }) {
                                 ReaderSessionStatus.Ready -> Unit
                                 else -> throw NarrationFailure(R.string.reader_connect_timeout)
@@ -670,14 +852,25 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
             captureAudibleProgress()
             cancelOwned()
             publish(ReaderPhase.PAUSED)
+            // Pausing preserves the chunk — that was always true in memory — and now it preserves
+            // it across the process too.
+            savePositionLocked()
         }
     }
 
+    /**
+     * Stops narration.
+     *
+     * Stop ends playback; it does **not** throw away where the reader was. The queue keeps its
+     * position and that position is saved, so the next Play resumes at the same chunk instead of
+     * restarting the document. Resetting the queue here was the defect that made Stop send the
+     * reader back to chunk one.
+     */
     fun stop() = synchronized(lock) {
         cancelOwned()
-        queue.reset()
         segmentIndex = 0
         publish(if (queue.size == 0) ReaderPhase.IDLE else ReaderPhase.STOPPED)
+        savePositionLocked()
     }
 
     /**
@@ -694,6 +887,8 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
         queue.jumpTo(target)
         segmentIndex = 0
         navigate()
+        // An explicit move is a position the reader chose, so it is persisted like any other.
+        savePositionLocked()
         true
     }
 
@@ -839,5 +1034,8 @@ class ReaderController @Inject constructor(@ApplicationContext private val conte
         val activePhases = setOf(ReaderPhase.CONNECTING, ReaderPhase.REWRITING, ReaderPhase.SPEAKING, ReaderPhase.NEXT)
         const val MAX_UNIT_ATTEMPTS = 3
         const val SESSION_GROUP_NANOS = 300_000_000_000L
+
+        /** The Reader's narration model. Named once so the voice change could not alter it. */
+        const val READER_MODEL = "models/gemini-3.8-live"
     }
 }

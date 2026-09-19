@@ -122,11 +122,26 @@ class GeminiReaderSession internal constructor(
 
     private data class Ingress(val raw: Any, val cost: Long, val turn: Turn?)
 
-    fun connect(apiKey: String, instruction: String, model: String, withSpeechConfig: Boolean = true) {
+    /**
+     * Opens a session whose narrator speaks with [voice].
+     *
+     * [voice] is the **Gemini prebuilt voice name** (`ReaderVoice.geminiVoiceName`), not Voxora's
+     * stored id. It is a required argument on purpose: the voice used to be a private constant, so
+     * a caller could not forget it and could not choose it either. A default would let a new call
+     * site silently narrate in the wrong voice, which is the defect this parameter exists to make
+     * unrepresentable. Callers pass `ReaderVoice.voiceName(prefs.readerVoice.first())`.
+     */
+    fun connect(
+        apiKey: String,
+        instruction: String,
+        model: String,
+        voice: String,
+        withSpeechConfig: Boolean = true,
+    ) {
         val target = synchronized(lock) {
             if (closed) throw ReaderSessionException("Gemini session is closed.")
             attempt?.let { abortLocked(it, "Gemini connection was replaced.") }
-            Attempt(++generation, setupPayload(instruction, model, withSpeechConfig)).also {
+            Attempt(++generation, setupPayload(instruction, model, voice, withSpeechConfig)).also {
                 attempt = it
                 _status.value = ReaderSessionStatus.Connecting
                 // Usage belongs to a connection, so a new connection starts from "not reported"
@@ -533,14 +548,22 @@ class GeminiReaderSession internal constructor(
         else -> "Gemini reported a server error."
     }
 
-    private fun setupPayload(instruction: String, model: String, withSpeechConfig: Boolean): String {
+    private fun setupPayload(
+        instruction: String,
+        model: String,
+        voice: String,
+        withSpeechConfig: Boolean,
+    ): String {
         val config = JSONObject().put("responseModalities", JSONArray().put("AUDIO"))
         if (withSpeechConfig) {
+            // A blank name is not a usable voice, so it falls back to the product default rather
+            // than sending an empty voiceName the server would reject.
+            val name = voice.trim().ifEmpty { ReaderVoice.DEFAULT.geminiVoiceName }
             config.put(
                 "speechConfig",
                 JSONObject().put(
                     "voiceConfig",
-                    JSONObject().put("prebuiltVoiceConfig", JSONObject().put("voiceName", READER_VOICE)),
+                    JSONObject().put("prebuiltVoiceConfig", JSONObject().put("voiceName", name)),
                 ),
             )
         }
@@ -557,7 +580,6 @@ class GeminiReaderSession internal constructor(
 
     companion object {
         private const val READER_WS_PATH = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
-        private const val READER_VOICE = "Kore"
         private const val TURN_TIMEOUT_MS = 180_000L
         private const val CONNECT_TIMEOUT_MS = 20_000L
         private const val LOG_LIMIT = 512

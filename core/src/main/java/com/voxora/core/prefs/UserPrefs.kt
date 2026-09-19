@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.voxora.core.gemini.ReaderLanguages
+import com.voxora.core.gemini.ReaderVoice
 import com.voxora.core.usage.ApiKeyMask
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -20,6 +21,7 @@ class UserPrefs(private val context: Context) {
     private val keyReaderEndpoint = stringPreferencesKey("reader_endpoint")
     private val keyReaderMode = stringPreferencesKey("reader_mode")
     private val keyReaderOutputLang = stringPreferencesKey("reader_output_lang")
+    private val keyReaderVoice = stringPreferencesKey("reader_voice")
     private val keyLastDocUri = stringPreferencesKey("last_doc_uri")
     private val keyReaderBubble = booleanPreferencesKey("reader_bubble")
     private val keyThemeMode = stringPreferencesKey("theme_mode")
@@ -28,6 +30,20 @@ class UserPrefs(private val context: Context) {
     val readerMode: Flow<String> = context.dataStore.data.map { it[keyReaderMode] ?: "faithful" }
     val readerOutputLang: Flow<String> =
         context.dataStore.data.map { ReaderLanguages.normalize(it[keyReaderOutputLang]) }
+
+    /**
+     * The narrator voice the Reader should use, as a [ReaderVoice] id.
+     *
+     * A **global Reader preference**, not per-book: the voice is how the product sounds, not what
+     * the book is. It normalizes like the narration language does, so an absent or unknown value
+     * yields [ReaderVoice.DEFAULT] instead of failing a run.
+     */
+    val readerVoice: Flow<ReaderVoice> =
+        context.dataStore.data.map { ReaderVoice.normalize(it[keyReaderVoice]) }
+
+    suspend fun setReaderVoice(voice: ReaderVoice) {
+        context.dataStore.edit { it[keyReaderVoice] = voice.id }
+    }
 
     suspend fun migrateReaderLanguage() {
         context.dataStore.edit {

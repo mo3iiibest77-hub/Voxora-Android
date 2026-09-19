@@ -3,12 +3,13 @@ package com.voxora.app.reader
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
-import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
-import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoaderimport com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.encryption.InvalidPasswordException
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.text.TextPosition
+import com.voxora.core.reader.BookSignalsReader
+import com.voxora.core.reader.ReaderSourceType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -24,21 +25,55 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
-/** Extracted document text plus the display name the provider reported. */
-data class ExtractedDocument(val name: String, val chunks: List<String>)
+/**
+ * Extracted document text plus the display name the provider reported, and the identification
+ * signals read from the document's opening.
+ *
+ * [signals] is not part of the reading pipeline: it exists so a book can be looked up in a public
+ * catalogue without the Reader ever uploading the document. It is computed here because this is the
+ * only place the extracted text exists in full, and it costs nothing extra to read the head of a
+ * string that has already been built.
+ */
+data class ExtractedDocument(
+    val name: String,
+    val chunks: List<String>,
+    val signals: BookSignals,
+)
+
+/**
+ * A document's identity, resolved without reading its contents.
+ *
+ * Needed before extraction because importing a document copies it into app storage first, and the
+ * copy has to know the file's type before it can be named.
+ */
+data class DocumentIdentity(
+    val name: String,
+    val type: ReaderSourceType,
+    val isPdf: Boolean,
+)
 
 class TextExtractor @Inject constructor(@ApplicationContext private val context: Context) {
-    suspend fun extract(uri: Uri): ExtractedDocument = withContext(Dispatchers.IO) {
-        val coroutineContext = currentCoroutineContext()
-        try {
-            coroutineContext.ensureActive()
+    /**
+     * Resolves [uri]'s display name and type.
+     *
+     * @param displayName overrides the name reported by the provider. This is required when the URI
+     *   points at Voxora's own copy of a document: the copy is named after the book's internal id,
+     *   so the provider name would be a UUID and the reader's file name would be lost.
+     */
+    suspend fun identify(uri: Uri, displayName: String? = null): DocumentIdentity =
+        withContext(Dispatchers.IO) {
             val resolver = context.contentResolver
             val mime = resolver.getType(uri)?.substringBefore(';')?.trim()?.lowercase(Locale.ROOT)
-            var name = uri.lastPathSegment.orEmpty()
+            // A caller-supplied name wins: Voxora's own copy of a document is named after the
+            // book's id, and the reader's file name is the one worth keeping.
+            val overrideName = displayName?.trim()?.takeIf { it.isNotEmpty() }
+            var name = overrideName ?: uri.lastPathSegment.orEmpty()
             resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
                 if (cursor.moveToFirst()) {
                     val nameColumn = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                    if (nameColumn >= 0 && !cursor.isNull(nameColumn)) name = cursor.getString(nameColumn)
+                    if (overrideName == null && nameColumn >= 0 && !cursor.isNull(nameColumn)) {
+                        name = cursor.getString(nameColumn)
+                    }
                     val sizeColumn = cursor.getColumnIndex(OpenableColumns.SIZE)
                     if (sizeColumn >= 0 && !cursor.isNull(sizeColumn) && cursor.getLong(sizeColumn) > MAX_BYTES) {
                         throw ExtractionException("This file is too large. Choose a file smaller than 20 MB.")
@@ -53,6 +88,26 @@ class TextExtractor @Inject constructor(@ApplicationContext private val context:
                 extension == "txt" -> false
                 else -> throw ExtractionException("Unsupported file type. Choose a PDF or UTF-8 TXT file.")
             }
+            DocumentIdentity(
+                name = name.trim(),
+                type = if (isPdf) ReaderSourceType.PDF else ReaderSourceType.TXT,
+                isPdf = isPdf,
+            )
+        }
+
+    /**
+     * Extracts [uri].
+     *
+     * @param displayName overrides the name reported by the provider; see [identify].
+     */
+    suspend fun extract(uri: Uri, displayName: String? = null): ExtractedDocument = withContext(Dispatchers.IO) {
+        val coroutineContext = currentCoroutineContext()
+        try {
+            coroutineContext.ensureActive()
+            val identity = identify(uri, displayName)
+            val name = identity.name
+            val isPdf = identity.isPdf
+            val resolver = context.contentResolver
             val bytes = resolver.openInputStream(uri)?.use { input ->
                 ByteArrayOutputStream().use { output ->
                     val buffer = ByteArray(8192)
@@ -164,7 +219,12 @@ class TextExtractor @Inject constructor(@ApplicationContext private val context:
                     else "This text file is blank. Choose a file containing text."
                 )
             }
-            ExtractedDocument(name = name.trim(), chunks = chunks)
+            val resolvedName = name.trim()
+            // Read the identification signals from the document that was just extracted. This is a
+            // read of a string already in memory — it never touches the file again, never blocks
+            // playback, and never sends the document anywhere.
+            val signals = BookSignalsReader.from(resolvedName, text)
+            ExtractedDocument(name = resolvedName, chunks = chunks, signals = signals)
         } catch (error: ExtractionException) {
             coroutineContext.ensureActive()
             throw error
