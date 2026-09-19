@@ -667,6 +667,9 @@ class ReaderController @Inject constructor(
                     current.producer?.join()
                     current.spool.close()
                     slots.remove(current)
+                    // The discarded slot is also released from the look-ahead map: the retry below
+                    // allocates a new one for the same index, and the map must not keep the old.
+                    prepared.remove(current.index)
                     VoxoraLog.w("Reader", "Retrying empty promoted chunk=${current.index + 1} with a fresh spool")
                     current = prepare(current.index, 0, MAX_UNIT_ATTEMPTS - 1)
                     // The retry is still a chunk whose audio must not start before its first
