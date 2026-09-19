@@ -8,6 +8,120 @@ import org.junit.Test
 
 class ChunkQueueTest {
     @Test
+    fun extractionNormalizationPreservesContentAndVisibleHyphens() {
+        assertEquals(
+            "Heading co operate cooperate well- known فارسی 中文",
+            ChunkQueue.normalize("Heading\nco\u00AD operate co\u00AD\noperate well-\nknown\u00A0فارسی\u0085中文"),
+        )
+    }
+
+    @Test
+    fun normalizationKeepsParagraphsButUnwrapsVisualLines() {
+        val text = "\uFEFFHeading\r\n\r\nFirst\rline\u2028continues.\n \t\nSecond\u2029Third\u000CFourth"
+        val expected = "Heading\n\nFirst line continues.\n\nSecond\n\nThird\n\nFourth"
+        assertEquals(expected, ChunkQueue.normalize(text))
+        assertEquals(expected, ChunkQueue.normalize(expected))
+        assertEquals("cooperate\n\nnext", ChunkQueue.normalize("co\u00AD\r\noperate\u00AD\n\nnext"))
+        assertEquals("می\u200Cروم cafe\u0301", ChunkQueue.normalize("می\u200Cروم cafe\u0301"))
+    }
+
+    @Test
+    fun documentChunksUseFiveHundredWordsWithoutOrphaningFinalPunctuation() {
+        for (count in listOf(499, 500, 501, 1000, 1001)) {
+            val words = (1..count).map { "word$it" }
+            val chunks = ChunkQueue.documentChunks(words.joinToString(" ") + ".")
+            assertEquals((count + 499) / 500, chunks.size)
+            assertEquals(words.joinToString(" ") + ".", chunks.joinToString(" "))
+            assertTrue(chunks.dropLast(1).all { it.split(' ').size == 500 })
+            assertTrue(chunks.last().endsWith('.'))
+        }
+        val longWords = List(500) { "a".repeat(20) }.joinToString(" ")
+        assertEquals(listOf(longWords), ChunkQueue.documentChunks(longWords))
+    }
+
+    @Test
+    fun paragraphsRemainNavigableWithoutTurningVisualLinesIntoUnits() {
+        val paragraph = (1..60).joinToString("\n") { "word$it" } + "."
+        val text = "Heading\n\n$paragraph\n\n$paragraph"
+        val chunks = ChunkQueue.documentChunks(text)
+        assertEquals(1, chunks.size)
+        val queue = ChunkQueue(chunks)
+        val segments = queue.segments(0)
+        assertEquals(2, segments.size)
+        assertEquals("Heading\n\n" + paragraph.replace('\n', ' '), segments.first())
+        assertEquals(paragraph.replace('\n', ' '), segments.last())
+        assertEquals(segments, queue.segments(0))
+        assertTrue(queue.segments(-1).isEmpty())
+        assertTrue(queue.segments(1).isEmpty())
+    }
+
+    @Test
+    fun sentenceGroupsPreserveTextAndStayWithinNarrationBounds() {
+        val sentence = List(20) { if (it == 0) "Word" else "word" }.joinToString(" ") + "."
+        val text = List(25) { sentence }.joinToString("\n")
+        val units = ChunkQueue.readableUnits(text)
+        assertEquals(7, units.size)
+        assertEquals(ChunkQueue.normalize(text), units.joinToString(" "))
+        assertTrue(units.dropLast(1).all { it.split(' ').size == 80 })
+        assertTrue(units.all { it.length <= 1_400 })
+        val lowercase = ChunkQueue.readableUnits(text.lowercase(java.util.Locale.ROOT))
+        assertEquals(ChunkQueue.normalize(text.lowercase(java.util.Locale.ROOT)), lowercase.joinToString(" "))
+        assertTrue(lowercase.all { it.split(' ').size in 1..100 })
+        assertTrue(ChunkQueue.readableUnits("\u0085\u00A0\n\n").isEmpty())
+    }
+
+    @Test
+    fun longTokensAndUnspacedScriptsAreBoundedWithoutLosingContent() {
+        for (text in listOf("a".repeat(10_000), "中文日本語".repeat(600), "ภาษาไทย".repeat(600))) {
+            val units = ChunkQueue.documentChunks(text).flatMap(ChunkQueue::readableUnits)
+            assertEquals(text, units.joinToString("").filterNot { it.isWhitespace() })
+            assertTrue(units.all { it.isNotEmpty() && it.length <= 1_400 })
+        }
+    }
+
+    @Test
+    fun graphemeClustersAreNeverSplitBySpeechOrNarrationLimits() {
+        val clusters = listOf(
+            "e\u0301",
+            "\uD83D\uDC69\uD83C\uDFFD\u200D\uD83D\uDCBB",
+            "\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67\u200D\uD83D\uDC66",
+            "\uD83C\uDDEE\uD83C\uDDF7",
+        )
+        for (cluster in clusters) {
+            val text = cluster.repeat(301)
+            val speech = ChunkQueue.speechSegments(text, cluster.length * 3)
+            assertEquals(text, speech.joinToString(""))
+            assertTrue(speech.all { it.length % cluster.length == 0 })
+            val units = ChunkQueue.readableUnits(text)
+            assertEquals(text, units.joinToString(""))
+            assertTrue(units.all { it.length % cluster.length == 0 })
+        }
+        val oversized = "a" + "\u0301".repeat(1_500)
+        assertEquals(listOf(oversized), ChunkQueue.readableUnits(oversized))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun speechRejectsLimitTooSmallForCombiningCluster() {
+        ChunkQueue.speechSegments("e\u0301", 1)
+    }
+
+    @Test
+    fun readerLanguageValidationUsesCatalogAndEnglishMigration() {
+        val catalog = com.voxora.core.gemini.ReaderLanguages
+        for (invalid in listOf(null, "", "original", "invalid")) {
+            assertEquals("en", catalog.normalize(invalid))
+        }
+        assertEquals("no", catalog.normalize("nb"))
+        assertEquals("pt-BR", catalog.normalize("PT-br"))
+        assertEquals(catalog.all.size, catalog.all.map { it.code }.toSet().size)
+        for (language in catalog.all) {
+            assertTrue(catalog.isValid(language.code))
+            assertEquals(language, catalog.language(language.code))
+            assertTrue(language.displayName(java.util.Locale.ENGLISH).isNotBlank())
+        }
+    }
+
+    @Test
     fun defaultChunksKeepWordBoundariesAndOrder() {
         for (count in listOf(499, 500, 501, 1000, 1001)) {
             val words = (1..count).map { "word$it" }

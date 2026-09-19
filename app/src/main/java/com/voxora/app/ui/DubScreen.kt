@@ -1,0 +1,598 @@
+package com.voxora.app.ui
+
+import android.content.res.Configuration.UI_MODE_NIGHT_YES
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.voxora.app.R
+import com.voxora.app.dub.DubService
+import com.voxora.app.dub.DubUiStatus
+import com.voxora.app.dub.SyncStatusVisual
+import com.voxora.app.dub.SyncTone
+import com.voxora.app.dub.sync.MediaControlAccess
+import com.voxora.app.dub.sync.SyncState
+import com.voxora.app.ui.theme.VoxoraBrand
+import com.voxora.app.ui.theme.VoxoraColors
+import com.voxora.app.ui.theme.VoxoraTheme
+import kotlin.math.sin
+
+/**
+ * Live Dub working surface.
+ *
+ * This is the existing Live Dub start/stop screen, moved out of Home so Home
+ * can act as the neutral Voxora product chooser. The Live Dub engine
+ * (`dub/` package, `GeminiLiveSession`, `GeminiLiveConfig`) is untouched —
+ * this screen only drives the already-public `DubService` start/stop API.
+ */
+@Composable
+fun DubScreen(
+    status: DubUiStatus,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onBack: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onDismissError: () -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
+    val level by DubService.audioLevel.collectAsStateWithLifecycle()
+    val syncState by DubService.syncState.collectAsStateWithLifecycle()
+
+    // The media-control grant is a system setting, so it can change while Voxora is in the
+    // background. Re-read it on every resume rather than trusting a value captured at first
+    // composition, or the card would still be showing after the user granted it.
+    val context = LocalContext.current
+    var mediaControlGranted by remember { mutableStateOf(MediaControlAccess.isGranted(context)) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                mediaControlGranted = MediaControlAccess.isGranted(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    DubContent(
+        status = status,
+        level = level,
+        syncState = syncState,
+        mediaControlGranted = mediaControlGranted,
+        onStart = onStart,
+        onStop = onStop,
+        onBack = onBack,
+        onOpenSettings = onOpenSettings,
+        onDismissError = onDismissError,
+        onRequestMediaControl = { context.startActivity(MediaControlAccess.settingsIntent()) },
+        modifier = modifier,
+    )
+}
+
+@Composable
+private fun DubContent(
+    status: DubUiStatus,
+    level: Float,
+    syncState: SyncState,
+    mediaControlGranted: Boolean,
+    onStart: () -> Unit,
+    onStop: () -> Unit,
+    onBack: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onDismissError: () -> Unit,
+    onRequestMediaControl: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    val isLive = status is DubUiStatus.Live || status is DubUiStatus.Connecting
+    val isError = status is DubUiStatus.Error
+    val statusLabel = when (status) {
+        is DubUiStatus.Idle -> stringResource(R.string.status_idle)
+        is DubUiStatus.Connecting -> stringResource(R.string.status_connecting)
+        is DubUiStatus.Live -> stringResource(R.string.status_live)
+        is DubUiStatus.Error -> stringResource(R.string.status_error)
+    }
+    val dotColor = when (status) {
+        is DubUiStatus.Live -> VoxoraColors.success
+        is DubUiStatus.Connecting -> VoxoraColors.warning
+        is DubUiStatus.Error -> colors.error
+        else -> colors.outline
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .background(colors.background)
+            .safeDrawingPadding()
+            .padding(horizontal = 24.dp, vertical = 16.dp),
+    ) {
+        // Auto-mirrored so the arrow points the correct way under RTL instead of staying LTR.
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.action_back),
+                    tint = colors.onSurface,
+                )
+            }
+            Spacer(Modifier.width(4.dp))
+            Text(
+                text = stringResource(R.string.dub_title),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.onSurface,
+            )
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(CircleShape)
+                        .background(VoxoraColors.glow),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "V",
+                        color = colors.primary,
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                }
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    text = stringResource(R.string.tagline),
+                    color = colors.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 8.dp),
+                )
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(colors.surfaceVariant)
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(dotColor),
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    Text(
+                        text = statusLabel,
+                        color = colors.onSurface,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+
+                if (isLive) {
+                    Spacer(Modifier.height(20.dp))
+                    LiveWaveform(
+                        level = level,
+                        active = status is DubUiStatus.Live,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(56.dp),
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    SyncStatusLine(state = syncState)
+                }
+
+                if (isError && status is DubUiStatus.Error) {
+                    Spacer(Modifier.height(16.dp))
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(colors.error.copy(alpha = 0.12f))
+                            .padding(14.dp),
+                    ) {
+                        Text(
+                            stringResource(R.string.error_banner_title),
+                            color = colors.error,
+                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            status.message,
+                            color = colors.onSurface,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    onDismissError()
+                                    onOpenSettings()
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(10.dp),
+                            ) {
+                                Text(
+                                    stringResource(R.string.action_settings),
+                                    color = colors.primary,
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                            }
+                            Button(
+                                onClick = {
+                                    onDismissError()
+                                    onStart()
+                                },
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = colors.primary,
+                                    contentColor = colors.onPrimary,
+                                ),
+                                shape = RoundedCornerShape(10.dp),
+                            ) {
+                                Text(
+                                    stringResource(R.string.action_retry),
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    text = stringResource(R.string.home_title),
+                    color = colors.onSurface,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Medium,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.home_subtitle),
+                    color = colors.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(24.dp))
+                if (isLive) {
+                    Button(
+                        onClick = onStop,
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = colors.error,
+                            contentColor = colors.onError,
+                        ),
+                        shape = RoundedCornerShape(14.dp),
+                    ) {
+                        Text(stringResource(R.string.action_stop), fontWeight = FontWeight.SemiBold)
+                    }
+                } else {
+                    Button(
+                        onClick = onStart,
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = colors.primary,
+                            contentColor = colors.onPrimary,
+                        ),
+                        shape = RoundedCornerShape(14.dp),
+                    ) {
+                        Text(stringResource(R.string.action_start), fontWeight = FontWeight.SemiBold)
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                // Guidance, not content: the capture hint and the latency note are the explanation
+                // role, so they read as the same kind of text as every other help sentence.
+                Text(
+                    text = stringResource(R.string.phase1_hint),
+                    color = VoxoraColors.explanation,
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.latency_hint),
+                    color = VoxoraColors.explanation,
+                    style = MaterialTheme.typography.labelSmall,
+                    textAlign = TextAlign.Center,
+                )
+                if (SyncStatusVisual.showsPermissionPrompt(live = isLive, granted = mediaControlGranted)) {
+                    Spacer(Modifier.height(14.dp))
+                    SyncPermissionCard(onRequest = onRequestMediaControl)
+                } else if (isLive && SyncStatusVisual.showsVideoNote(syncState)) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.sync_video_note),
+                        color = VoxoraColors.explanation,
+                        style = MaterialTheme.typography.labelSmall,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                TextButton(onClick = onOpenSettings) {
+                    Text(stringResource(R.string.action_settings), color = colors.primary)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * One small line saying what synchronization is doing. The tone comes from
+ * [SyncStatusVisual]; the composable only asks for it.
+ */
+@Composable
+private fun SyncStatusLine(state: SyncState, modifier: Modifier = Modifier) {
+    val dot = when (SyncStatusVisual.tone(state)) {
+        SyncTone.ACTIVE -> VoxoraColors.success
+        SyncTone.WARNING -> VoxoraColors.warning
+        SyncTone.NEUTRAL -> VoxoraColors.neutral
+    }
+    val label = when (state) {
+        SyncState.IDLE -> stringResource(R.string.status_idle)
+        SyncState.WARMING_UP -> stringResource(R.string.sync_status_warming)
+        SyncState.SYNCED -> stringResource(R.string.sync_status_synced)
+        SyncState.CORRECTING -> stringResource(R.string.sync_status_correcting)
+        SyncState.AUDIO_ONLY -> stringResource(R.string.sync_status_audio_only)
+        SyncState.UNAVAILABLE -> stringResource(R.string.sync_status_unavailable)
+    }
+    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(dot),
+        )
+        Spacer(Modifier.size(8.dp))
+        Text(
+            text = label,
+            color = VoxoraColors.explanation,
+            style = MaterialTheme.typography.labelSmall,
+        )
+    }
+}
+
+/**
+ * The media-control opt-in.
+ *
+ * It explains *why* the permission is needed before offering the system settings page, and it is
+ * only shown while Live Dub is running without the grant — the feature works without it, as
+ * audio-only, so this is an offer and not a gate.
+ */
+@Composable
+private fun SyncPermissionCard(onRequest: () -> Unit, modifier: Modifier = Modifier) {
+    val colors = MaterialTheme.colorScheme
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(colors.surface)
+            .padding(14.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.sync_permission_title),
+            color = colors.onSurface,
+            fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = stringResource(R.string.sync_permission_body),
+            color = VoxoraColors.explanation,
+            style = MaterialTheme.typography.labelSmall,
+        )
+        Spacer(Modifier.height(10.dp))
+        OutlinedButton(
+            onClick = onRequest,
+            shape = RoundedCornerShape(10.dp),
+        ) {
+            Text(
+                text = stringResource(R.string.sync_permission_action),
+                color = colors.primary,
+                style = MaterialTheme.typography.labelMedium,
+            )
+        }
+    }
+}
+
+@Composable
+private fun LiveWaveform(
+    level: Float,
+    active: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val gold = VoxoraBrand.waveGold
+    val green = VoxoraBrand.waveGreen
+    val transition = rememberInfiniteTransition(label = "wave")
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = (Math.PI * 2).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(1200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "phase",
+    )
+    Canvas(modifier = modifier) {
+        val bars = 24
+        val gap = size.width * 0.012f
+        val barW = (size.width - gap * (bars + 1)) / bars
+        val base = if (active) level.coerceIn(0.05f, 1f) else 0.12f
+        for (i in 0 until bars) {
+            val n = ((sin(phase + i * 0.45f) + 1f) / 2f)
+            val amp = (0.18f + 0.82f * base * (0.35f + 0.65f * n)).coerceIn(0.1f, 1f)
+            val bh = size.height * amp
+            val left = gap + i * (barW + gap)
+            val top = (size.height - bh) / 2f
+            val t = i / (bars - 1f)
+            val color = androidx.compose.ui.graphics.lerp(gold, green, t)
+            drawRoundRect(
+                brush = Brush.verticalGradient(listOf(color.copy(alpha = 0.35f), color)),
+                topLeft = Offset(left, top),
+                size = Size(barW, bh),
+                cornerRadius = CornerRadius(barW / 2f, barW / 2f),
+            )
+        }
+    }
+}
+
+@Preview(showBackground = true, uiMode = UI_MODE_NIGHT_YES)
+@Composable
+private fun SyncStatusLinePreview(modifier: Modifier = Modifier) {
+    VoxoraTheme {
+        Surface(modifier = modifier) {
+            Column(Modifier.padding(16.dp)) {
+                SyncStatusLine(state = SyncState.WARMING_UP)
+                Spacer(Modifier.height(8.dp))
+                SyncStatusLine(state = SyncState.SYNCED)
+                Spacer(Modifier.height(8.dp))
+                SyncStatusLine(state = SyncState.CORRECTING)
+                Spacer(Modifier.height(8.dp))
+                SyncStatusLine(state = SyncState.AUDIO_ONLY)
+                Spacer(Modifier.height(8.dp))
+                SyncStatusLine(state = SyncState.UNAVAILABLE)
+            }
+        }
+    }
+}
+
+@Preview(showBackground = true, uiMode = UI_MODE_NIGHT_YES)
+@Composable
+private fun SyncPermissionCardPreview(modifier: Modifier = Modifier) {
+    VoxoraTheme {
+        Surface(modifier = modifier) {
+            Box(Modifier.padding(16.dp)) {
+                SyncPermissionCard(onRequest = {})
+            }
+        }
+    }
+}
+
+@Preview(showBackground = true, uiMode = UI_MODE_NIGHT_YES)
+@Composable
+private fun DubContentPreview(modifier: Modifier = Modifier) {
+    VoxoraTheme {
+        Surface(modifier = modifier) {
+            DubContent(
+                status = DubUiStatus.Idle,
+                level = 0f,
+                syncState = SyncState.IDLE,
+                mediaControlGranted = false,
+                onStart = {},
+                onStop = {},
+                onBack = {},
+                onOpenSettings = {},
+                onDismissError = {},
+                onRequestMediaControl = {},
+            )
+        }
+    }
+}
+
+@Preview(showBackground = true, uiMode = UI_MODE_NIGHT_YES)
+@Composable
+private fun DubContentSyncedPreview(modifier: Modifier = Modifier) {
+    VoxoraTheme {
+        Surface(modifier = modifier) {
+            DubContent(
+                status = DubUiStatus.Live,
+                level = 0.6f,
+                syncState = SyncState.SYNCED,
+                mediaControlGranted = true,
+                onStart = {},
+                onStop = {},
+                onBack = {},
+                onOpenSettings = {},
+                onDismissError = {},
+                onRequestMediaControl = {},
+            )
+        }
+    }
+}
+
+@Preview(showBackground = true, uiMode = UI_MODE_NIGHT_YES)
+@Composable
+private fun DubContentSyncPermissionPreview(modifier: Modifier = Modifier) {
+    VoxoraTheme {
+        Surface(modifier = modifier) {
+            DubContent(
+                status = DubUiStatus.Live,
+                level = 0.4f,
+                syncState = SyncState.AUDIO_ONLY,
+                mediaControlGranted = false,
+                onStart = {},
+                onStop = {},
+                onBack = {},
+                onOpenSettings = {},
+                onDismissError = {},
+                onRequestMediaControl = {},
+            )
+        }
+    }
+}

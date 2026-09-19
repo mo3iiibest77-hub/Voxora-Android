@@ -9,6 +9,11 @@ import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.encryption.InvalidPasswordException
 import com.tom_roush.pdfbox.text.PDFTextStripper
 import com.tom_roush.pdfbox.text.TextPosition
+import com.voxora.core.reader.BookSignals
+import com.voxora.core.reader.BookSignalsReader
+import com.voxora.core.reader.ReaderDocumentLimits
+import com.voxora.core.reader.ReaderDocumentType
+import com.voxora.core.reader.ReaderSourceType
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -24,43 +29,131 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
+/**
+ * Extracted document text plus the display name the provider reported, and the identification
+ * signals read from the document's opening.
+ *
+ * [signals] is not part of the reading pipeline: it exists so a book can be looked up in a public
+ * catalogue without the Reader ever uploading the document. It is computed here because this is the
+ * only place the extracted text exists in full, and it costs nothing extra to read the head of a
+ * string that has already been built.
+ */
+data class ExtractedDocument(
+    val name: String,
+    val chunks: List<String>,
+    val signals: BookSignals,
+)
+
+/**
+ * A document's identity, resolved without reading its contents.
+ *
+ * Needed before extraction because importing a document copies it into app storage first, and the
+ * copy has to know the file's type before it can be named.
+ */
+data class DocumentIdentity(
+    val name: String,
+    val type: ReaderSourceType,
+    val isPdf: Boolean,
+)
+
 class TextExtractor @Inject constructor(@ApplicationContext private val context: Context) {
-    suspend fun extract(uri: Uri): List<String> = withContext(Dispatchers.IO) {
-        val coroutineContext = currentCoroutineContext()
-        try {
-            coroutineContext.ensureActive()
+    /**
+     * Resolves [uri]'s display name and type.
+     *
+     * @param displayName overrides the name reported by the provider. This is required when the URI
+     *   points at Voxora's own copy of a document: the copy is named after the book's internal id,
+     *   so the provider name would be a UUID and the reader's file name would be lost.
+     * @param knownType the type the caller already knows, which wins over anything sniffed here.
+     *   **This is what makes a stored book reopenable.** A `file://` URI carries no MIME type, so
+     *   without it the type can only be guessed from [displayName]'s extension — and a display name
+     *   is not a file name: once book identification succeeds, the record's title becomes the
+     *   catalogue title (`"The Selfish Gene"`), which has no extension. Guessing from it turned a
+     *   perfectly readable copy into `Unsupported file type`. The persisted `sourceType` is a fact
+     *   the record already holds; this parameter is how it reaches extraction.
+     */
+    suspend fun identify(
+        uri: Uri,
+        displayName: String? = null,
+        knownType: ReaderSourceType? = null,
+    ): DocumentIdentity =
+        withContext(Dispatchers.IO) {
             val resolver = context.contentResolver
             val mime = resolver.getType(uri)?.substringBefore(';')?.trim()?.lowercase(Locale.ROOT)
-            var name = uri.lastPathSegment.orEmpty()
+            // A caller-supplied name wins: Voxora's own copy of a document is named after the
+            // book's id, and the reader's file name is the one worth keeping.
+            val overrideName = displayName?.trim()?.takeIf { it.isNotEmpty() }
+            var name = overrideName ?: uri.lastPathSegment.orEmpty()
             resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)?.use { cursor ->
                 if (cursor.moveToFirst()) {
                     val nameColumn = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                    if (nameColumn >= 0 && !cursor.isNull(nameColumn)) name = cursor.getString(nameColumn)
+                    if (overrideName == null && nameColumn >= 0 && !cursor.isNull(nameColumn)) {
+                        name = cursor.getString(nameColumn)
+                    }
                     val sizeColumn = cursor.getColumnIndex(OpenableColumns.SIZE)
-                    if (sizeColumn >= 0 && !cursor.isNull(sizeColumn) && cursor.getLong(sizeColumn) > MAX_BYTES) {
-                        throw ExtractionException("This file is too large. Choose a file smaller than 20 MB.")
+                    if (sizeColumn >= 0 && !cursor.isNull(sizeColumn) &&
+                        ReaderDocumentLimits.exceeds(cursor.getLong(sizeColumn))
+                    ) {
+                        throw ExtractionException(
+                            "This file is too large. Choose a file no larger than ${ReaderDocumentLimits.LABEL}.",
+                        )
                     }
                 }
             }
-            val extension = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
-            val isPdf = when {
-                mime == "application/pdf" -> true
-                mime == "text/plain" -> false
-                extension == "pdf" -> true
-                extension == "txt" -> false
-                else -> throw ExtractionException("Unsupported file type. Choose a PDF or UTF-8 TXT file.")
-            }
+            // The order of evidence is the rule, not an implementation detail: see
+            // [ReaderDocumentType]. A known type from the record beats everything; a `file://` copy
+            // has no MIME type; and a display title is not a file name.
+            val type = ReaderDocumentType.resolve(
+                known = knownType,
+                mime = mime,
+                name = name,
+            ) ?: throw ExtractionException("Unsupported file type. Choose a PDF or UTF-8 TXT file.")
+            val isPdf = type == ReaderSourceType.PDF
+            DocumentIdentity(
+                name = name.trim(),
+                type = type,
+                isPdf = isPdf,
+            )
+        }
+
+    /**
+     * Extracts [uri].
+     *
+     * @param displayName overrides the name reported by the provider; see [identify].
+     * @param knownType the type the caller already knows; see [identify]. Passing it is what lets a
+     *   stored book be re-extracted from its own copy even when its display title is a catalogue
+     *   title rather than a file name.
+     */
+    suspend fun extract(
+        uri: Uri,
+        displayName: String? = null,
+        knownType: ReaderSourceType? = null,
+    ): ExtractedDocument = withContext(Dispatchers.IO) {
+        val coroutineContext = currentCoroutineContext()
+        try {
+            coroutineContext.ensureActive()
+            val identity = identify(uri, displayName, knownType)
+            val name = identity.name
+            val isPdf = identity.isPdf
+            val resolver = context.contentResolver
             val bytes = resolver.openInputStream(uri)?.use { input ->
                 ByteArrayOutputStream().use { output ->
                     val buffer = ByteArray(8192)
                     var total = 0
                     while (true) {
                         coroutineContext.ensureActive()
-                        val count = input.read(buffer, 0, minOf(buffer.size, MAX_BYTES - total + 1))
+                        // Read one byte past the limit at most, so a file that is too large is
+                        // refused without ever buffering more than the supported size.
+                        val count = input.read(
+                            buffer,
+                            0,
+                            minOf(buffer.size.toLong(), ReaderDocumentLimits.MAX_BYTES - total + 1L).toInt(),
+                        )
                         if (count < 0) break
                         total += count
-                        if (total > MAX_BYTES) {
-                            throw ExtractionException("This file is too large. Choose a file smaller than 20 MB.")
+                        if (ReaderDocumentLimits.exceeds(total.toLong())) {
+                            throw ExtractionException(
+                                "This file is too large. Choose a file smaller than ${ReaderDocumentLimits.LABEL}.",
+                            )
                         }
                         output.write(buffer, 0, count)
                     }
@@ -96,7 +189,40 @@ class TextExtractor @Inject constructor(@ApplicationContext private val context:
                                 super.processPage(page)
                                 coroutineContext.ensureActive()
                             }
+
+                            /**
+                             * PDFBox collects glyphs in content-stream order and only
+                             * sorts them when `sortByPosition` is enabled. That default
+                             * is what scrambles the reading order of PDFs whose stream
+                             * is not painted in visual order, so the fragments are
+                             * ordered here by [PdfReadingOrder] instead — which also
+                             * keeps multi-column pages from being row-interleaved.
+                             */
+                            override fun writePage() {
+                                coroutineContext.ensureActive()
+                                charactersByArticle.forEach { article ->
+                                    if (article.size < 2) return@forEach
+                                    val fragments = article.map { position ->
+                                        PdfReadingOrder.Fragment(
+                                            position.xDirAdj,
+                                            position.yDirAdj,
+                                            position.widthDirAdj,
+                                            position.heightDir,
+                                        )
+                                    }
+                                    val sorted = PdfReadingOrder.order(fragments).map(article::get)
+                                    article.clear()
+                                    article.addAll(sorted)
+                                }
+                                super.writePage()
+                                coroutineContext.ensureActive()
+                            }
                         }
+                        stripper.sortByPosition = false
+                        stripper.lineSeparator = "\n"
+                        stripper.paragraphStart = ""
+                        stripper.paragraphEnd = "\n\n"
+                        stripper.pageEnd = "\n\n"
                         stripper.writeText(document, writer)
                     }
                 } else {
@@ -120,7 +246,7 @@ class TextExtractor @Inject constructor(@ApplicationContext private val context:
                 writer.toString()
             }
             coroutineContext.ensureActive()
-            val chunks = ChunkQueue.split(text)
+            val chunks = ChunkQueue.documentChunks(text)
             coroutineContext.ensureActive()
             if (chunks.isEmpty()) {
                 throw ExtractionException(
@@ -128,7 +254,12 @@ class TextExtractor @Inject constructor(@ApplicationContext private val context:
                     else "This text file is blank. Choose a file containing text."
                 )
             }
-            chunks
+            val resolvedName = name.trim()
+            // Read the identification signals from the document that was just extracted. This is a
+            // read of a string already in memory — it never touches the file again, never blocks
+            // playback, and never sends the document anywhere.
+            val signals = BookSignalsReader.from(resolvedName, text)
+            ExtractedDocument(name = resolvedName, chunks = chunks, signals = signals)
         } catch (error: ExtractionException) {
             coroutineContext.ensureActive()
             throw error
@@ -168,7 +299,9 @@ class TextExtractor @Inject constructor(@ApplicationContext private val context:
     }
 
     private companion object {
-        const val MAX_BYTES = 20 * 1024 * 1024
+        // The document-size limit is not declared here: it is one rule shared with the document
+        // store, in `ReaderDocumentLimits`, so the boundary that reads a file and the boundary
+        // that copies it can never disagree about what "too large" means.
         const val MAX_CHARS = 2_000_000
         const val MAX_PAGES = 1_000
     }

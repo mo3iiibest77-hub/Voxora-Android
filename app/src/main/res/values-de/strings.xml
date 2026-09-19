@@ -11,7 +11,6 @@
     <string name="action_save">Speichern</string>
     <string name="action_sign_out">Abmelden</string>
     <string name="settings_title">Einstellungen</string>
-    <string name="settings_account">Konto</string>
     <string name="settings_api_key">Gemini-API-Schlüssel</string>
     <string name="settings_api_key_hint">Schlüssel aus Google AI Studio einfügen</string>
     <string name="settings_target_language">Synchron-Sprache</string>
@@ -35,10 +34,4 @@
     <string name="onboarding_page2_body">Wenn Android die Bildschirmaufnahme anfragt, erlauben. Voxora nutzt nur Audio — nicht die Kamera.</string>
     <string name="onboarding_page3_title">Kostenlosen Gemini-Schlüssel hinzufügen</string>
     <string name="onboarding_page3_body">Schlüssel in Google AI Studio erstellen, in den Einstellungen einfügen, Sprache wählen, dann Start.</string>
-    <string name="auth_optional_hint">Optional. Du kannst Voxora nur mit API-Schlüssel nutzen, ohne Anmeldung.</string>
-    <string name="auth_signing_in">Anmeldung…</string>
-    <string name="auth_failed">Anmeldung fehlgeschlagen. Erneut versuchen oder als Gast fortfahren.</string>
-    <string name="auth_signed_out">Abgemeldet</string>
-    <string name="auth_welcome">Willkommen, %1$s</string>
-    <string name="auth_need_client_id">Google-Anmeldung braucht eine Web-Client-ID. Du kannst als Gast mit API-Schlüssel weitermachen.</string>
 </resources>

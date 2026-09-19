@@ -1,10 +1,25 @@
 name: Android CI
 
+# Build/test only when app source or build config changes.
+# Pure docs commits (AGENTS.md, CloudMD.md, AgentMD.md, CLAUDE.md, README, etc.)
+# do not start assembleDebug or unit tests. workflow_dispatch still always runs.
 on:
   push:
-    branches: [main]
+    branches: [main, feat/reader-segmented-spooling]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".gitignore"
+      - ".editorconfig"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".gitignore"
+      - ".editorconfig"
   workflow_dispatch:
 
 jobs:
@@ -75,3 +90,34 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
+
+  # Independent from the APK job so a contract-test regression is reported
+  # without preventing the debug artifact from being produced.
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools platforms;android-35 build-tools;35.0.0
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Run unit tests
+        run: |
+          gradle :core:testDebugUnitTest :app:testDebugUnitTest --stacktrace --no-daemon

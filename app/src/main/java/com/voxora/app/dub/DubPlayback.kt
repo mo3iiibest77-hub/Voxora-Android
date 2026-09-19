@@ -5,16 +5,21 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioFormat
 import android.media.AudioManager
+import android.media.AudioTimestamp
 import android.media.AudioTrack
 import android.media.VolumeProvider
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Build
 import android.util.Log
+import com.voxora.app.dub.sync.PlaybackHead
+import com.voxora.app.dub.sync.PlaybackHeadState
+import com.voxora.app.dub.sync.SourceVolumeDuck
 import com.voxora.app.util.VoxoraLog
 import com.voxora.core.GeminiLiveConfig
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Gemini on USAGE_ASSISTANT (not STREAM_MUSIC).
@@ -31,12 +36,33 @@ class DubPlayback(context: Context? = null) {
     private var mediaSession: MediaSession? = null
     private val playing = AtomicBoolean(false)
     private var savedMusicVolume: Int = -1
+    private val writtenFrames = AtomicLong(0)
+
+    /**
+     * The device's playback head, unwrapped.
+     *
+     * Guarded by [playedFrames]'s lock rather than by a thread rule: three callers read it — the
+     * audio consumer, the sync tick and the status collector — and a torn read would look like a
+     * wrap.
+     */
+    private var headState = PlaybackHeadState()
+
     /** 0..100 software gain for dub (volume keys) */
     private val dubVolume = AtomicInteger(100)
+
+    /**
+     * The playback-rate trim currently applied to the output, as a multiple of the output sample
+     * rate. `1.0` means no trim. Read by the diagnostics line and written by the synchronizer.
+     */
+    @Volatile
+    private var appliedRate = 1.0f
 
     fun start() {
         VoxoraLog.i("Playback", "start()")
         stop()
+        writtenFrames.set(0L)
+        headState = PlaybackHeadState()
+        appliedRate = 1.0f
         val attrs = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_ASSISTANT)
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
@@ -52,7 +78,11 @@ class DubPlayback(context: Context? = null) {
             AudioFormat.CHANNEL_OUT_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
         )
-        val bufSize = (minBuf * 8).coerceAtLeast(GeminiLiveConfig.OUTPUT_SAMPLE_RATE * 2)
+        // Keep the output buffer short. Every byte sitting in this buffer is added lip-sync delay
+        // before the first dubbed word is heard, so the old `minBuf * 8` (a full second at
+        // 24 kHz) was itself a latency bug. Two minimum buffers rides out a scheduling hiccup;
+        // MIN_BUFFER_BYTES floors it at ~125 ms so a tiny reported minimum cannot underrun.
+        val bufSize = (minBuf * 2).coerceAtLeast(MIN_BUFFER_BYTES)
         val builder = AudioTrack.Builder()
             .setAudioAttributes(attrs)
             .setAudioFormat(
@@ -93,7 +123,88 @@ class DubPlayback(context: Context? = null) {
             }
             offset += written
         }
+        writtenFrames.addAndGet(offset.toLong())
     }
+
+    /**
+     * Dubbed audio content handed to the output since [start], in nanoseconds.
+     *
+     * This counts what was *written*. It is the scheduling side of the timeline; the played side
+     * comes from [playedNanos], and the difference between them is the buffer the user is
+     * currently waiting through.
+     */
+    fun writtenNanos(): Long =
+        writtenFrames.get() * 1_000_000_000L / GeminiLiveConfig.OUTPUT_SAMPLE_RATE
+
+    /**
+     * Frames the device has actually presented since [start], unwrapped into a monotonic count.
+     *
+     * Returns the last known total when the track is gone or refuses to report, which the
+     * timeline reads as "no progress" rather than as a negative position.
+     *
+     * Synchronized because three threads read it — the audio consumer, the sync tick and the
+     * status collector — and the unwrap mutates state; a torn read would look like a wrap and
+     * fabricate an enormous backlog.
+     */
+    @Synchronized
+    fun playedFrames(): Long {
+        val t = track ?: return headState.total
+        return try {
+            headState = PlaybackHead.advance(headState, t.playbackHeadPosition)
+            headState.total
+        } catch (e: Exception) {
+            VoxoraLog.w("Playback", "playbackHeadPosition failed: ${e.message}")
+            headState.total
+        }
+    }
+
+    /** The playhead: dubbed audio the user has actually heard, in nanoseconds. */
+    fun playedNanos(): Long =
+        playedFrames() * 1_000_000_000L / GeminiLiveConfig.OUTPUT_SAMPLE_RATE
+
+    /**
+     * The monotonic time the platform associates with the audio currently leaving the speaker,
+     * or null when the device cannot report it.
+     *
+     * This is the only honest source for "when did the first dubbed word actually play" —
+     * a write timestamp is not a playback timestamp.
+     */
+    fun playbackTimestampNanos(): Long? {
+        val t = track ?: return null
+        return try {
+            val ts = AudioTimestamp()
+            if (t.getTimestamp(ts)) ts.nanoTime else null
+        } catch (e: Exception) {
+            VoxoraLog.w("Playback", "getTimestamp failed: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * Applies a bounded playback-rate trim to the output.
+     *
+     * This is the *gentle* half of the correction: playing a few percent fast drains a small
+     * backlog without skipping the audio a drop would discard. It is deliberately tiny, clamped,
+     * and best-effort — a device whose track refuses the rate keeps playing at `1.0` rather than
+     * failing, and [currentRate] then reports what is actually applied rather than what was asked
+     * for.
+     */
+    fun setRate(rate: Float) {
+        val wanted = rate.coerceIn(MIN_RATE, MAX_RATE)
+        val t = track ?: return
+        if (wanted == appliedRate) return
+        val ok = try {
+            t.setPlaybackRate((GeminiLiveConfig.OUTPUT_SAMPLE_RATE * wanted).toInt()) ==
+                AudioTrack.SUCCESS
+        } catch (e: Exception) {
+            VoxoraLog.w("Playback", "setPlaybackRate failed: ${e.message}")
+            false
+        }
+        appliedRate = if (ok) wanted else 1.0f
+    }
+
+    /** The rate the output is actually running at. Always `1.0` before [start] and after [stop]. */
+    fun currentRate(): Float = appliedRate
 
     fun stop() {
         VoxoraLog.i("Playback", "stop()")
@@ -107,6 +218,8 @@ class DubPlayback(context: Context? = null) {
         } catch (_: Exception) {
         }
         track = null
+        headState = PlaybackHeadState()
+        appliedRate = 1.0f
         abandonFocus()
         restoreSourceMusic()
     }
@@ -226,13 +339,12 @@ class DubPlayback(context: Context? = null) {
         try {
             val max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
             val cur = am.getStreamVolume(AudioManager.STREAM_MUSIC)
-            if (cur <= 0 || max <= 0) return
+            // The rule is pure and unit-tested; it returns null when there is no headroom, in
+            // which case the source is deliberately left exactly as it is.
+            val target = SourceVolumeDuck.duckTarget(cur, max) ?: return
             savedMusicVolume = cur
-            val target = (cur * 28 / 100).coerceAtLeast(1).coerceAtMost(cur - 1)
-            if (target < cur) {
-                am.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
-                VoxoraLog.i("Playback", "duck STREAM_MUSIC only $cur → $target (max=$max, ~28%); dub=ASSISTANT")
-            }
+            am.setStreamVolume(AudioManager.STREAM_MUSIC, target, 0)
+            VoxoraLog.i("Playback", "duck STREAM_MUSIC only $cur → $target (max=$max, ~28%); dub=ASSISTANT")
         } catch (e: Exception) {
             Log.w(TAG, "lowerSourceMusicOnly: ${e.message}")
             VoxoraLog.w("Playback", "duck failed: ${e.message}")
@@ -242,9 +354,8 @@ class DubPlayback(context: Context? = null) {
 
     private fun restoreSourceMusic() {
         val am = audioManager ?: return
-        val saved = savedMusicVolume
+        val saved = SourceVolumeDuck.restoreTarget(savedMusicVolume) ?: return
         savedMusicVolume = -1
-        if (saved < 0) return
         try {
             am.setStreamVolume(AudioManager.STREAM_MUSIC, saved, 0)
             VoxoraLog.i("Playback", "restore STREAM_MUSIC → $saved")
@@ -255,5 +366,12 @@ class DubPlayback(context: Context? = null) {
 
     companion object {
         private const val TAG = "VoxoraPlayback"
+
+        /** Floor for the output buffer: ~125 ms of 24 kHz mono 16-bit audio. */
+        private val MIN_BUFFER_BYTES = GeminiLiveConfig.OUTPUT_SAMPLE_RATE * 2 / 8
+
+        /** The hard clamp on the playback-rate trim, whatever the policy asks for. */
+        private const val MIN_RATE = 0.95f
+        private const val MAX_RATE = 1.05f
     }
 }

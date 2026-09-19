@@ -2,7 +2,10 @@ package com.voxora.core
 
 /**
  * Shared constants aligned with ParsLiveDub extension protocol.
- * Phase 1 will implement the WebSocket client against these values.
+ *
+ * There is deliberately no fixed output-delay constant here. Live Dub measures the pipeline's
+ * own latency at run time and corrects drift against it; a hardcoded delay was removed together
+ * with the rejected overlay approach.
  */
 object GeminiLiveConfig {
     const val WS_PATH =
@@ -11,5 +14,4 @@ object GeminiLiveConfig {
     const val INPUT_SAMPLE_RATE = 16_000
     const val OUTPUT_SAMPLE_RATE = 24_000
     const val CHUNK_MS = 60
-    const val DEFAULT_DELAY_MS = 2_900
 }

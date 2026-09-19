@@ -1,5 +1,6 @@
 package com.voxora.app.ui
 
+import android.content.res.Configuration.UI_MODE_NIGHT_YES
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,6 +20,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -29,29 +31,45 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.voxora.app.R
+import com.voxora.app.ui.theme.VoxoraColors
+import com.voxora.app.ui.theme.VoxoraTheme
 import kotlinx.coroutines.launch
 
+/**
+ * First-run introduction to both products.
+ *
+ * Voxora is two features behind one entry point, so the flow names both: Live Dub and the Reader.
+ * It also states what the app can and cannot access, and that the Gemini key is a single shared
+ * secret stored on the device — the previous flow described only Live Dub, which no longer matched
+ * the product.
+ *
+ * Signing in with Google is presented as optional, because it is: guest use with an API key is a
+ * supported path, and nothing here gates the app behind an account.
+ */
 @Composable
 fun OnboardingScreen(
     onFinished: () -> Unit,
     onOpenSettingsForKey: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
-    val pagerState = rememberPagerState(pageCount = { 3 })
+    val pageCount = 4
+    val pagerState = rememberPagerState(pageCount = { pageCount })
     val scope = rememberCoroutineScope()
 
     val titles = listOf(
         stringResource(R.string.onboarding_page1_title),
         stringResource(R.string.onboarding_page2_title),
         stringResource(R.string.onboarding_page3_title),
+        stringResource(R.string.onboarding_page4_title),
     )
     val bodies = listOf(
         stringResource(R.string.onboarding_page1_body),
         stringResource(R.string.onboarding_page2_body),
         stringResource(R.string.onboarding_page3_body),
+        stringResource(R.string.onboarding_page4_body),
     )
 
     Column(
@@ -74,16 +92,21 @@ fun OnboardingScreen(
             Modifier
                 .size(64.dp)
                 .clip(CircleShape)
-                .background(colors.primary.copy(alpha = 0.15f)),
+                .background(VoxoraColors.glow),
             contentAlignment = Alignment.Center,
         ) {
-            Text("V", color = colors.primary, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+            Text(
+                text = "V",
+                color = colors.primary,
+                style = MaterialTheme.typography.headlineSmall,
+                fontWeight = FontWeight.Bold,
+            )
         }
         Spacer(Modifier.height(12.dp))
         Text(
-            stringResource(R.string.app_name),
+            text = stringResource(R.string.app_name),
             color = colors.primary,
-            fontSize = 22.sp,
+            style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.SemiBold,
         )
 
@@ -103,19 +126,20 @@ fun OnboardingScreen(
                 verticalArrangement = Arrangement.Center,
             ) {
                 Text(
-                    titles[page],
+                    text = titles[page],
                     color = colors.onSurface,
-                    fontSize = 22.sp,
+                    style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.SemiBold,
                     textAlign = TextAlign.Center,
                 )
                 Spacer(Modifier.height(16.dp))
+                // The onboarding copy explains what the product does and what it can access, so it
+                // is guidance: the explanation role, consistent with every other help sentence.
                 Text(
-                    bodies[page],
-                    color = colors.onSurfaceVariant,
-                    fontSize = 15.sp,
+                    text = bodies[page],
+                    color = VoxoraColors.explanation,
+                    style = MaterialTheme.typography.bodyLarge,
                     textAlign = TextAlign.Center,
-                    lineHeight = 22.sp,
                 )
             }
         }
@@ -124,7 +148,7 @@ fun OnboardingScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.padding(vertical = 16.dp),
         ) {
-            repeat(3) { i ->
+            repeat(pageCount) { i ->
                 Box(
                     Modifier
                         .size(if (pagerState.currentPage == i) 10.dp else 8.dp)
@@ -137,7 +161,7 @@ fun OnboardingScreen(
             }
         }
 
-        if (pagerState.currentPage < 2) {
+        if (pagerState.currentPage < pageCount - 1) {
             Button(
                 onClick = {
                     scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
@@ -177,6 +201,16 @@ fun OnboardingScreen(
             ) {
                 Text(stringResource(R.string.onboarding_add_api_key), color = colors.primary)
             }
+        }
+    }
+}
+
+@Preview(showBackground = true, uiMode = UI_MODE_NIGHT_YES)
+@Composable
+private fun OnboardingScreenPreview(modifier: Modifier = Modifier) {
+    VoxoraTheme {
+        Surface(modifier = modifier) {
+            OnboardingScreen(onFinished = {}, onOpenSettingsForKey = {})
         }
     }
 }

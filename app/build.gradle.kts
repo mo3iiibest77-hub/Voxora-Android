@@ -41,6 +41,15 @@ android {
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
     packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
+    testOptions {
+        // The Android unit-test runtime substitutes a mockable `android.jar` whose methods throw
+        // `RuntimeException("Stub!")`. `VoxoraLog` — which the Reader's error paths call — writes
+        // through `android.util.Log`, so without this a test that exercises a handled failure dies
+        // on the logging call rather than on the behaviour it is testing. Returning defaults makes
+        // those calls no-ops. It does **not** replace the real `org.json` on the test classpath:
+        // defaulted JSON accessors return null and would break the cache, not fix it.
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {
@@ -52,6 +61,11 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.7")
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     testImplementation("junit:junit:4.13.2")
+    // The Android unit-test runtime ships a stubbed `org.json` whose methods throw, so any test
+    // that reaches app code using `JSONObject`/`JSONArray` fails with `RuntimeException("Stub!")`.
+    // The real implementation on the test classpath is what lets those tests exercise the code
+    // they are testing; it is test-only and never shipped. Same pin as the `:core` module.
+    testImplementation("org.json:json:20240303")
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.compose.ui:ui")
@@ -64,9 +78,10 @@ dependencies {
     implementation("com.google.dagger:hilt-android:2.52")
     ksp("com.google.dagger:hilt-compiler:2.52")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
-    implementation("androidx.credentials:credentials:1.3.0")
-    implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
-    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
+    // Google Identity Services authorization: the OAuth access token that Cloud reads need.
+    // Credential Manager is deliberately not used — it can only return an ID token, which
+    // identifies the account and authorises no Cloud API.
+    implementation("com.google.android.gms:play-services-auth:21.2.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
