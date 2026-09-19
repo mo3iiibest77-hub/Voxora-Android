@@ -235,21 +235,23 @@ on the card as if it were prose.
 **Verification.** `validate-cloud.sh` (pure JVM, kotlinc + JUnit, `-ea`): **715 tests pass across 59
 classes**. `validate-reader-android.sh` type-checks the Android-side Reader layers: OK. All seven
 guards pass — `themecheck.py`, `themeguard.py` (now exactly two modes), `checkimports.py`,
-`stringcheck.py`, `bidi_fa.py`, `jsonguard.py` (new), `dubguard.py`. **The local harness cannot
+`stringcheck.py`, `bidi_fa.py`, `apptestguard.py` (new), `dubguard.py`. **The local harness cannot
 compile Compose**, so `ReaderLibrarySection.kt` and the palette wiring are only proven by the CI
 `Assemble debug` job; **no real-device testing was performed** and every
 appearance/gesture/cache-hit claim is a device-verification item.
 
-**CI — first run failed, fix pushed.** Push run `35450489051` (`99a54ac`) passed `Assemble debug APK`
-but failed `Unit tests` with **19 of 388**, all in the new `ReaderChunkCacheTest` and all
-`RuntimeException` at its `store` helper. The cause was not the cache: the app module's unit tests run
-against Android's **stubbed** `org.json`, whose methods throw, and `ReaderChunkCache` is the first
-app-module code any unit test has reached that writes JSON — `:core` already had
-`testImplementation("org.json:json:20240303")`, `app` did not. The same dependency was added to
-`app/build.gradle.kts` (test-only, never shipped) and pushed. The local harness could not see it
-because it supplies a real `json-20240303.jar`; new `jsonguard.py` now fails statically when app
-sources parse JSON without that test dependency. **The cycle is not CI-verified until the fix's run is
-green.**
+**CI — `Unit tests` failed twice on Android's test stubs; both fixes pushed.** `Assemble debug APK`
+passed both times. Push run `35450489051` (`99a54ac`) failed `Unit tests` with **19 of 388**, all in
+the new `ReaderChunkCacheTest`, all `RuntimeException` at its `store` helper: the app module's unit
+tests run against Android's **stubbed `org.json`**, and `ReaderChunkCache` is the first app-module
+code any unit test has reached that writes JSON — `:core` already had
+`testImplementation("org.json:json:20240303")`, `app` did not. That was added (test-only). Push run
+`35450784861` (`00094aa`) then failed **1 of 388** — `anUnreadableEntryIsAMissRatherThanAFailure` at
+`ReaderChunkCacheTest.kt:217` — because with JSON fixed the test reached the cache's error path, which
+logs through `VoxoraLog` → `android.util.Log`, itself a stub that throws; `testOptions {
+unitTests.isReturnDefaultValues = true }` was added. The local harness could see neither, because it
+supplies a real `json-20240303.jar` and a plain-JVM `VoxoraLog` stub; new `apptestguard.py` now fails
+statically on either omission. **The cycle is not CI-verified until the second fix's run is green.**
 
 **BLOCKED.** Real-device verification is unavailable from this environment; so is any live
 `generateContent` check, so the themes' real Persian output is unmeasured.

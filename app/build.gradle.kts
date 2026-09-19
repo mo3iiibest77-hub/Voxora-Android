@@ -41,6 +41,15 @@ android {
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
     packaging { resources { excludes += "/META-INF/{AL2.0,LGPL2.1}" } }
+    testOptions {
+        // The Android unit-test runtime substitutes a mockable `android.jar` whose methods throw
+        // `RuntimeException("Stub!")`. `VoxoraLog` — which the Reader's error paths call — writes
+        // through `android.util.Log`, so without this a test that exercises a handled failure dies
+        // on the logging call rather than on the behaviour it is testing. Returning defaults makes
+        // those calls no-ops. It does **not** replace the real `org.json` on the test classpath:
+        // defaulted JSON accessors return null and would break the cache, not fix it.
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {

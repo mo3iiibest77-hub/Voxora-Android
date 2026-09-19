@@ -94,22 +94,27 @@ holds the standing UI/i18n rules plus the current implementation record.
 
 ## IN PROGRESS
 
-- **The cycle's first CI run failed `Unit tests`; the fix is pushed and its run has not been read
-  yet.** Push run `35450489051` (commit `99a54ac`) passed `Assemble debug APK` but failed
-  `Unit tests` — **19 of 388**, all in the new `ReaderChunkCacheTest`, all `RuntimeException` at the
-  shared `store` helper. The cause was not the cache: the app module's unit tests run against
-  Android's **stubbed** `org.json`, whose methods throw, and `ReaderChunkCache` is the first
-  app-module code any unit test has reached that writes JSON. `:core` already had
-  `testImplementation("org.json:json:20240303")`; `app` did not. That dependency was added to
-  `app/build.gradle.kts` (test-only, never shipped) and pushed. The run ids for the fix commit are
-  recorded in the follow-up docs commit once they are read from the REST API. **The cycle is not
-  CI-verified until that run is green.**
-- **The local harness could not see that fault, and a guard now can.** `validate-cloud.sh` compiles
-  and runs the same sources with a real `json-20240303.jar`, so the stub only exists under Gradle.
-  New `jsonguard.py` fails if any `app/src/main` Kotlin file imports `org.json.*` while
-  `app/build.gradle.kts` declares no real `org.json` on the test classpath; it was verified both ways.
-  This is the same family as the §5 defects in `AgentMD.md` — a fault that exists only in the
-  committed tree under Gradle.
+- **`Unit tests` has failed twice on Android's unit-test stubs; the second fix is pushed and its run
+  has not been read yet.** `Assemble debug APK` passed both times. Push run `35450489051` (commit
+  `99a54ac`) failed `Unit tests` with **19 of 388**, all in the new `ReaderChunkCacheTest`, all
+  `RuntimeException` at the shared `store` helper: the app module's unit tests run against Android's
+  **stubbed** `org.json`, and `ReaderChunkCache` is the first app-module code any unit test has reached
+  that writes JSON. `:core` already had `testImplementation("org.json:json:20240303")`; `app` did not.
+  That dependency was added (test-only, never shipped) and pushed as `00094aa`, whose run
+  `35450784861` then failed **1 of 388** — `anUnreadableEntryIsAMissRatherThanAFailure` at
+  `ReaderChunkCacheTest.kt:217` — because with JSON fixed the test reached the cache's error path, which
+  logs through `VoxoraLog` → `android.util.Log`, itself a stub that throws.
+  `testOptions { unitTests.isReturnDefaultValues = true }` was added. **The cycle is not CI-verified
+  until the second fix's run is green.**
+- **The local harness could not see either fault, and a guard now can.** `validate-cloud.sh` compiles
+  and runs the same sources with a real `json-20240303.jar` **and** a plain-JVM `VoxoraLog` stub, so
+  neither Android stub exists locally. New `apptestguard.py` fails if any `app/src/main` Kotlin file
+  imports `org.json.*` while `app/build.gradle.kts` declares no real `org.json` on the unit-test
+  classpath, or imports `android.util.Log` while the module does not set
+  `unitTests.isReturnDefaultValues = true`; it was verified both ways. Note that
+  `isReturnDefaultValues` does **not** replace the real `org.json` — defaulted JSON accessors return
+  null and would break the cache, not fix it. This is the same family as the §5 defects in
+  `AgentMD.md` — faults that exist only in the committed tree under Gradle.
 
 ## BLOCKED
 
