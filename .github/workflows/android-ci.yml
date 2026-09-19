@@ -1,10 +1,25 @@
 name: Android CI
 
+# Build/test only when app source or build config changes.
+# Pure docs commits (AGENTS.md, CloudMD.md, AgentMD.md, CLAUDE.md, README, etc.)
+# do not start assembleDebug or unit tests. workflow_dispatch still always runs.
 on:
   push:
     branches: [main, feat/reader-segmented-spooling]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".gitignore"
+      - ".editorconfig"
   pull_request:
     branches: [main]
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
+      - "LICENSE"
+      - ".gitignore"
+      - ".editorconfig"
   workflow_dispatch:
 
 jobs:
