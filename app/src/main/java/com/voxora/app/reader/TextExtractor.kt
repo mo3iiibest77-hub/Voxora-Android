@@ -3,7 +3,8 @@ package com.voxora.app.reader
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
-import com.tom_roush.pdfbox.android.PDFBoxResourceLoaderimport com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.pdmodel.PDDocument
 import com.tom_roush.pdfbox.pdmodel.PDPage
 import com.tom_roush.pdfbox.pdmodel.encryption.InvalidPasswordException
 import com.tom_roush.pdfbox.text.PDFTextStripper
