@@ -1,8 +1,9 @@
 # CloudMD.md — Voxora long-term project state
 
 **Branch:** `feat/reader-segmented-spooling`
-**Last updated:** 2026-09-19, at commit `80fdae2` — the 100 MB / exact-resume / bounded-prefetch /
-help-affordance / observed-usage cycle is implemented, documented and **CI-verified**.
+**Last updated:** 2026-09-19, at commit `2012916` — the exact-segment-resume / Book Intelligence
+search-fallback / help-icon-style cycle is implemented, documented and **CI-verified**. It sits on top
+of the owner's `32ad653` (`ci: skip Android CI when only documentation files change`).
 
 This file is the concise, durable state of the project: what is finished, what is in flight, what is
 blocked, and the single next action. It is **not** a plan and it is not a wish list — an item is only
@@ -13,6 +14,38 @@ holds the standing UI/i18n rules plus the current implementation record.
 
 ## DONE
 
+- **Exact segment-level resume, a Book Intelligence search fallback, and the help-icon style are
+  CI-verified** at `2012916` (on top of the owner's `32ad653`): **Android CI push run
+  `35463634403` (#165) is green — both jobs success**, `Unit tests` 10/10 steps including `Run unit
+  tests` and `Assemble debug APK` 14/14 steps including `Assemble debug` and `Upload debug APK`. No
+  `pull_request` run existed for this SHA at the time of inspection. Locally, 802 pure-JVM tests pass
+  across 66 classes (up from 752 across 63), `validate-reader-android.sh` type-checks the Android-side
+  Reader layers, and all seven guards pass. See `AgentMD.md` §9. The three parts:
+  - **Stop → Play resumes the exact segment.** The defect was one line — `ReaderController.stop()`
+    set `segmentIndex = 0` while keeping the chunk. The segment is now part of the persisted position:
+    `ReaderBook.currentSegment` (defaulted, so a legacy record migrates to segment 0), kept by Stop
+    and Pause alike, restored before playback and clamped against the real unit count by
+    `ReaderPosition.clampSegment`. A monotonic `positionStamp`, captured under the controller's lock
+    and enforced in the pure reducer, stops a stale fire-and-forget save from overwriting a newer
+    one. `Slot.startUnit` separates the persisted logical segment, the cache entry's first unit and
+    the playback cursor, so a chunk restored from the cache plays from the saved segment instead of
+    re-narrating — `ReaderSpool.unitStart` is the pure arithmetic behind it.
+  - **Book Intelligence falls back to a bounded, grounded search.** When Google Books and Open
+    Library produce no confident match, `GeminiGroundedBookSearch` runs one `generateContent` call
+    with the `google_search` tool on the **existing** key and endpoint (no new credential or vendor),
+    and `BookIntelOverviewPlan` is the one pure decision the UI and repository share — so a book no
+    catalogue identified is no longer skipped. `BookSearchPrompt` keeps findings bounded and treats
+    `NOT_FOUND` as a negative finding; `buildFromContext` states the findings as second-hand evidence
+    and forbids invention; the context fingerprint is part of the per-language cache key and
+    `VERSION` was raised 2 → 3. Nothing from the search ever becomes a metadata field. A cover
+    fallback acts only on the document's own validated ISBN, only after the image is verified, and
+    never displaces a catalogue cover.
+  - **The help icon joins the ordinary card icon language.** `HelpIconButton` now uses the same
+    circular `VoxoraColors.glow` wash and `colorScheme.primary` glyph as the Reader's other section
+    icons instead of its own explanation tint; still clickable, dialog unchanged, no text added, no
+    literal colour, content description and RTL preserved.
+  - **No real-device testing was performed**, and the grounded search and the cover fallback have
+    never contacted their live services; see BLOCKED.
 - **The 100 MB / exact-resume / bounded-prefetch / help-affordance / observed-usage cycle is
   CI-verified** at `80fdae2` (Android CI push run `35458802897` #158 and `pull_request` run
   `35458806113` #159): **both jobs success** — `Assemble debug APK` 14/14 steps and `Unit tests`
@@ -169,9 +202,9 @@ holds the standing UI/i18n rules plus the current implementation record.
 
 ## IN PROGRESS
 
-- Nothing. The 100 MB / exact-resume / bounded-prefetch / help-affordance / observed-usage cycle is
-  implemented, documented and CI-verified at `80fdae2`; the only open items are the device-verification
-  and live-API checks under BLOCKED.
+- Nothing. The exact-segment-resume / search-fallback / help-icon cycle is implemented, documented and
+  pushed at `2012916`; its CI run is being observed and its result recorded above. The only open items
+  are the device-verification and live-API checks under BLOCKED.
 
 ## BLOCKED
 
@@ -179,10 +212,18 @@ holds the standing UI/i18n rules plus the current implementation record.
   features *feel* is an owner-only item: the two-entry theme selector and the legacy-id redirect, the
   drag-to-expand library gesture under RTL, whether the swapped Dark roles read as intended, whether
   Continue actually plays from the cache, and whether the resume lands on the same chunk. CI proves it
-  compiles and the pure-JVM suite proves its logic, not how it looks or sounds. This cycle adds: the
-  100 MB boundary against a genuinely large file, the help dialogs and their RTL mirroring, the usage
-  chart's RTL mirroring, whether Continue audibly resumes the cached chunk, and whether the prefetched
-  chunk is ready before promotion.
+  compiles and the pure-JVM suite proves its logic, not how it looks or sounds. This cycle adds the
+  headline item the fix exists for: **whether Stop → Play audibly resumes at the exact segment**,
+  whether a cached chunk plays from the saved segment without re-narrating, whether two books keep
+  independent positions across a real process death, and whether the help icon now reads as part of
+  the card.
+- **The grounded search path has never run against the live API.** The `google_search` request shape
+  and the `groundingMetadata` parsing are pinned against `MockWebServer`; whether the configured model
+  accepts the tool, real latency, quota cost and the quality of real search findings are unverified.
+  A failure degrades to "no overview" and nothing else.
+- **The cover fallback has never contacted Open Library.** Its URL shape, `image/*` content-type and
+  minimum-size rules are pinned by tests; a live 404, redirect or rate limit is unexercised. It can
+  only ever add a cover to a book that had none.
 - **The cache's real hit rate is unmeasured.** The tests prove the reuse and eviction rules; they
   cannot prove that a real Stop usually lands on a chunk whose producer had finished. A missed cache
   costs a re-synthesis, never a lost position — `cacheDir` is the OS's to clear, and the cache is
@@ -200,18 +241,22 @@ holds the standing UI/i18n rules plus the current implementation record.
 
 ## NEXT
 
-Owner device verification of both cycles: (1) confirm the Settings theme selector offers exactly two
-appearances and that an install whose saved preference was the removed one lands on Voxora Light
-rather than failing; (2) open "Your Books", drag the header down and up, select a book and confirm its
-real chunk and last-read appear and Continue resumes it; (3) play a chunk, let the next one prefetch,
-tap Stop, then Continue, and confirm it resumes at the same place; (4) switch the output language and
-confirm the Book Intelligence themes change language without narration being disturbed; (5) import a
-file just under 100 MB and confirm it is accepted, then confirm a file over 100 MB is refused with the
-100 MB message; (6) open Book A, stop at a chunk, open Book B, stop at a different chunk, then
-Continue each and confirm each resumes at its own chunk and starts playing without a second press;
-(7) tap the info icon beside each green section and confirm the dialog opens, reads correctly and
-dismisses, in both English and Persian; (8) confirm the usage chart appears only after a request has
-been made and that no figure implies a quota.
+Owner device verification, this cycle first: (1) play into Chunk 3 / Segment 3, tap Stop, then Play,
+and confirm it resumes at that segment rather than restarting the chunk — then repeat for two
+different books and confirm each keeps its own position, and confirm it survives killing the app;
+(2) import a book no catalogue identifies, wait for the Book Intelligence card, and confirm it shows a
+generated paragraph labelled as generated with no invented author, year or publisher, and that a book
+with a real catalogue cover is not given a different one; (3) confirm the help icon beside each
+explanation sentence matches the card's other icons and still opens the dialog in both English and
+Persian. Then the earlier cycles' items: (4) confirm the Settings theme selector offers exactly two
+appearances and that an install whose saved preference was the removed one lands on Voxora Light;
+(5) open "Your Books", drag the header down and up, select a book and confirm its real chunk and
+last-read appear and Continue resumes it; (6) switch the output language and confirm the Book
+Intelligence themes change language without narration being disturbed; (7) import a file just under
+100 MB and confirm it is accepted, then confirm a file over 100 MB is refused with the 100 MB
+message; (8) tap the info icon beside each green section and confirm the dialog opens, reads correctly
+and dismisses, in both English and Persian; (9) confirm the usage chart appears only after a request
+has been made and that no figure implies a quota.
 
 ---
 
@@ -223,6 +268,11 @@ been made and that no figure implies a quota.
   for Live Dub, plus the seven guard scripts). `validate-cloud.sh` and `validate-reader-android.sh`
   both needed their source lists extended for each new file this cycle; a green local run is necessary,
   not sufficient.
+- **A documentation-only commit does not start CI.** The owner's `32ad653` added `paths-ignore`
+  (`**/*.md`, `docs/**`, `LICENSE`, `.gitignore`, `.editorconfig`) to both the `push` and
+  `pull_request` triggers of `Android CI`, so a commit that changes only `.md` files produces **no
+  run at all** — not a skipped job. A code commit still triggers both jobs. Do not read "no run" as
+  "green": verify the commit that actually contains the source changes.
 - **The harness cannot compile Compose.** A green local run is necessary, not sufficient.
 - **The harness has two known blind spots**, both of which have let a real compile error reach CI:
   `validate-reader-android.sh` substitutes a stub for `TextExtractor.kt` (no PDFBox jar), and it does

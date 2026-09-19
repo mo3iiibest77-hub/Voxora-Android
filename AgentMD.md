@@ -964,3 +964,234 @@ icon beside each green section and confirm the dialog opens, reads correctly and
 English and Persian, with RTL mirroring; (4) confirm the usage chart appears only after a request has
 been made, that a day with no request shows a zero, and that no figure implies a quota.
 
+---
+
+## 9. Implementation record — exact segment resume, a Book Intelligence search fallback, and the help-icon style
+
+A **record**, not a rule. The standing rules are §1–§4; the Reader's architecture contract is
+`AGENTS.md` §5. This section covers the three-part cycle that followed §8, in the owner's stated
+priority order.
+
+**Commit.** `2012916` — `fix(reader): resume at the exact segment, add a search fallback for Book
+Intelligence`. Implementation, tests and this record are in that one commit. It sits on top of the
+owner's `32ad653` (`ci: skip Android CI when only documentation files change`); the branch had
+advanced past the previously inspected `61a3c4a` while this work was in progress, so the commit was
+rebased onto the new tip before it was pushed — the two commits touch disjoint files.
+
+### What was requested
+
+Three priorities, in order:
+
+- **P1 — the primary bug.** Stop at Chunk 3 / Segment 3, then Play, must resume Chunk 3 / Segment 3
+  rather than restarting the chunk. Per-book and independent; survives reopening and process death;
+  legacy chunk-only records migrate to the first segment; an out-of-range persisted segment clamps
+  instead of crashing; a **stale asynchronous position write must not overwrite a newer one**; a
+  cached chunk must resume at the persisted segment without re-narrating earlier segments.
+- **P2.** When Google Books and Open Library produce no confident match, run a **bounded** web/context
+  search through an **already-supported** mechanism (no invented credential or endpoint), feed
+  verified context to Gemini for an overview in the selected Reader language, never fabricate
+  bibliographic facts, keep web context distinct from source-backed metadata, preserve the
+  language-specific overview cache with a deterministic context fingerprint, and add a cover fallback
+  that never replaces a verified cover.
+- **P3.** Give `HelpIconButton` the **same visual treatment as the Reader's ordinary card icons**
+  instead of its special `VoxoraColors.explanation` tint — still clickable, dialog/title/body intact,
+  no text beside it, no hardcoded colour, RTL and accessibility preserved.
+
+### What the repository actually contained (checked, not assumed)
+
+- `ReaderController.stop()` really did contain `segmentIndex = 0`, so Stop reset the logical segment
+  while `savePositionLocked()` kept the chunk. Pause did not reset it. That single line is the P1
+  defect.
+- The persisted position was **chunk-only**: `ReaderBook` had `currentChunk` and no segment, and
+  `ReaderLibrary.withPosition`/`ReaderBookCodec` carried only that. There was no ordering information
+  on a save, and saves are fire-and-forget on `documentScope`, so two saves for one book could land
+  out of order.
+- `ReaderController.prepare()` **refused the cache whenever `firstUnit != 0`** (`if (firstUnit == 0)
+  loadCached(...) else null`). A chunk restored from the cache holds every unit from zero, so that
+  guard was correct about *text alignment* but wrong about *resume*: it forced a re-narration of a
+  chunk already on disk whenever the reader resumed mid-chunk. The three positions that had to be
+  kept apart — the persisted logical segment, the cache entry's first unit, and the playback cursor —
+  were conflated.
+- Book Intelligence generated an overview **only when `book.metadata != null`**, and
+  `ReaderViewModel.observeLibraryForOverviews` skipped every book without a catalogue record before
+  the repository was ever consulted. A book the catalogues could not identify therefore got nothing.
+- The Gemini key already reaches `generativelanguage.googleapis.com` for the overview call, and the
+  Generative Language API supports **Google Search grounding** as a tool on that same
+  `generateContent` call — so the fallback needed no new credential, endpoint or vendor.
+- `HelpIconButton` was the one card icon that invented its own treatment: a bare
+  `Icons.Outlined.Info` tinted `VoxoraColors.explanation`. The ordinary Reader section icons use a
+  circular `VoxoraColors.glow` wash with a `colorScheme.primary` glyph (`ReaderScreen.kt:418-430`
+  and its siblings), all at 44 dp.
+
+### What was actually implemented
+
+**P1. The segment is part of the position, and its writes are ordered.**
+
+- `ReaderBook` gained `currentSegment` (zero-based, inside `currentChunk`) and a monotonic
+  `positionStamp`; both are defaulted, so every existing caller compiles unchanged and a record
+  written before the field existed decodes to segment `0` — which *is* the old behaviour, a safe
+  migration rather than a lost position. `ReaderBookCodec` encodes both and decodes them tolerantly.
+- `ReaderBook.withPosition(chunk, segment, atMillis, stamp)` **drops** a non-zero stamp that is not
+  newer than the stored one and returns the same instance; a `0` stamp carries no ordering claim and
+  is always applied, so the stamp can never make a legitimate save unsavable. The four-argument
+  overload is new and the two-argument one now preserves the current segment.
+- `ReaderController.savePositionLocked()` captures `chunk`, `segment` and `++positionStamp`
+  **under the lock**, before launching the coroutine — reading them inside the coroutine would let a
+  later save's values be written under an earlier save's stamp, which is the inversion the stamp
+  exists to prevent. `positionStamp` is seeded from the record on open so a restart cannot make a
+  fresh write look older than the stored one, and reset in `startLoad`.
+- `ReaderPosition.clampSegment(persisted, segmentCount)` bounds the persisted segment against **this**
+  extraction's real unit count (a record stores chunk counts, not unit counts). An out-of-range
+  segment lands on the chunk's last unit rather than crashing or jumping to the start of the book.
+- `stop()` no longer resets the segment; it captures audible progress **before** `cancelOwned()`
+  (which advances the generation and would otherwise make the capture a no-op), then saves.
+  `jumpToSegment` now saves too, so a swipe is not the one move a process death loses.
+- `Slot.startUnit` names where playback begins, deliberately separate from `ReaderSpool.firstUnit`
+  (where *production* begins). `prepare()` now consults the cache whatever the start unit and sets
+  `startUnit = ReaderPosition.clampSegment(firstUnit, units.size)`; `awaitInitialRendering`,
+  `awaitNextUnitRendering` and `consume()` all use it. `ReaderSpool.unitStart(ends, unit)` is the pure
+  arithmetic that names the first byte of the unit to play in a restored chunk, so playback resumes at
+  the saved segment while every earlier unit's audio and text stay available and are never
+  re-generated.
+
+**P2. A bounded, grounded search fallback that stays evidence.**
+
+- `BookSearchContext`/`BookSearchSource`/`BookContextSource`/`BookSearchPrompt` (core) hold the
+  query, the instruction and the reading-back rules apart from the transport. `NOT_FOUND` is a
+  **negative finding** (turned into null), prose shorter than `MIN_SUMMARY_CHARS` is discarded, and
+  the summary is capped at `MAX_SUMMARY_CHARS` with at most `MAX_SOURCES` sources.
+- `GeminiGroundedBookSearch` runs one `generateContent` call with `tools: [{google_search: {}}]`
+  through `GeminiHttpSearchTransport`, reusing the existing key, model and endpoint; the key travels
+  in the `x-goog-api-key` header, never a `?key=` URL. `GeminiContent` reads the answer text and the
+  `groundingMetadata.groundingChunks[].web` sources. Every failure — no key, no signal, offline,
+  timeout, rate limit, parse — is `null`, and nothing reaches the import path.
+- `BookIntelOverviewPlan.need(book, language)` is **one pure decision** shared by the UI and the
+  repository, so the two cannot disagree: a catalogue record is preferred, otherwise a book with
+  usable signals needs a context-backed overview keyed by `BookSearchPrompt.fingerprint`. The
+  fingerprint is of the **signals**, not the results, because checking results would mean running the
+  search the cache exists to avoid.
+- `BookIntelOverviewPrompt.buildFromContext` is a separate, stricter prompt: the book's own details
+  are stated as known, the search findings are stated as second-hand evidence, disagreement is to be
+  reported rather than resolved, and the model is told to write less — or nothing — rather than fill a
+  gap. `generateFromContext` refuses to store a text whose `contextFingerprint` does not match the
+  question, and `VERSION` was raised 2 → 3 so a catalogue-backed text is not reused as a
+  search-backed one. Nothing from the search ever becomes a `BookMetadata` field.
+- `OpenLibraryCover.urlForIsbn` validates the ISBN (check digit) and uses `?default=false` so a
+  missing cover is an error rather than a generic placeholder; `OpenLibraryCoverLookup.verifiedCover`
+  fetches it and requires an `image/*` content type and a real body. `OpenLibraryCover.preferred`
+  puts the verified catalogue cover first, so a fallback can only ever fill a gap — and
+  `withFallbackCover` is only reached in the `Matched` branch, hoisted out of the non-suspending
+  reducer lambda.
+- `BookIntelCard` now reads the per-language overview at card level and shows the generated block in
+  the unidentified branches too, because for a book no catalogue identified that paragraph is the
+  only Book Intelligence there is.
+
+**P3. The help icon joins the icon language it sits in.**
+
+- `HelpIconButton` now renders the same `Box(size 44.dp, clip CircleShape, background
+  VoxoraColors.glow)` with `Icons.Outlined.Info` tinted `MaterialTheme.colorScheme.primary` that the
+  ordinary Reader section icons use. The dialog, its title/body and the `reader_help_open` content
+  description naming the section are unchanged; nothing was added beside the icon and no literal
+  colour was introduced. `HELP_ICON_DP` was replaced by `HELP_BADGE_DP = 44`.
+
+**Also updated:** `reader_pause_hint`, `reader_pause_hint_help`, `reader_book_info_generated_note`
+and `reader_book_info_generated_help` in **both** locales, because both features changed what those
+sentences describe. The Persian was extended in the existing register and terminology, not
+machine-translated.
+
+### Files and components changed
+
+- **core, new:** `reader/ReaderPosition.kt`, `reader/BookIntelOverviewPlan.kt`,
+  `reader/BookSearchContext.kt`, `reader/GeminiSearchClient.kt`, `reader/GeminiContent.kt`,
+  `reader/OpenLibraryCover.kt`.
+- **core, modified:** `ReaderBook.kt` (`currentSegment`, `positionStamp`, the four-argument
+  `withPosition`, `reopened()` resetting the segment), `ReaderLibrary.kt` (segment + stamp threading),
+  `ReaderBookCodec.kt` (encode/decode both, tolerant of missing fields; `contextFingerprint`),
+  `BookIntelOverview.kt` (`contextFingerprint`, `VERSION = 3`, `buildFromContext`,
+  `isUsableFor(..., contextFingerprint)`), `GeminiTextClient.kt` (`request`/`store` split,
+  `generateFromContext`).
+- **app, modified:** `ReaderController.kt` (the P1 core — `stop()`, `savePositionLocked`,
+  `positionStamp`, `Slot.startUnit`, `prepare()`, the render gates, `consume()`, restore clamping),
+  `ReaderSpool.kt` (`unitStart`), `library/ReaderBookRepository.kt` (`recordPosition` segment/stamp,
+  `contextSearch`, `coverLookup`, `withFallbackCover`, the plan-driven `ensureOverview`),
+  `ReaderViewModel.kt` (plan-driven `observeLibraryForOverviews`), `BookIntelCard.kt`
+  (`GeneratedOverviewBlock`, overview in the unidentified branches), `ReaderInfoHint.kt` (P3),
+  both `res/values*/strings.xml`.
+- **Live Dub:** untouched. `git status` shows no change under `dub/`, `GeminiLive*`,
+  `SystemAudioCapture`, `DubPlayback`, `FloatingBubble*` or `DelayedScreenOverlay`.
+- **new tests:** `ReaderSegmentResumeTest`, `BookIntelContextTest`, `GeminiSearchTransportTest`
+  (core); two cases added to `ReaderSpoolTest` (app).
+
+### Tests actually run
+
+| What | How | Result |
+|---|---|---|
+| Pure-JVM contract suite | `/tmp/rr/validate-cloud.sh` (kotlinc + JUnit, `-ea`) | **802 tests OK**, 66 classes |
+| Android-side Reader layers | `/tmp/rr/validate-reader-android.sh` (android.jar + stubs) | **OK** |
+| Guards | `themecheck`, `themeguard`, `checkimports`, `stringcheck`, `bidi_fa`, `apptestguard`, `dubguard` | all **OK** |
+| Live Dub untouched | `git status` filtered for `dub/`, `GeminiLive*`, `SystemAudioCapture`, `DubPlayback`, `FloatingBubble*`, `DelayedScreenOverlay` | **no changes** |
+
+The suite grew from 752 across 63 classes to 802 across 66. `ReaderSegmentResumeTest` pins the
+round trips (3/3, 7/6), that Stop → Play keeps the segment, that **only `reopened()`** resets it, that
+segments are independent per book, that a legacy chunk-only record migrates to segment 0, that an
+out-of-range segment clamps and an absurd persisted segment decodes without crashing, that a stale
+stamped save is rejected while a stamp-less save is always applied, and that the chunk still clamps.
+`BookIntelContextTest` pins the plan paths and cache fingerprints, the search prompt's finding rules
+and its no-invention rule, the cover preference order, and that a search result never becomes
+metadata. `GeminiSearchTransportTest` pins the request shape (the `google_search` tool, the header
+key, no key in the URL) and the grounding-source parsing, and that 429/500/parse/safety/unreachable
+all become failures. `ReaderSpoolTest` gained the two cases that a restored chunk plays from the
+saved unit and that a spool still being produced starts at its own first byte.
+
+**One real defect was caught locally before push:** the cover fallback's `withFallbackCover` is a
+suspending function and was initially called inside `mutate`'s non-suspending transform lambda;
+`validate-reader-android.sh` reported `suspension functions can only be called within coroutine body`
+at `ReaderBookRepository.kt:360`. It was hoisted out of the lambda. This is a case where the local
+harness did catch a compile error, unlike the Compose blind spot recorded in §5 and §7.
+
+### CI result
+
+**Green.** `2012916` was pushed to `feat/reader-segmented-spooling` and produced **one** run — a
+`push` run; no `pull_request` run existed for this SHA at the time of inspection. Read from the
+GitHub REST API (`/actions/runs/{id}/jobs`), not inferred:
+
+| Run | Event | `Unit tests` | `Assemble debug APK` |
+|---|---|---|---|
+| `35463634403` (#165) | push | success (10/10 steps) | success (14/14 steps) |
+
+`Assemble debug APK` is the only real compile check for the Compose changes here (`BookIntelCard.kt`,
+`ReaderInfoHint.kt`), which the dev server cannot compile; `Run unit tests` and `Assemble debug` are
+both present and `success` in their step lists. The owner's `32ad653` means a **documentation-only**
+commit starts no run at all, so this record's own commit (which changes only `.md` files) is expected
+to produce none — the run above is the one that contains the source changes.
+
+### Unresolved limitations
+
+- **No real-device testing was performed.** Whether Stop → Play audibly resumes at the exact segment,
+  whether a cached chunk plays from the saved segment without re-narrating, whether the per-book
+  positions survive a real process death, and whether the help icon now reads as part of the card are
+  all **DEVICE VERIFICATION PENDING**.
+- **The grounded search path has never run against the live API.** The request shape and the
+  `groundingMetadata` parsing are pinned against `MockWebServer`; whether the configured model accepts
+  the `google_search` tool, what real latency and quota cost are, and the quality of real search
+  findings are unverified. A failure degrades to "no overview" and nothing else.
+- **The cover fallback has never contacted Open Library.** Its URL shape, content-type and size rules
+  are pinned by tests; a live 404, redirect or rate limit is unexercised. It can only ever add a cover
+  to a book that had none.
+- **The overview cache cannot see a better search result.** The fingerprint is of the signals, not the
+  results, by design — the explicit retry is the only way to pick up a materially better finding
+  without a prompt-version change.
+- **Compose is still not compiled locally** (§5), so the `BookIntelCard` and `ReaderInfoHint` changes
+  carry the same CI-round-trip cost and the same blind spot.
+
+### Exact next action
+
+**Owner device verification of the three priorities.** On a device: (1) play into Chunk 3 / Segment 3,
+tap Stop, then Play, and confirm it resumes at that segment rather than restarting the chunk — then do
+the same for two different books and confirm each keeps its own position, and confirm it survives
+killing the app; (2) import a book no catalogue identifies, wait for the Book Intelligence card, and
+confirm it shows a generated paragraph labelled as generated with no invented author, year or
+publisher, and that a book with a real catalogue cover is not given a different one; (3) confirm the
+help icon beside each explanation sentence now matches the card's other icons and still opens the
+dialog in both English and Persian.
+
