@@ -695,9 +695,12 @@ pass: `themecheck.py`, `themeguard.py` (now two modes), `checkimports.py`, `stri
 ### CI result
 
 `Unit tests` **failed twice** — 19/388 then 1/388, both from the Android unit-test stubs (see the
-defects above) — while `Assemble debug APK` passed both times. Both fixes were pushed; the run ids for
-the second fix commit are recorded in `CloudMD.md` rather than duplicated here. **The cycle is not
-CI-verified until that run is green.**
+defects above) — while `Assemble debug APK` passed both times. After the second fix, **CI is green** at
+`1b2da81` (push run `35451720666` and `pull_request` run `35451723199`, created 2026-09-19T15:28Z):
+**both jobs success in both runs** — `Unit tests` 10/10 steps including `Run unit tests`, and
+`Assemble debug APK` 14/14 steps including `Assemble debug` and `Upload debug APK`. `Assemble debug` is
+the only real compile check for `ReaderLibrarySection.kt` and the palette wiring, which the dev server
+cannot compile.
 
 ### Unresolved limitations
 

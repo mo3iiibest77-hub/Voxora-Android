@@ -240,18 +240,19 @@ compile Compose**, so `ReaderLibrarySection.kt` and the palette wiring are only 
 `Assemble debug` job; **no real-device testing was performed** and every
 appearance/gesture/cache-hit claim is a device-verification item.
 
-**CI — `Unit tests` failed twice on Android's test stubs; both fixes pushed.** `Assemble debug APK`
-passed both times. Push run `35450489051` (`99a54ac`) failed `Unit tests` with **19 of 388**, all in
-the new `ReaderChunkCacheTest`, all `RuntimeException` at its `store` helper: the app module's unit
-tests run against Android's **stubbed `org.json`**, and `ReaderChunkCache` is the first app-module
-code any unit test has reached that writes JSON — `:core` already had
+**CI — `Unit tests` failed twice on Android's test stubs, then green.** `Assemble debug APK` passed
+throughout. Push run `35450489051` (`99a54ac`) failed `Unit tests` with **19 of 388**, all in the new
+`ReaderChunkCacheTest`, all `RuntimeException` at its `store` helper: the app module's unit tests run
+against Android's **stubbed `org.json`**, and `ReaderChunkCache` is the first app-module code any unit
+test has reached that writes JSON — `:core` already had
 `testImplementation("org.json:json:20240303")`, `app` did not. That was added (test-only). Push run
 `35450784861` (`00094aa`) then failed **1 of 388** — `anUnreadableEntryIsAMissRatherThanAFailure` at
 `ReaderChunkCacheTest.kt:217` — because with JSON fixed the test reached the cache's error path, which
 logs through `VoxoraLog` → `android.util.Log`, itself a stub that throws; `testOptions {
-unitTests.isReturnDefaultValues = true }` was added. The local harness could see neither, because it
-supplies a real `json-20240303.jar` and a plain-JVM `VoxoraLog` stub; new `apptestguard.py` now fails
-statically on either omission. **The cycle is not CI-verified until the second fix's run is green.**
+unitTests.isReturnDefaultValues = true }` was added. **Green at `1b2da81`**: push run `35451720666` and
+`pull_request` run `35451723199`, both jobs success in both runs (`Unit tests` 10/10, `Assemble debug
+APK` 14/14). The local harness could see neither fault, because it supplies a real `json-20240303.jar`
+and a plain-JVM `VoxoraLog` stub; new `apptestguard.py` now fails statically on either omission.
 
 **BLOCKED.** Real-device verification is unavailable from this environment; so is any live
 `generateContent` check, so the themes' real Persian output is unmeasured.

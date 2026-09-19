@@ -1,8 +1,8 @@
 # CloudMD.md — Voxora long-term project state
 
 **Branch:** `feat/reader-segmented-spooling`
-**Last updated:** 2026-09-19, at commit `cf0dc07` plus the uncommitted two-appearance / library /
-chunk-cache cycle described below.
+**Last updated:** 2026-09-19, at commit `1b2da81` — the two-appearance / library / chunk-cache cycle
+is implemented, documented and **CI-verified**.
 
 This file is the concise, durable state of the project: what is finished, what is in flight, what is
 blocked, and the single next action. It is **not** a plan and it is not a wish list — an item is only
@@ -13,6 +13,29 @@ holds the standing UI/i18n rules plus the current implementation record.
 
 ## DONE
 
+- **The whole cycle is CI-verified** at `1b2da81` (Android CI push run `35451720666` and
+  `pull_request` run `35451723199`, created 2026-09-19T15:28Z): **both jobs success in both runs** —
+  `Unit tests` 10/10 steps including `Run unit tests`, and `Assemble debug APK` 14/14 steps including
+  `Assemble debug` and `Upload debug APK`. `Assemble debug` is the only real compile check for
+  `ReaderLibrarySection.kt` and the palette wiring; the dev server cannot compile Compose. The cycle
+  needed two fix rounds first — `Unit tests` failed 19/388 on `99a54ac` and 1/388 on `00094aa`, both
+  from Android unit-test stubs (`org.json`, then `android.util.Log`) — see `AgentMD.md` §7 for the full
+  analysis. **No real-device testing was performed**; every
+  appearance, gesture and cache-hit claim is a **DEVICE VERIFICATION PENDING** item.
+- **Two CI rounds, both real faults the local harness structurally cannot see** (this cycle).
+  `Assemble debug APK` passed throughout. (1) `99a54ac` failed `Unit tests` **19 of 388**, all in the
+  new `ReaderChunkCacheTest` at its `store` helper: the app module's unit tests run against Android's
+  **stubbed** `org.json`, and `ReaderChunkCache` is the first app-module code any unit test has reached
+  that writes JSON. `:core` already had `testImplementation("org.json:json:20240303")`; `app` did not.
+  Fixed in `00094aa` (test-only). (2) `00094aa` then failed **1 of 388** —
+  `anUnreadableEntryIsAMissRatherThanAFailure` at `ReaderChunkCacheTest.kt:217` — because with JSON
+  fixed the test reached the cache's error path, which logs through `VoxoraLog` → `android.util.Log`,
+  itself a stub that throws. `testOptions { unitTests.isReturnDefaultValues = true }` was added in
+  `1b2da81`. `validate-cloud.sh` sees neither stub (it supplies a real `json-20240303.jar` and a
+  plain-JVM `VoxoraLog` stub), so new `apptestguard.py` now fails statically on either omission. Note
+  `isReturnDefaultValues` does **not** replace the real `org.json`: defaulted JSON accessors return null
+  and would break the cache, not fix it. Same family as the §5 defects in `AgentMD.md` — faults that
+  exist only in the committed tree under Gradle.
 - **The experimental light variant is removed; there are two appearances** (this cycle). The three
   variants were read from the code, not assumed: `ORIGINAL_DARK` ("Original Dark"), `LIGHT_TEST_1`
   ("Light Test 1") and `LIGHT_TEST_2` ("Voxora Light" — the appearance the request called "Voxlerai").
@@ -94,27 +117,9 @@ holds the standing UI/i18n rules plus the current implementation record.
 
 ## IN PROGRESS
 
-- **`Unit tests` has failed twice on Android's unit-test stubs; the second fix is pushed and its run
-  has not been read yet.** `Assemble debug APK` passed both times. Push run `35450489051` (commit
-  `99a54ac`) failed `Unit tests` with **19 of 388**, all in the new `ReaderChunkCacheTest`, all
-  `RuntimeException` at the shared `store` helper: the app module's unit tests run against Android's
-  **stubbed** `org.json`, and `ReaderChunkCache` is the first app-module code any unit test has reached
-  that writes JSON. `:core` already had `testImplementation("org.json:json:20240303")`; `app` did not.
-  That dependency was added (test-only, never shipped) and pushed as `00094aa`, whose run
-  `35450784861` then failed **1 of 388** — `anUnreadableEntryIsAMissRatherThanAFailure` at
-  `ReaderChunkCacheTest.kt:217` — because with JSON fixed the test reached the cache's error path, which
-  logs through `VoxoraLog` → `android.util.Log`, itself a stub that throws.
-  `testOptions { unitTests.isReturnDefaultValues = true }` was added. **The cycle is not CI-verified
-  until the second fix's run is green.**
-- **The local harness could not see either fault, and a guard now can.** `validate-cloud.sh` compiles
-  and runs the same sources with a real `json-20240303.jar` **and** a plain-JVM `VoxoraLog` stub, so
-  neither Android stub exists locally. New `apptestguard.py` fails if any `app/src/main` Kotlin file
-  imports `org.json.*` while `app/build.gradle.kts` declares no real `org.json` on the unit-test
-  classpath, or imports `android.util.Log` while the module does not set
-  `unitTests.isReturnDefaultValues = true`; it was verified both ways. Note that
-  `isReturnDefaultValues` does **not** replace the real `org.json` — defaulted JSON accessors return
-  null and would break the cache, not fix it. This is the same family as the §5 defects in
-  `AgentMD.md` — faults that exist only in the committed tree under Gradle.
+- Nothing. The two-appearance / library / chunk-cache cycle is implemented, documented and
+  CI-verified at `1b2da81`; the only open items are the device-verification and live-API checks under
+  BLOCKED.
 
 ## BLOCKED
 
