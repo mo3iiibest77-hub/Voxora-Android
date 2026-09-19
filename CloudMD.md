@@ -94,11 +94,22 @@ holds the standing UI/i18n rules plus the current implementation record.
 
 ## IN PROGRESS
 
-- **This cycle is implemented and locally validated but its CI run has not been read yet.** The
-  implementation and documentation are committed together and pushed; the `Unit tests` and
-  `Assemble debug APK` jobs are the only proof that `ReaderLibrarySection.kt` and the palette wiring
-  compile, because the local harness cannot compile Compose. The run ids are recorded in the
-  follow-up docs commit once they are read from the REST API.
+- **The cycle's first CI run failed `Unit tests`; the fix is pushed and its run has not been read
+  yet.** Push run `35450489051` (commit `99a54ac`) passed `Assemble debug APK` but failed
+  `Unit tests` — **19 of 388**, all in the new `ReaderChunkCacheTest`, all `RuntimeException` at the
+  shared `store` helper. The cause was not the cache: the app module's unit tests run against
+  Android's **stubbed** `org.json`, whose methods throw, and `ReaderChunkCache` is the first
+  app-module code any unit test has reached that writes JSON. `:core` already had
+  `testImplementation("org.json:json:20240303")`; `app` did not. That dependency was added to
+  `app/build.gradle.kts` (test-only, never shipped) and pushed. The run ids for the fix commit are
+  recorded in the follow-up docs commit once they are read from the REST API. **The cycle is not
+  CI-verified until that run is green.**
+- **The local harness could not see that fault, and a guard now can.** `validate-cloud.sh` compiles
+  and runs the same sources with a real `json-20240303.jar`, so the stub only exists under Gradle.
+  New `jsonguard.py` fails if any `app/src/main` Kotlin file imports `org.json.*` while
+  `app/build.gradle.kts` declares no real `org.json` on the test classpath; it was verified both ways.
+  This is the same family as the §5 defects in `AgentMD.md` — a fault that exists only in the
+  committed tree under Gradle.
 
 ## BLOCKED
 

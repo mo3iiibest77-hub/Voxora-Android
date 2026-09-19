@@ -650,18 +650,47 @@ Four connected areas, in the owner's order:
   `LightTestPalettesTest`), `BookIntelOverviewTest`, `ReaderBookOverviewTest`, `ReaderChunkCacheTest`
   (new), `ReaderSpoolTest`.
 
+### Build defects found after the first push, and how they were fixed
+
+The first push (`99a54ac`) passed `Assemble debug APK` but failed `Unit tests`: **19 of 388 tests**,
+all in the new `ReaderChunkCacheTest`, all `java.lang.RuntimeException` at the shared `store` helper.
+
+| # | Defect | Fix | Commit |
+|---|---|---|---|
+| 1 | The app module's unit tests run against Android's **stubbed** `org.json`, whose methods throw `RuntimeException("Stub!")`. `ReaderChunkCache` is app-module code that writes `meta.json` with `JSONObject`/`JSONArray`, so every test that stored an entry threw. `:core` already declared `testImplementation("org.json:json:20240303")`; `app` did not, because no app-module unit test had ever reached `org.json` before this cycle. | added the same `testImplementation("org.json:json:20240303")` to `app/build.gradle.kts` | this commit |
+
+`Assemble debug APK` passing is what isolated this: the app main sources compiled and the JSON was
+fine at runtime on Android — it is only the **unit-test** runtime that substitutes a stub. The exact
+failure (`ReaderChunkCacheTest > … FAILED … RuntimeException at ReaderChunkCacheTest.kt:73`, `388
+tests completed, 19 failed`) was read from the job log, not guessed.
+
+**Why the local harness missed it.** `validate-cloud.sh` compiles and runs the same sources with a
+real `json-20240303.jar` on its classpath, so `JSONObject` works locally and the stub only appears in
+the Android unit-test runtime. The harness's `validate-reader-android.sh` type-checks the Reader
+layers but does not run the app-module tests. This is a new member of the same family as §5's defects:
+a fault that exists only in the committed tree under Gradle.
+
+`jsonguard.py` was added to the local harness to close it: if any `app/src/main` Kotlin file imports
+`org.json.*`, `app/build.gradle.kts` must declare a `testImplementation` on a real `org.json`. It was
+verified both ways — it reports clean on the fixed tree and reports exactly
+`app/src/main/java/com/voxora/app/reader/ReaderChunkCache.kt` when the dependency is removed, i.e. it
+would have caught this before the first push.
+
 ### Tests actually run
 
 `validate-cloud.sh` (pure JVM, kotlinc 2.0.21 + JUnit 4.13.2, `-ea`): **715 tests pass across 59
 classes** (up from 688 after Part G, and from 681 before this cycle). `validate-reader-android.sh`
-type-checks the Android-side Reader layers against `android.jar` with stubs: **OK**. All six guards
+type-checks the Android-side Reader layers against `android.jar` with stubs: **OK**. All seven guards
 pass: `themecheck.py`, `themeguard.py` (now two modes), `checkimports.py`, `stringcheck.py`
 (`values` 360 / `values-fa` 359 with only the `translatable="false"` key differing), `bidi_fa.py`,
-`dubguard.py`. Live Dub is untouched.
+`dubguard.py`, `jsonguard.py` (new this cycle — see the defect above). Live Dub is untouched.
 
 ### CI result
 
-See `CloudMD.md` — the run ids for this commit are recorded there rather than duplicated here.
+The first push (`99a54ac`) **failed** `Unit tests` (19/388 — see the defect above) while
+`Assemble debug APK` passed. The `org.json` test dependency was added and pushed; the run ids for the
+fix commit are recorded in `CloudMD.md` rather than duplicated here. **The cycle is not CI-verified
+until that run is green.**
 
 ### Unresolved limitations
 
